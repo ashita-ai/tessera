@@ -159,3 +159,34 @@ async def log_proposal_force_approved(
         actor_id=actor_id,
         payload={"warning": "Proposal force-approved without full consumer acknowledgment"},
     )
+
+
+async def log_proposal_approved(
+    session: AsyncSession,
+    proposal_id: UUID,
+    acknowledged_count: int,
+) -> AuditEventDB:
+    """Log an auto-approval of a proposal when all consumers acknowledged."""
+    return await log_event(
+        session=session,
+        entity_type="proposal",
+        entity_id=proposal_id,
+        action=AuditAction.PROPOSAL_APPROVED,
+        payload={"acknowledged_count": acknowledged_count, "auto_approved": True},
+    )
+
+
+async def log_proposal_rejected(
+    session: AsyncSession,
+    proposal_id: UUID,
+    blocked_by: UUID,
+) -> AuditEventDB:
+    """Log a proposal rejection when a consumer blocks it."""
+    return await log_event(
+        session=session,
+        entity_type="proposal",
+        entity_id=proposal_id,
+        action=AuditAction.PROPOSAL_REJECTED,
+        actor_id=blocked_by,
+        payload={"reason": "Consumer blocked the proposal"},
+    )

@@ -1,10 +1,11 @@
 """Proposals API endpoints."""
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,11 +18,80 @@ from tessera.db import (
     TeamDB,
     get_session,
 )
-from tessera.models import Acknowledgment, AcknowledgmentCreate, Proposal, ProposalCreate
-from tessera.models.enums import ChangeType, ContractStatus, ProposalStatus, RegistrationStatus
-from tessera.services import log_proposal_acknowledged, log_proposal_force_approved
+from tessera.models import Acknowledgment, AcknowledgmentCreate, Contract, Proposal, ProposalCreate
+from tessera.models.enums import (
+    AcknowledgmentResponseType,
+    ChangeType,
+    ContractStatus,
+    ProposalStatus,
+    RegistrationStatus,
+)
+from tessera.services import (
+    log_contract_published,
+    log_proposal_acknowledged,
+    log_proposal_approved,
+    log_proposal_force_approved,
+    log_proposal_rejected,
+)
 
 router = APIRouter()
+
+
+class PublishRequest(BaseModel):
+    """Request body for publishing a contract from a proposal."""
+
+    version: str
+    published_by: UUID
+
+
+async def check_proposal_completion(
+    proposal: ProposalDB,
+    session: AsyncSession,
+) -> tuple[bool, int]:
+    """Check if all registered consumers have acknowledged the proposal.
+
+    Returns a tuple of (all_acknowledged, acknowledged_count).
+    """
+    # Get the current active contract for this asset
+    contract_result = await session.execute(
+        select(ContractDB)
+        .where(ContractDB.asset_id == proposal.asset_id)
+        .where(ContractDB.status == ContractStatus.ACTIVE)
+        .order_by(ContractDB.published_at.desc())
+        .limit(1)
+    )
+    current_contract = contract_result.scalar_one_or_none()
+
+    # If no active contract, no consumers to acknowledge
+    if not current_contract:
+        return True, 0
+
+    # Get all active registrations for this contract
+    reg_result = await session.execute(
+        select(RegistrationDB)
+        .where(RegistrationDB.contract_id == current_contract.id)
+        .where(RegistrationDB.status == RegistrationStatus.ACTIVE)
+    )
+    registrations = reg_result.scalars().all()
+
+    # If no registrations, proposal auto-approves
+    if not registrations:
+        return True, 0
+
+    # Get all acknowledgments for this proposal
+    ack_result = await session.execute(
+        select(AcknowledgmentDB).where(AcknowledgmentDB.proposal_id == proposal.id)
+    )
+    acknowledgments = ack_result.scalars().all()
+
+    # Build sets for comparison
+    registered_team_ids = {r.consumer_team_id for r in registrations}
+    acknowledged_team_ids = {a.consumer_team_id for a in acknowledgments}
+
+    # Check if all registered consumers have acknowledged
+    all_acknowledged = registered_team_ids <= acknowledged_team_ids
+
+    return all_acknowledged, len(acknowledgments)
 
 
 @router.post("", response_model=Proposal, status_code=201)
@@ -264,7 +334,11 @@ async def acknowledge_proposal(
     ack: AcknowledgmentCreate,
     session: AsyncSession = Depends(get_session),
 ) -> AcknowledgmentDB:
-    """Acknowledge a proposal as a consumer."""
+    """Acknowledge a proposal as a consumer.
+
+    If the acknowledgment response is 'blocked', the proposal is rejected.
+    If all registered consumers have acknowledged (non-blocked), the proposal is auto-approved.
+    """
     # Verify proposal exists
     result = await session.execute(select(ProposalDB).where(ProposalDB.id == proposal_id))
     proposal = result.scalar_one_or_none()
@@ -305,6 +379,32 @@ async def acknowledge_proposal(
         notes=ack.notes,
     )
 
+    # Handle rejection if consumer blocks
+    if ack.response == AcknowledgmentResponseType.BLOCKED:
+        proposal.status = ProposalStatus.REJECTED
+        proposal.resolved_at = datetime.utcnow()
+        await session.flush()
+        await session.refresh(proposal)
+        await log_proposal_rejected(
+            session=session,
+            proposal_id=proposal_id,
+            blocked_by=ack.consumer_team_id,
+        )
+        return db_ack
+
+    # Check for auto-approval (all consumers acknowledged, none blocked)
+    all_acknowledged, ack_count = await check_proposal_completion(proposal, session)
+    if all_acknowledged:
+        proposal.status = ProposalStatus.APPROVED
+        proposal.resolved_at = datetime.utcnow()
+        await session.flush()
+        await session.refresh(proposal)
+        await log_proposal_approved(
+            session=session,
+            proposal_id=proposal_id,
+            acknowledged_count=ack_count,
+        )
+
     return db_ack
 
 
@@ -323,7 +423,7 @@ async def withdraw_proposal(
         raise HTTPException(status_code=400, detail="Proposal is not pending")
 
     proposal.status = ProposalStatus.WITHDRAWN
-    proposal.resolved_at = datetime.now(timezone.utc)
+    proposal.resolved_at = datetime.utcnow()
     await session.flush()
     await session.refresh(proposal)
     return proposal
@@ -345,7 +445,7 @@ async def force_proposal(
         raise HTTPException(status_code=400, detail="Proposal is not pending")
 
     proposal.status = ProposalStatus.APPROVED
-    proposal.resolved_at = datetime.now(timezone.utc)
+    proposal.resolved_at = datetime.utcnow()
     await session.flush()
     await session.refresh(proposal)
 
@@ -356,3 +456,79 @@ async def force_proposal(
     )
 
     return proposal
+
+
+@router.post("/{proposal_id}/publish")
+async def publish_from_proposal(
+    proposal_id: UUID,
+    publish_request: PublishRequest,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Publish a contract from an approved proposal.
+
+    Only works on proposals with status=APPROVED.
+    Creates a new contract with the proposed schema and deprecates the old one.
+    """
+    # Get the proposal
+    result = await session.execute(select(ProposalDB).where(ProposalDB.id == proposal_id))
+    proposal = result.scalar_one_or_none()
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+
+    if proposal.status != ProposalStatus.APPROVED:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot publish from proposal with status '{proposal.status}'. "
+            "Proposal must be approved first."
+        )
+
+    # Get the asset
+    asset_result = await session.execute(
+        select(AssetDB).where(AssetDB.id == proposal.asset_id)
+    )
+    asset = asset_result.scalar_one_or_none()
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    # Get the current active contract to deprecate
+    current_contract_result = await session.execute(
+        select(ContractDB)
+        .where(ContractDB.asset_id == proposal.asset_id)
+        .where(ContractDB.status == ContractStatus.ACTIVE)
+        .order_by(ContractDB.published_at.desc())
+        .limit(1)
+    )
+    current_contract = current_contract_result.scalar_one_or_none()
+
+    # Create new contract from the proposal
+    new_contract = ContractDB(
+        asset_id=proposal.asset_id,
+        version=publish_request.version,
+        schema_def=proposal.proposed_schema,
+        compatibility_mode=current_contract.compatibility_mode if current_contract else None,
+        guarantees=current_contract.guarantees if current_contract else None,
+        published_by=publish_request.published_by,
+    )
+    session.add(new_contract)
+
+    # Deprecate old contract
+    if current_contract:
+        current_contract.status = ContractStatus.DEPRECATED
+
+    await session.flush()
+    await session.refresh(new_contract)
+
+    await log_contract_published(
+        session=session,
+        contract_id=new_contract.id,
+        publisher_id=publish_request.published_by,
+        version=new_contract.version,
+        change_type=str(proposal.change_type),
+    )
+
+    return {
+        "action": "published",
+        "proposal_id": str(proposal_id),
+        "contract": Contract.model_validate(new_contract).model_dump(),
+        "deprecated_contract_id": str(current_contract.id) if current_contract else None,
+    }

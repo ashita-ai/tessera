@@ -5,8 +5,10 @@ from tessera.services.audit import (
     log_contract_published,
     log_event,
     log_proposal_acknowledged,
+    log_proposal_approved,
     log_proposal_created,
     log_proposal_force_approved,
+    log_proposal_rejected,
 )
 from tessera.services.schema_diff import (
     BreakingChange,
@@ -40,5 +42,7 @@ __all__ = [
     "log_contract_published",
     "log_proposal_created",
     "log_proposal_acknowledged",
+    "log_proposal_approved",
     "log_proposal_force_approved",
+    "log_proposal_rejected",
 ]
