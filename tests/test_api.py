@@ -98,7 +98,8 @@ class TestAssetsAPI:
         await client.post("/api/v1/assets", json={"fqn": "team2.asset", "owner_team_id": team2_id})
 
         resp = await client.get(f"/api/v1/assets?owner={team1_id}")
-        assets = resp.json()
+        data = resp.json()
+        assets = data["results"]
         assert all(a["owner_team_id"] == team1_id for a in assets)
 
 

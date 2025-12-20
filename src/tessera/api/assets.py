@@ -4,7 +4,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.db import (
@@ -60,17 +60,87 @@ async def create_asset(
     return db_asset
 
 
-@router.get("", response_model=list[Asset])
+@router.get("")
 async def list_assets(
     owner: UUID | None = Query(None, description="Filter by owner team ID"),
+    fqn: str | None = Query(None, description="Filter by FQN pattern (case-insensitive)"),
+    limit: int = Query(50, ge=1, le=100, description="Results per page"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
     session: AsyncSession = Depends(get_session),
-) -> list[AssetDB]:
-    """List all assets, optionally filtered by owner."""
+) -> dict[str, Any]:
+    """List all assets with filtering and pagination."""
     query = select(AssetDB)
     if owner:
         query = query.where(AssetDB.owner_team_id == owner)
+    if fqn:
+        query = query.where(AssetDB.fqn.ilike(f"%{fqn}%"))
+
+    # Get total count
+    count_query = select(func.count()).select_from(query.subquery())
+    total_result = await session.execute(count_query)
+    total = total_result.scalar() or 0
+
+    # Apply pagination and ordering
+    query = query.order_by(AssetDB.fqn)
+    query = query.limit(limit).offset(offset)
     result = await session.execute(query)
-    return list(result.scalars().all())
+    assets = result.scalars().all()
+
+    return {
+        "results": [Asset.model_validate(a).model_dump() for a in assets],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@router.get("/search")
+async def search_assets(
+    q: str = Query(..., min_length=1, description="Search query"),
+    owner: UUID | None = Query(None, description="Filter by owner team ID"),
+    limit: int = Query(50, ge=1, le=100, description="Results per page"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Search assets by FQN pattern.
+
+    Searches for assets whose FQN contains the search query (case-insensitive).
+    """
+    query = select(AssetDB).where(AssetDB.fqn.ilike(f"%{q}%"))
+    if owner:
+        query = query.where(AssetDB.owner_team_id == owner)
+
+    # Get total count
+    count_query = select(func.count()).select_from(query.subquery())
+    total_result = await session.execute(count_query)
+    total = total_result.scalar() or 0
+
+    # Apply pagination and ordering
+    query = query.order_by(AssetDB.fqn)
+    query = query.limit(limit).offset(offset)
+    result = await session.execute(query)
+    assets = result.scalars().all()
+
+    # Build response with owner team names
+    results = []
+    for asset in assets:
+        team_result = await session.execute(
+            select(TeamDB).where(TeamDB.id == asset.owner_team_id)
+        )
+        team = team_result.scalar_one_or_none()
+        results.append({
+            "id": str(asset.id),
+            "fqn": asset.fqn,
+            "owner_team_id": str(asset.owner_team_id),
+            "owner_team_name": team.name if team else "Unknown",
+        })
+
+    return {
+        "results": results,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 @router.get("/{asset_id}", response_model=Asset)
