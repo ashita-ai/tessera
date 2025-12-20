@@ -1,0 +1,53 @@
+"""Enumerations for Tessera entities."""
+
+from enum import StrEnum
+
+
+class CompatibilityMode(StrEnum):
+    """Schema compatibility modes, borrowed from Kafka schema registries."""
+
+    BACKWARD = "backward"  # New schema can read old data (safe for producers)
+    FORWARD = "forward"  # Old schema can read new data (safe for consumers)
+    FULL = "full"  # Both directions (strictest)
+    NONE = "none"  # No compatibility checks, just notify
+
+
+class ContractStatus(StrEnum):
+    """Lifecycle status of a contract."""
+
+    ACTIVE = "active"
+    DEPRECATED = "deprecated"
+    RETIRED = "retired"
+
+
+class RegistrationStatus(StrEnum):
+    """Status of a consumer registration."""
+
+    ACTIVE = "active"
+    MIGRATING = "migrating"
+    INACTIVE = "inactive"
+
+
+class ChangeType(StrEnum):
+    """Semantic versioning change classification."""
+
+    PATCH = "patch"  # Bug fixes, no schema changes
+    MINOR = "minor"  # Backward-compatible additions
+    MAJOR = "major"  # Breaking changes
+
+
+class ProposalStatus(StrEnum):
+    """Status of a breaking change proposal."""
+
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    WITHDRAWN = "withdrawn"
+
+
+class AcknowledgmentResponseType(StrEnum):
+    """Consumer response to a proposal."""
+
+    APPROVED = "approved"
+    BLOCKED = "blocked"
+    MIGRATING = "migrating"

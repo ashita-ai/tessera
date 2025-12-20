@@ -1,0 +1,35 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: tessera
+      POSTGRES_PASSWORD: tessera
+      POSTGRES_DB: tessera
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tessera"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://tessera:tessera@db:5432/tessera
+      API_HOST: "0.0.0.0"
+      API_PORT: "8000"
+      GIT_SYNC_PATH: /app/contracts
+    volumes:
+      - ./contracts:/app/contracts
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  postgres_data:

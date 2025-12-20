@@ -1,0 +1,4 @@
+-- Create schemas for Tessera
+CREATE SCHEMA IF NOT EXISTS core;
+CREATE SCHEMA IF NOT EXISTS workflow;
+CREATE SCHEMA IF NOT EXISTS audit;
