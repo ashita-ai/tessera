@@ -12,6 +12,7 @@ from tessera.models.enums import (
     ChangeType,
     CompatibilityMode,
     ContractStatus,
+    DependencyType,
     ProposalStatus,
     RegistrationStatus,
 )
@@ -156,6 +157,25 @@ class AcknowledgmentDB(Base):
 
     # Relationships
     proposal: Mapped["ProposalDB"] = relationship(back_populates="acknowledgments")
+
+
+class AssetDependencyDB(Base):
+    """Asset-to-asset dependency for upstream lineage tracking."""
+
+    __tablename__ = "dependencies"
+    __table_args__ = {"schema": "core"}
+
+    id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    dependent_asset_id: Mapped[UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("core.assets.id"), nullable=False
+    )
+    dependency_asset_id: Mapped[UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("core.assets.id"), nullable=False
+    )
+    dependency_type: Mapped[DependencyType] = mapped_column(
+        Enum(DependencyType), default=DependencyType.CONSUMES
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 class AuditEventDB(Base):

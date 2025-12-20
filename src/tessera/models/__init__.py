@@ -7,11 +7,13 @@ from tessera.models.acknowledgment import (
 )
 from tessera.models.asset import Asset, AssetCreate, AssetUpdate
 from tessera.models.contract import Contract, ContractCreate
+from tessera.models.dependency import Dependency, DependencyCreate
 from tessera.models.enums import (
     AcknowledgmentResponseType,
     ChangeType,
     CompatibilityMode,
     ContractStatus,
+    DependencyType,
     ProposalStatus,
     RegistrationStatus,
 )
@@ -25,6 +27,7 @@ __all__ = [
     "ChangeType",
     "CompatibilityMode",
     "ContractStatus",
+    "DependencyType",
     "ProposalStatus",
     "RegistrationStatus",
     # Team
@@ -38,6 +41,9 @@ __all__ = [
     # Contract
     "Contract",
     "ContractCreate",
+    # Dependency
+    "Dependency",
+    "DependencyCreate",
     # Registration
     "Registration",
     "RegistrationCreate",

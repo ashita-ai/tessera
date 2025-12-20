@@ -7,8 +7,25 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tessera.db import AssetDB, ContractDB, ProposalDB, RegistrationDB, TeamDB, get_session
-from tessera.models import Asset, AssetCreate, AssetUpdate, Contract, ContractCreate, Proposal
+from tessera.db import (
+    AssetDB,
+    AssetDependencyDB,
+    ContractDB,
+    ProposalDB,
+    RegistrationDB,
+    TeamDB,
+    get_session,
+)
+from tessera.models import (
+    Asset,
+    AssetCreate,
+    AssetUpdate,
+    Contract,
+    ContractCreate,
+    Dependency,
+    DependencyCreate,
+    Proposal,
+)
 from tessera.models.enums import ChangeType, ContractStatus, RegistrationStatus
 from tessera.services import (
     check_compatibility,
@@ -91,6 +108,90 @@ async def update_asset(
     await session.flush()
     await session.refresh(asset)
     return asset
+
+
+@router.post("/{asset_id}/dependencies", response_model=Dependency, status_code=201)
+async def create_dependency(
+    asset_id: UUID,
+    dependency: DependencyCreate,
+    session: AsyncSession = Depends(get_session),
+) -> AssetDependencyDB:
+    """Register an upstream dependency for an asset.
+
+    Creates a relationship indicating that this asset depends on another asset.
+    """
+    # Verify the dependent asset exists
+    result = await session.execute(select(AssetDB).where(AssetDB.id == asset_id))
+    asset = result.scalar_one_or_none()
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    # Verify the dependency asset exists
+    result = await session.execute(
+        select(AssetDB).where(AssetDB.id == dependency.depends_on_asset_id)
+    )
+    dependency_asset = result.scalar_one_or_none()
+    if not dependency_asset:
+        raise HTTPException(status_code=404, detail="Dependency asset not found")
+
+    # Prevent self-dependency
+    if asset_id == dependency.depends_on_asset_id:
+        raise HTTPException(status_code=400, detail="Asset cannot depend on itself")
+
+    # Check for duplicate dependency
+    result = await session.execute(
+        select(AssetDependencyDB)
+        .where(AssetDependencyDB.dependent_asset_id == asset_id)
+        .where(AssetDependencyDB.dependency_asset_id == dependency.depends_on_asset_id)
+    )
+    if result.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="Dependency already exists")
+
+    db_dependency = AssetDependencyDB(
+        dependent_asset_id=asset_id,
+        dependency_asset_id=dependency.depends_on_asset_id,
+        dependency_type=dependency.dependency_type,
+    )
+    session.add(db_dependency)
+    await session.flush()
+    await session.refresh(db_dependency)
+    return db_dependency
+
+
+@router.get("/{asset_id}/dependencies", response_model=list[Dependency])
+async def list_dependencies(
+    asset_id: UUID,
+    session: AsyncSession = Depends(get_session),
+) -> list[AssetDependencyDB]:
+    """List all upstream dependencies for an asset."""
+    result = await session.execute(select(AssetDB).where(AssetDB.id == asset_id))
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    result = await session.execute(
+        select(AssetDependencyDB).where(AssetDependencyDB.dependent_asset_id == asset_id)
+    )
+    return list(result.scalars().all())
+
+
+@router.delete("/{asset_id}/dependencies/{dependency_id}", status_code=204)
+async def delete_dependency(
+    asset_id: UUID,
+    dependency_id: UUID,
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    """Remove an upstream dependency."""
+    result = await session.execute(
+        select(AssetDependencyDB)
+        .where(AssetDependencyDB.id == dependency_id)
+        .where(AssetDependencyDB.dependent_asset_id == asset_id)
+    )
+    dependency = result.scalar_one_or_none()
+    if not dependency:
+        raise HTTPException(status_code=404, detail="Dependency not found")
+
+    await session.delete(dependency)
+    await session.flush()
 
 
 @router.post("/{asset_id}/contracts", status_code=201)
@@ -352,16 +453,46 @@ async def get_lineage(
     asset_id: UUID,
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    """Get the dependency lineage for an asset.
+    """Get the complete dependency lineage for an asset.
 
-    Returns teams that consume this asset (downstream).
-    Upstream tracking requires additional modeling (not yet implemented).
+    Returns both upstream (what this asset depends on) and downstream
+    (teams/assets that consume this asset) dependencies.
     """
     # Verify asset exists
     result = await session.execute(select(AssetDB).where(AssetDB.id == asset_id))
     asset = result.scalar_one_or_none()
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found")
+
+    # Get owner team name
+    owner_result = await session.execute(
+        select(TeamDB).where(TeamDB.id == asset.owner_team_id)
+    )
+    owner_team = owner_result.scalar_one_or_none()
+
+    # Get upstream dependencies (assets this asset depends on)
+    upstream = []
+    deps_result = await session.execute(
+        select(AssetDependencyDB).where(AssetDependencyDB.dependent_asset_id == asset_id)
+    )
+    dependencies = deps_result.scalars().all()
+
+    for dep in dependencies:
+        dep_asset_result = await session.execute(
+            select(AssetDB).where(AssetDB.id == dep.dependency_asset_id)
+        )
+        dep_asset = dep_asset_result.scalar_one_or_none()
+        if dep_asset:
+            dep_team_result = await session.execute(
+                select(TeamDB).where(TeamDB.id == dep_asset.owner_team_id)
+            )
+            dep_team = dep_team_result.scalar_one_or_none()
+            upstream.append({
+                "asset_id": str(dep.dependency_asset_id),
+                "asset_fqn": dep_asset.fqn,
+                "dependency_type": str(dep.dependency_type),
+                "owner_team": dep_team.name if dep_team else "Unknown",
+            })
 
     # Get all contracts for this asset
     contracts_result = await session.execute(
@@ -399,10 +530,36 @@ async def get_lineage(
                     ],
                 })
 
+    # Also get assets that depend on this asset (downstream assets)
+    downstream_assets = []
+    reverse_deps_result = await session.execute(
+        select(AssetDependencyDB).where(AssetDependencyDB.dependency_asset_id == asset_id)
+    )
+    reverse_deps = reverse_deps_result.scalars().all()
+
+    for dep in reverse_deps:
+        dep_asset_result = await session.execute(
+            select(AssetDB).where(AssetDB.id == dep.dependent_asset_id)
+        )
+        dep_asset = dep_asset_result.scalar_one_or_none()
+        if dep_asset:
+            dep_team_result = await session.execute(
+                select(TeamDB).where(TeamDB.id == dep_asset.owner_team_id)
+            )
+            dep_team = dep_team_result.scalar_one_or_none()
+            downstream_assets.append({
+                "asset_id": str(dep.dependent_asset_id),
+                "asset_fqn": dep_asset.fqn,
+                "dependency_type": str(dep.dependency_type),
+                "owner_team": dep_team.name if dep_team else "Unknown",
+            })
+
     return {
         "asset_id": str(asset_id),
         "asset_fqn": asset.fqn,
         "owner_team_id": str(asset.owner_team_id),
-        "upstream": [],  # Not yet modeled - would require asset-to-asset dependencies
+        "owner_team_name": owner_team.name if owner_team else "Unknown",
+        "upstream": upstream,
         "downstream": downstream,
+        "downstream_assets": downstream_assets,
     }

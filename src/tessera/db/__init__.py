@@ -4,6 +4,7 @@ from tessera.db.database import get_session, init_db
 from tessera.db.models import (
     AcknowledgmentDB,
     AssetDB,
+    AssetDependencyDB,
     AuditEventDB,
     Base,
     ContractDB,
@@ -18,6 +19,7 @@ __all__ = [
     "init_db",
     "TeamDB",
     "AssetDB",
+    "AssetDependencyDB",
     "ContractDB",
     "RegistrationDB",
     "ProposalDB",

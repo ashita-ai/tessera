@@ -51,3 +51,11 @@ class AcknowledgmentResponseType(StrEnum):
     APPROVED = "approved"
     BLOCKED = "blocked"
     MIGRATING = "migrating"
+
+
+class DependencyType(StrEnum):
+    """Type of asset-to-asset dependency."""
+
+    CONSUMES = "consumes"  # Direct data consumption (SELECT FROM)
+    REFERENCES = "references"  # Foreign key or reference
+    TRANSFORMS = "transforms"  # Data transformation (dbt model)
