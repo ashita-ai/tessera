@@ -1,6 +1,6 @@
 """Proposals API endpoints."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -382,7 +382,7 @@ async def acknowledge_proposal(
     # Handle rejection if consumer blocks
     if ack.response == AcknowledgmentResponseType.BLOCKED:
         proposal.status = ProposalStatus.REJECTED
-        proposal.resolved_at = datetime.utcnow()
+        proposal.resolved_at = datetime.now(UTC)
         await session.flush()
         await session.refresh(proposal)
         await log_proposal_rejected(
@@ -396,7 +396,7 @@ async def acknowledge_proposal(
     all_acknowledged, ack_count = await check_proposal_completion(proposal, session)
     if all_acknowledged:
         proposal.status = ProposalStatus.APPROVED
-        proposal.resolved_at = datetime.utcnow()
+        proposal.resolved_at = datetime.now(UTC)
         await session.flush()
         await session.refresh(proposal)
         await log_proposal_approved(
@@ -423,7 +423,7 @@ async def withdraw_proposal(
         raise HTTPException(status_code=400, detail="Proposal is not pending")
 
     proposal.status = ProposalStatus.WITHDRAWN
-    proposal.resolved_at = datetime.utcnow()
+    proposal.resolved_at = datetime.now(UTC)
     await session.flush()
     await session.refresh(proposal)
     return proposal
@@ -445,7 +445,7 @@ async def force_proposal(
         raise HTTPException(status_code=400, detail="Proposal is not pending")
 
     proposal.status = ProposalStatus.APPROVED
-    proposal.resolved_at = datetime.utcnow()
+    proposal.resolved_at = datetime.now(UTC)
     await session.flush()
     await session.refresh(proposal)
 

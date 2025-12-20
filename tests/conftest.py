@@ -3,11 +3,10 @@
 import os
 from collections.abc import AsyncGenerator
 from typing import Any
-from uuid import uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import event, text
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from tessera.db.models import Base
@@ -18,11 +17,15 @@ from tessera.main import app
 from dotenv import load_dotenv
 load_dotenv()
 
-# Use the same database as the app (schemas isolate test data)
+# Support both PostgreSQL and SQLite
+# SQLite: DATABASE_URL=sqlite+aiosqlite:///./test.db or sqlite+aiosqlite:///:memory:
+# PostgreSQL: DATABASE_URL=postgresql+asyncpg://user:pass@host/db
 TEST_DATABASE_URL = os.environ.get(
     "DATABASE_URL",
-    "postgresql+asyncpg://postgres:postgres@localhost:5432/tessera"
+    "sqlite+aiosqlite:///:memory:"  # Default to in-memory SQLite for fast tests
 )
+
+_USE_SQLITE = TEST_DATABASE_URL.startswith("sqlite")
 
 
 @pytest.fixture
@@ -34,7 +37,16 @@ def anyio_backend() -> str:
 @pytest.fixture
 async def test_engine():
     """Create a test database engine."""
-    engine = create_async_engine(TEST_DATABASE_URL, echo=False)
+    connect_args = {}
+    if _USE_SQLITE:
+        # SQLite needs check_same_thread=False for async
+        connect_args = {"check_same_thread": False}
+
+    engine = create_async_engine(
+        TEST_DATABASE_URL,
+        echo=False,
+        connect_args=connect_args,
+    )
     yield engine
     await engine.dispose()
 
@@ -44,14 +56,20 @@ def create_tables(connection):
     Base.metadata.create_all(connection, checkfirst=True)
 
 
+def drop_tables(connection):
+    """Drop all tables."""
+    Base.metadata.drop_all(connection)
+
+
 @pytest.fixture
 async def test_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
     """Create tables and provide a test session."""
     async with test_engine.begin() as conn:
-        # Create schemas for PostgreSQL
-        await conn.execute(text("CREATE SCHEMA IF NOT EXISTS core"))
-        await conn.execute(text("CREATE SCHEMA IF NOT EXISTS workflow"))
-        await conn.execute(text("CREATE SCHEMA IF NOT EXISTS audit"))
+        if not _USE_SQLITE:
+            # PostgreSQL: Create schemas
+            await conn.execute(text("CREATE SCHEMA IF NOT EXISTS core"))
+            await conn.execute(text("CREATE SCHEMA IF NOT EXISTS workflow"))
+            await conn.execute(text("CREATE SCHEMA IF NOT EXISTS audit"))
         await conn.run_sync(create_tables)
 
     async_session = async_sessionmaker(
@@ -66,14 +84,7 @@ async def test_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
 
     # Clean up tables after test
     async with test_engine.begin() as conn:
-        # Use raw SQL for more reliable cleanup
-        await conn.execute(text("DROP TABLE IF EXISTS workflow.acknowledgments CASCADE"))
-        await conn.execute(text("DROP TABLE IF EXISTS workflow.proposals CASCADE"))
-        await conn.execute(text("DROP TABLE IF EXISTS core.registrations CASCADE"))
-        await conn.execute(text("DROP TABLE IF EXISTS core.contracts CASCADE"))
-        await conn.execute(text("DROP TABLE IF EXISTS core.assets CASCADE"))
-        await conn.execute(text("DROP TABLE IF EXISTS core.teams CASCADE"))
-        await conn.execute(text("DROP TABLE IF EXISTS audit.events CASCADE"))
+        await conn.run_sync(drop_tables)
 
 
 @pytest.fixture
@@ -83,9 +94,11 @@ async def client(test_engine) -> AsyncGenerator[AsyncClient, None]:
 
     # Create schemas and tables
     async with test_engine.begin() as conn:
-        await conn.execute(text("CREATE SCHEMA IF NOT EXISTS core"))
-        await conn.execute(text("CREATE SCHEMA IF NOT EXISTS workflow"))
-        await conn.execute(text("CREATE SCHEMA IF NOT EXISTS audit"))
+        if not _USE_SQLITE:
+            # PostgreSQL: Create schemas
+            await conn.execute(text("CREATE SCHEMA IF NOT EXISTS core"))
+            await conn.execute(text("CREATE SCHEMA IF NOT EXISTS workflow"))
+            await conn.execute(text("CREATE SCHEMA IF NOT EXISTS audit"))
         await conn.run_sync(create_tables)
 
     # Create session maker for this engine
@@ -117,14 +130,7 @@ async def client(test_engine) -> AsyncGenerator[AsyncClient, None]:
 
     # Clean up tables after test
     async with test_engine.begin() as conn:
-        # Use raw SQL for more reliable cleanup
-        await conn.execute(text("DROP TABLE IF EXISTS workflow.acknowledgments CASCADE"))
-        await conn.execute(text("DROP TABLE IF EXISTS workflow.proposals CASCADE"))
-        await conn.execute(text("DROP TABLE IF EXISTS core.registrations CASCADE"))
-        await conn.execute(text("DROP TABLE IF EXISTS core.contracts CASCADE"))
-        await conn.execute(text("DROP TABLE IF EXISTS core.assets CASCADE"))
-        await conn.execute(text("DROP TABLE IF EXISTS core.teams CASCADE"))
-        await conn.execute(text("DROP TABLE IF EXISTS audit.events CASCADE"))
+        await conn.run_sync(drop_tables)
 
 
 # Sample data factories
