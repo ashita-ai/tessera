@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="assets/tessera.jpg" alt="Tessera" width="300">
-</p>
-
 # tessera
 
 Data contract coordination for warehouses.
