@@ -97,23 +97,30 @@ Be concise and direct. No flattery or excessive praise. Focus on what needs to b
 tessera/
 ├── src/tessera/
 │   ├── api/               # FastAPI endpoints
+│   │   ├── api_keys.py    # API key management (admin)
 │   │   ├── assets.py      # Asset + contract publishing
-│   │   ├── teams.py       # Team management
+│   │   ├── auth.py        # Authentication dependencies
 │   │   ├── contracts.py   # Contract lookup
-│   │   ├── registrations.py # Consumer registration
+│   │   ├── errors.py      # Error handling + middleware
+│   │   ├── pagination.py  # Pagination helpers
 │   │   ├── proposals.py   # Breaking change workflow
-│   │   └── sync.py        # dbt manifest sync
+│   │   ├── registrations.py # Consumer registration
+│   │   ├── schemas.py     # Schema validation
+│   │   ├── sync.py        # dbt manifest sync
+│   │   └── teams.py       # Team management
 │   ├── db/                # SQLAlchemy models + session
 │   ├── models/            # Pydantic schemas
 │   ├── services/          # Business logic
+│   │   ├── audit.py       # Audit logging
+│   │   ├── auth.py        # API key validation + management
 │   │   ├── schema_diff.py # Schema comparison
-│   │   └── audit.py       # Audit logging
+│   │   └── schema_validator.py # Schema validation
 │   ├── config.py          # Settings from env
 │   └── main.py            # FastAPI app
-├── tests/                 # Test suite
+├── tests/                 # Test suite (126 tests)
 │   ├── conftest.py        # Fixtures
 │   ├── test_schema_diff.py # Schema diff tests
-│   └── test_api.py        # API integration tests
+│   └── test_*.py          # Endpoint tests
 ├── examples/              # Usage examples
 │   └── quickstart.py      # 5 core workflows
 └── assets/                # Images, logos
@@ -318,3 +325,13 @@ All under `/api/v1`:
 - `POST /registrations` - Register as consumer
 - `POST /proposals/{id}/acknowledge` - Acknowledge breaking change
 - `POST /sync/dbt` - Sync from dbt manifest
+- `POST /api-keys` - Create API key (admin)
+- `DELETE /api-keys/{id}` - Revoke API key (admin)
+
+### Authentication
+
+API key-based auth with three scopes: `read`, `write`, `admin`.
+
+Development: Set `AUTH_DISABLED=true` to skip auth.
+
+Bootstrap: Set `BOOTSTRAP_API_KEY` env var for initial setup.

@@ -89,6 +89,22 @@ Acknowledgment
 └── notes (nullable string)
 ```
 
+### APIKey
+
+```
+APIKey
+├── id (uuid)
+├── key_hash (string)          # SHA-256 hash of the key
+├── key_prefix (string)        # First few chars for identification (e.g., "tess_live_abc1")
+├── name (string)              # Human-readable name
+├── team_id (uuid -> Team)
+├── scopes (json)              # List of permissions: read, write, admin
+├── created_at (timestamp)
+├── expires_at (nullable timestamp)
+├── last_used_at (nullable timestamp)
+└── revoked_at (nullable timestamp)
+```
+
 ## Compatibility Modes
 
 | Mode | Add column | Drop column | Rename column | Widen type | Narrow type |
@@ -131,64 +147,81 @@ Beyond schema, contracts can specify guarantees:
 
 ## API Surface
 
+All endpoints under `/api/v1`. Authentication via `Authorization: Bearer <api_key>` header.
+
 ### Teams
 
 ```
-POST   /teams
-GET    /teams
-GET    /teams/{id}
-PATCH  /teams/{id}
+POST   /teams              # Create team
+GET    /teams              # List teams (paginated)
+GET    /teams/{id}         # Get team
+PUT    /teams/{id}         # Update team
 ```
 
 ### Assets
 
 ```
-POST   /assets
-GET    /assets
-GET    /assets/{id}
-GET    /assets?owner={team_id}
+POST   /assets                      # Create asset
+GET    /assets                      # List assets (paginated)
+GET    /assets/{id}                 # Get asset
+POST   /assets/{id}/contracts       # Publish contract
+POST   /assets/{id}/impact          # Impact analysis
 ```
 
 ### Contracts
 
 ```
-POST   /assets/{asset_id}/contracts
-GET    /assets/{asset_id}/contracts
-GET    /contracts/{id}
-GET    /contracts/{id}/registrations
+GET    /contracts                   # List contracts (paginated)
+GET    /contracts/{id}              # Get contract
 ```
 
 ### Registrations
 
 ```
-POST   /contracts/{contract_id}/registrations
-GET    /registrations/{id}
-PATCH  /registrations/{id}
-DELETE /registrations/{id}
+POST   /registrations?contract_id=  # Register as consumer
+GET    /registrations/{id}          # Get registration
+PATCH  /registrations/{id}          # Update registration
+DELETE /registrations/{id}          # Unregister
 ```
 
 ### Proposals
 
 ```
-POST   /assets/{asset_id}/proposals
-GET    /proposals/{id}
-POST   /proposals/{id}/acknowledge
-POST   /proposals/{id}/withdraw
-POST   /proposals/{id}/force
+GET    /proposals                   # List proposals
+GET    /proposals/{id}              # Get proposal
+POST   /proposals/{id}/acknowledge  # Acknowledge breaking change
 ```
 
-### Analysis
+### Sync (dbt integration)
 
 ```
-GET    /assets/{asset_id}/impact?proposed_schema={...}
-GET    /assets/{asset_id}/lineage
+POST   /sync/push          # Export contracts to git (requires GIT_SYNC_PATH)
+POST   /sync/pull          # Import contracts from git (requires GIT_SYNC_PATH)
+POST   /sync/dbt           # Sync from dbt manifest
+POST   /sync/dbt/impact    # CI/CD impact analysis
 ```
 
-### Git Sync
+### Schemas
 
 ```
-POST   /sync/push    # Export database state to git-friendly format
-POST   /sync/pull    # Import git-friendly format into database
+POST   /schemas/validate   # Validate JSON Schema
+```
+
+### API Keys
+
+```
+POST   /api-keys           # Create API key (admin only)
+GET    /api-keys           # List API keys
+GET    /api-keys/{id}      # Get API key
+DELETE /api-keys/{id}      # Revoke API key (admin only)
+```
+
+### Health
+
+```
+GET    /health             # Basic health check
+GET    /health/ready       # Readiness probe (checks database)
+GET    /health/live        # Liveness probe
 ```
 
 ## Key Workflows
@@ -213,7 +246,7 @@ Tessera:
 ### 2. Consumer registers
 
 ```
-POST /contracts/{contract_id}/registrations
+POST /registrations?contract_id={contract_id}
 {
   "consumer_team_id": "ml-features",
   "pinned_version": null
@@ -244,7 +277,10 @@ Force-publish is allowed but logged. Social pressure, not hard blocks.
 ### 4. Impact analysis (CI integration)
 
 ```
-GET /assets/{asset_id}/impact?proposed_schema={...}
+POST /assets/{asset_id}/impact
+{
+  "proposed_schema": {...}
+}
 
 Response:
 {
@@ -267,6 +303,8 @@ Response:
 - assets
 - contracts
 - registrations
+- api_keys
+- dependencies
 
 ### workflow
 - proposals
@@ -287,9 +325,29 @@ CREATE TABLE audit.events (
 );
 ```
 
-## Open Questions
+## Authentication
 
-- **Schema format**: JSON Schema for warehouse use cases
-- **Auth model**: Start simple with API keys per team
-- **Notification delivery**: Webhook-first, let consumers route as needed
-- **dbt integration**: Parse manifest.json to auto-register assets
+API key-based authentication with three scopes:
+
+| Scope | Permissions |
+|-------|-------------|
+| read | GET endpoints, list/view operations |
+| write | POST/PUT/PATCH, create/update operations |
+| admin | DELETE, API key management, team management |
+
+Keys are prefixed with `tess_{environment}_` (e.g., `tess_live_abc123...`).
+
+Bootstrap flow:
+1. Set `BOOTSTRAP_API_KEY` environment variable
+2. Create first team using bootstrap key
+3. Create admin API key for that team
+4. Use admin key for ongoing operations
+
+Development mode: Set `AUTH_DISABLED=true` to skip authentication (uses first team in database).
+
+## Resolved Design Decisions
+
+- **Schema format**: JSON Schema
+- **Auth model**: API keys per team with read/write/admin scopes
+- **Notification delivery**: Webhook-first (configurable via `WEBHOOK_URL`)
+- **dbt integration**: Parse manifest.json via `/sync/dbt` endpoint

@@ -15,6 +15,10 @@ Strategic context for Tessera development.
 3. **Can coordination feel like acceleration?** Every step is friction. If it feels like bureaucracy, teams will route around it.
 4. **Where do you go deep?** dbt? Snowflake? Temporal? Picking one loses others. Not picking loses all.
 
+## Resolved
+
+- **Auth model**: API keys per team with read/write/admin scopes. Bootstrap key for initial setup. Development mode for local testing.
+
 ## Risks
 
 - **Cold start.** Network effects require density. A registry with three assets is useless.

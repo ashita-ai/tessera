@@ -21,27 +21,35 @@ tessera/
 │   ├── main.py               # FastAPI app entry point
 │   ├── config.py             # Pydantic settings from env
 │   ├── api/                  # REST endpoints
-│   │   ├── teams.py          # Team CRUD
+│   │   ├── api_keys.py       # API key management (admin)
 │   │   ├── assets.py         # Asset + contract publishing
+│   │   ├── auth.py           # Authentication dependencies
 │   │   ├── contracts.py      # Contract lookup
-│   │   ├── registrations.py  # Consumer registration
+│   │   ├── errors.py         # Error handling + middleware
+│   │   ├── pagination.py     # Pagination helpers
 │   │   ├── proposals.py      # Breaking change workflow
+│   │   ├── registrations.py  # Consumer registration
 │   │   ├── schemas.py        # Schema validation
-│   │   └── sync.py           # dbt manifest sync + impact analysis
+│   │   ├── sync.py           # dbt manifest sync + impact analysis
+│   │   └── teams.py          # Team CRUD
 │   ├── db/                   # Database layer
-│   │   ├── models.py         # SQLAlchemy ORM models
-│   │   └── session.py        # Async session management
+│   │   ├── database.py       # Async session management
+│   │   └── models.py         # SQLAlchemy ORM models
 │   ├── models/               # Pydantic schemas
-│   │   ├── enums.py          # Status/type enums
-│   │   ├── team.py           # Team DTOs
+│   │   ├── acknowledgment.py # Acknowledgment DTOs
+│   │   ├── api_key.py        # API key DTOs
 │   │   ├── asset.py          # Asset DTOs
 │   │   ├── contract.py       # Contract DTOs
+│   │   ├── dependency.py     # Dependency DTOs
+│   │   ├── enums.py          # Status/type enums
+│   │   ├── proposal.py       # Proposal DTOs
 │   │   ├── registration.py   # Registration DTOs
-│   │   └── proposal.py       # Proposal DTOs
+│   │   └── team.py           # Team DTOs
 │   └── services/             # Business logic
+│       ├── audit.py          # Audit event logging
+│       ├── auth.py           # API key validation + management
 │       ├── schema_diff.py    # JSON Schema diffing + compatibility
-│       ├── schema_validator.py # Schema validation
-│       └── audit.py          # Audit event logging
+│       └── schema_validator.py # Schema validation
 ├── sdk/                      # Python SDK (tessera-sdk)
 │   ├── src/tessera_sdk/      # SDK source
 │   │   ├── client.py         # TesseraClient (sync/async)
@@ -49,10 +57,15 @@ tessera/
 │   └── pyproject.toml        # SDK package config
 ├── tests/                    # Test suite (126 tests)
 │   ├── conftest.py           # Fixtures + factories
-│   ├── test_api.py           # API integration tests
+│   ├── test_assets.py        # Asset endpoint tests
+│   ├── test_contracts.py     # Contract endpoint tests
+│   ├── test_health.py        # Health check tests
+│   ├── test_proposals.py     # Proposal endpoint tests
+│   ├── test_registrations.py # Registration endpoint tests
 │   ├── test_schema_diff.py   # Schema diff unit tests
+│   ├── test_schema_validator.py # Validator tests
 │   ├── test_sync.py          # Sync endpoint tests
-│   └── test_*.py             # Other test modules
+│   └── test_teams.py         # Team endpoint tests
 ├── examples/                 # Usage examples
 │   └── quickstart.py         # 5 core workflows demo
 ├── alembic/                  # Database migrations
@@ -72,6 +85,8 @@ tessera/
   - `CORS_ORIGINS`: Allowed origins
   - `GIT_SYNC_PATH`: Optional path for git-based sync
   - `WEBHOOK_URL/WEBHOOK_SECRET`: Optional webhook integration
+  - `AUTH_DISABLED`: Disable auth for development (default: false)
+  - `BOOTSTRAP_API_KEY`: Initial admin key for bootstrapping
 
 ### Database Models (`src/tessera/db/models.py`)
 | Model | Schema | Description |
@@ -80,9 +95,10 @@ tessera/
 | AssetDB | core | Data asset (table/view) |
 | ContractDB | core | Versioned schema contract |
 | RegistrationDB | core | Consumer dependency registration |
+| APIKeyDB | core | API key for authentication |
+| AssetDependencyDB | core | Asset-to-asset lineage |
 | ProposalDB | workflow | Breaking change proposal |
 | AcknowledgmentDB | workflow | Consumer acknowledgment |
-| AssetDependencyDB | core | Asset-to-asset lineage |
 | AuditEventDB | audit | Append-only event log |
 
 ### Schema Diffing (`src/tessera/services/schema_diff.py`)
@@ -155,6 +171,26 @@ Base path: `/api/v1`
 | POST | `/sync/pull` | Pull contracts from git (requires GIT_SYNC_PATH) |
 | POST | `/sync/dbt` | Sync from dbt manifest |
 | POST | `/sync/dbt/impact` | CI/CD impact analysis (API-first) |
+
+### Schemas
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/schemas/validate` | Validate JSON Schema |
+
+### API Keys
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api-keys` | Create API key (admin only) |
+| GET | `/api-keys` | List API keys |
+| GET | `/api-keys/{id}` | Get API key |
+| DELETE | `/api-keys/{id}` | Revoke API key (admin only) |
+
+### Health
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/health` | Basic health check |
+| GET | `/health/ready` | Readiness probe (checks DB) |
+| GET | `/health/live` | Liveness probe |
 
 ## SDK (tessera-sdk)
 
