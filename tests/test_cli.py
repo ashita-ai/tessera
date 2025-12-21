@@ -146,9 +146,7 @@ class TestAssetCommands:
     def test_asset_search(self) -> None:
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "results": [{"id": "a1", "fqn": "db.schema.users"}]
-        }
+        mock_response.json.return_value = {"results": [{"id": "a1", "fqn": "db.schema.users"}]}
 
         with patch("tessera.cli.make_request", return_value=mock_response):
             result = runner.invoke(app, ["asset", "search", "users"])
@@ -219,7 +217,9 @@ class TestContractCommands:
         mock_response.status_code = 200
         mock_response.json.return_value = {
             "proposal": {"id": "p1", "status": "pending"},
-            "breaking_changes": [{"change_type": "field_removed", "message": "Field 'name' removed"}],
+            "breaking_changes": [
+                {"change_type": "field_removed", "message": "Field 'name' removed"}
+            ],
         }
 
         with patch("tessera.cli.make_request", return_value=mock_response):
@@ -245,7 +245,7 @@ class TestContractCommands:
     def test_contract_list_empty(self) -> None:
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
-        mock_response.json.return_value = []
+        mock_response.json.return_value = {"results": [], "total": 0, "limit": 50, "offset": 0}
 
         with patch("tessera.cli.make_request", return_value=mock_response):
             result = runner.invoke(app, ["contract", "list", "asset-123"])
@@ -255,10 +255,25 @@ class TestContractCommands:
     def test_contract_list_with_contracts(self) -> None:
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
-        mock_response.json.return_value = [
-            {"id": "c1", "version": "1.0.0", "status": "deprecated", "published_at": "2024-01-01T00:00:00Z"},
-            {"id": "c2", "version": "2.0.0", "status": "active", "published_at": "2024-01-02T00:00:00Z"},
-        ]
+        mock_response.json.return_value = {
+            "results": [
+                {
+                    "id": "c1",
+                    "version": "1.0.0",
+                    "status": "deprecated",
+                    "published_at": "2024-01-01T00:00:00Z",
+                },
+                {
+                    "id": "c2",
+                    "version": "2.0.0",
+                    "status": "active",
+                    "published_at": "2024-01-02T00:00:00Z",
+                },
+            ],
+            "total": 2,
+            "limit": 50,
+            "offset": 0,
+        }
 
         with patch("tessera.cli.make_request", return_value=mock_response):
             result = runner.invoke(app, ["contract", "list", "asset-123"])
@@ -274,7 +289,9 @@ class TestContractCommands:
             "to_version": "2.0.0",
             "change_type": "minor",
             "is_breaking": False,
-            "changes": [{"change_type": "field_added", "message": "Added field 'email'", "breaking": False}],
+            "changes": [
+                {"change_type": "field_added", "message": "Added field 'email'", "breaking": False}
+            ],
         }
 
         with patch("tessera.cli.make_request", return_value=mock_response):
@@ -347,7 +364,11 @@ class TestRegisterCommand:
     def test_register_success(self) -> None:
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 201
-        mock_response.json.return_value = {"id": "reg-1", "asset_id": "a1", "consumer_team_id": "t1"}
+        mock_response.json.return_value = {
+            "id": "reg-1",
+            "asset_id": "a1",
+            "consumer_team_id": "t1",
+        }
 
         with patch("tessera.cli.make_request", return_value=mock_response):
             result = runner.invoke(app, ["register", "--asset", "a1", "--team", "t1"])
