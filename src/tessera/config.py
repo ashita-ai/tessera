@@ -57,5 +57,11 @@ class Settings(BaseSettings):
     redis_url: str | None = None  # e.g., redis://localhost:6379/0
     cache_ttl: int = 300  # Default cache TTL in seconds (5 minutes)
 
+    # Database connection pool
+    db_pool_size: int = 20  # Base pool size
+    db_max_overflow: int = 10  # Additional connections under load
+    db_pool_timeout: int = 30  # Seconds to wait for connection
+    db_pool_recycle: int = 3600  # Recycle connections after 1 hour
+
 
 settings = Settings()

@@ -38,10 +38,35 @@ _async_session: async_sessionmaker[AsyncSession] | None = None
 
 
 def get_engine() -> AsyncEngine:
-    """Get or create the database engine (lazy initialization)."""
+    """Get or create the database engine (lazy initialization).
+
+    Configures connection pooling for PostgreSQL. SQLite uses NullPool
+    (no pooling) as it doesn't support concurrent connections.
+    """
     global _engine
     if _engine is None:
-        _engine = create_async_engine(settings.database_url, echo=False)
+        # SQLite doesn't support connection pooling
+        is_sqlite = settings.database_url.startswith("sqlite")
+        if is_sqlite:
+            from sqlalchemy.pool import StaticPool
+
+            _engine = create_async_engine(
+                settings.database_url,
+                echo=False,
+                poolclass=StaticPool,
+                connect_args={"check_same_thread": False},
+            )
+        else:
+            # PostgreSQL with connection pooling
+            _engine = create_async_engine(
+                settings.database_url,
+                echo=False,
+                pool_size=settings.db_pool_size,
+                max_overflow=settings.db_max_overflow,
+                pool_timeout=settings.db_pool_timeout,
+                pool_recycle=settings.db_pool_recycle,
+                pool_pre_ping=True,  # Verify connections before use
+            )
     return _engine
 
 

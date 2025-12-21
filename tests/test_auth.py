@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from tessera.db.models import Base, TeamDB
 from tessera.main import app
-from tessera.services.auth import create_api_key, generate_api_key, hash_api_key
+from tessera.services.auth import create_api_key, generate_api_key, hash_api_key, verify_api_key
 from tessera.models.api_key import APIKeyCreate
 from tessera.models.enums import APIKeyScope
 
@@ -135,22 +135,27 @@ class TestAPIKeyGeneration:
 
         assert key.startswith("tess_live_")
         assert len(key) > 20
-        assert len(key_hash) == 64  # SHA-256 hex digest
+        assert key_hash.startswith("$argon2id$")  # argon2 hash format
         assert prefix.startswith("tess_live_")
 
-    def test_hash_api_key(self):
-        """Test API key hashing."""
+    def test_hash_and_verify_api_key(self):
+        """Test API key hashing and verification with argon2."""
         key = "tess_live_abc123"
         hash1 = hash_api_key(key)
         hash2 = hash_api_key(key)
 
-        # Same key should produce same hash
-        assert hash1 == hash2
-        assert len(hash1) == 64
+        # With argon2, same key produces different hashes (salted)
+        assert hash1 != hash2  # Different salts
+        assert hash1.startswith("$argon2id$")
+        assert hash2.startswith("$argon2id$")
 
-        # Different key should produce different hash
-        hash3 = hash_api_key("tess_live_xyz789")
-        assert hash3 != hash1
+        # But verification should work with either hash
+        assert verify_api_key(key, hash1)
+        assert verify_api_key(key, hash2)
+
+        # Wrong key should fail verification
+        assert not verify_api_key("wrong_key", hash1)
+        assert not verify_api_key("tess_live_xyz789", hash1)
 
 
 class TestAPIKeyService:

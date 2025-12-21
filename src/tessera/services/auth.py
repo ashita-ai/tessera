@@ -1,16 +1,20 @@
 """Authentication service for API key management."""
 
-import hashlib
 import secrets
 from datetime import UTC, datetime
 from uuid import UUID
 
+from argon2 import PasswordHasher
+from argon2.exceptions import VerifyMismatchError
 from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.db.models import APIKeyDB, TeamDB
 from tessera.models.api_key import APIKey, APIKeyCreate, APIKeyCreated
 from tessera.models.enums import APIKeyScope
+
+# Use argon2id with secure defaults
+_hasher = PasswordHasher()
 
 
 def generate_api_key(environment: str = "live") -> tuple[str, str, str]:
@@ -22,14 +26,23 @@ def generate_api_key(environment: str = "live") -> tuple[str, str, str]:
     # Generate 32 random bytes = 64 hex characters
     random_part = secrets.token_hex(32)
     full_key = f"tess_{environment}_{random_part}"
-    key_hash = hashlib.sha256(full_key.encode()).hexdigest()
+    key_hash = _hasher.hash(full_key)
     key_prefix = f"tess_{environment}_{random_part[:4]}"
     return full_key, key_hash, key_prefix
 
 
 def hash_api_key(key: str) -> str:
-    """Hash an API key for storage/lookup."""
-    return hashlib.sha256(key.encode()).hexdigest()
+    """Hash an API key for storage."""
+    return _hasher.hash(key)
+
+
+def verify_api_key(key: str, key_hash: str) -> bool:
+    """Verify an API key against its hash."""
+    try:
+        _hasher.verify(key_hash, key)
+        return True
+    except VerifyMismatchError:
+        return False
 
 
 async def create_api_key(
@@ -86,6 +99,10 @@ async def validate_api_key(
 ) -> tuple[APIKeyDB, TeamDB] | None:
     """Validate an API key and return the key record and team.
 
+    With argon2, we can't do direct hash lookups (hashes are salted).
+    Instead, we extract the prefix from the key to narrow candidates,
+    then verify each one using argon2.
+
     Args:
         session: Database session
         key: The raw API key
@@ -93,14 +110,21 @@ async def validate_api_key(
     Returns:
         Tuple of (APIKeyDB, TeamDB) if valid, None otherwise
     """
-    key_hash = hash_api_key(key)
     now = datetime.now(UTC)
 
+    # Extract prefix from the key (e.g., "tess_live_abcd" from "tess_live_abcd...")
+    # Format: tess_{env}_{first 4 chars of random}
+    parts = key.split("_")
+    if len(parts) < 3:
+        return None
+    key_prefix = f"{parts[0]}_{parts[1]}_{parts[2][:4]}"
+
+    # Fetch candidate keys by prefix
     result = await session.execute(
         select(APIKeyDB, TeamDB)
         .join(TeamDB, APIKeyDB.team_id == TeamDB.id)
         .where(
-            APIKeyDB.key_hash == key_hash,
+            APIKeyDB.key_prefix == key_prefix,
             APIKeyDB.revoked_at.is_(None),
             or_(
                 APIKeyDB.expires_at.is_(None),
@@ -108,18 +132,18 @@ async def validate_api_key(
             ),
         )
     )
-    row = result.first()
-    if not row:
-        return None
+    candidates = result.all()
 
-    api_key_db, team_db = row
+    # Verify each candidate with argon2
+    for api_key_db, team_db in candidates:
+        if verify_api_key(key, api_key_db.key_hash):
+            # Update last_used_at
+            await session.execute(
+                update(APIKeyDB).where(APIKeyDB.id == api_key_db.id).values(last_used_at=now)
+            )
+            return api_key_db, team_db
 
-    # Update last_used_at
-    await session.execute(
-        update(APIKeyDB).where(APIKeyDB.id == api_key_db.id).values(last_used_at=now)
-    )
-
-    return api_key_db, team_db
+    return None
 
 
 async def get_api_key(

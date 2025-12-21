@@ -1,5 +1,6 @@
 """Assets API endpoints."""
 
+from collections import defaultdict
 from typing import Any
 from uuid import UUID
 
@@ -107,34 +108,38 @@ async def search_assets(
 
     Searches for assets whose FQN contains the search query (case-insensitive).
     """
-    query = select(AssetDB).where(AssetDB.fqn.ilike(f"%{q}%"))
+    base_query = select(AssetDB).where(AssetDB.fqn.ilike(f"%{q}%"))
     if owner:
-        query = query.where(AssetDB.owner_team_id == owner)
+        base_query = base_query.where(AssetDB.owner_team_id == owner)
 
     # Get total count
-    count_query = select(func.count()).select_from(query.subquery())
+    count_query = select(func.count()).select_from(base_query.subquery())
     total_result = await session.execute(count_query)
     total = total_result.scalar() or 0
 
-    # Apply pagination and ordering
-    query = query.order_by(AssetDB.fqn)
-    query = query.limit(limit).offset(offset)
-    result = await session.execute(query)
-    assets = result.scalars().all()
+    # JOIN with teams to get names in a single query (fixes N+1)
+    query = (
+        select(AssetDB, TeamDB)
+        .join(TeamDB, AssetDB.owner_team_id == TeamDB.id)
+        .where(AssetDB.fqn.ilike(f"%{q}%"))
+    )
+    if owner:
+        query = query.where(AssetDB.owner_team_id == owner)
+    query = query.order_by(AssetDB.fqn).limit(limit).offset(offset)
 
-    # Build response with owner team names
-    results = []
-    for asset in assets:
-        team_result = await session.execute(select(TeamDB).where(TeamDB.id == asset.owner_team_id))
-        team = team_result.scalar_one_or_none()
-        results.append(
-            {
-                "id": str(asset.id),
-                "fqn": asset.fqn,
-                "owner_team_id": str(asset.owner_team_id),
-                "owner_team_name": team.name if team else "Unknown",
-            }
-        )
+    result = await session.execute(query)
+    rows = result.all()
+
+    # Build response with owner team names from join
+    results = [
+        {
+            "id": str(asset.id),
+            "fqn": asset.fqn,
+            "owner_team_id": str(asset.owner_team_id),
+            "owner_team_name": team.name,
+        }
+        for asset, team in rows
+    ]
 
     return {
         "results": results,
@@ -653,27 +658,24 @@ async def analyze_impact(
     diff_result = diff_schemas(current_contract.schema_def, proposed_schema)
     breaking = diff_result.breaking_for_mode(current_contract.compatibility_mode)
 
-    # Get impacted consumers (registrations for this contract)
+    # Get impacted consumers with team names in a single query (fixes N+1)
     regs_result = await session.execute(
-        select(RegistrationDB)
+        select(RegistrationDB, TeamDB)
+        .join(TeamDB, RegistrationDB.consumer_team_id == TeamDB.id)
         .where(RegistrationDB.contract_id == current_contract.id)
         .where(RegistrationDB.status == RegistrationStatus.ACTIVE)
     )
-    registrations = regs_result.scalars().all()
+    rows = regs_result.all()
 
-    # Get team names for impacted consumers
-    impacted_consumers = []
-    for reg in registrations:
-        team_result = await session.execute(select(TeamDB).where(TeamDB.id == reg.consumer_team_id))
-        team = team_result.scalar_one_or_none()
-        impacted_consumers.append(
-            {
-                "team_id": str(reg.consumer_team_id),
-                "team_name": team.name if team else "Unknown",
-                "status": str(reg.status),
-                "pinned_version": reg.pinned_version,
-            }
-        )
+    impacted_consumers = [
+        {
+            "team_id": str(reg.consumer_team_id),
+            "team_name": team.name,
+            "status": str(reg.status),
+            "pinned_version": reg.pinned_version,
+        }
+        for reg, team in rows
+    ]
 
     return {
         "change_type": str(diff_result.change_type),
@@ -693,111 +695,108 @@ async def get_lineage(
     Returns both upstream (what this asset depends on) and downstream
     (teams/assets that consume this asset) dependencies.
     """
-    # Verify asset exists
-    result = await session.execute(select(AssetDB).where(AssetDB.id == asset_id))
-    asset = result.scalar_one_or_none()
-    if not asset:
-        raise HTTPException(status_code=404, detail="Asset not found")
-
-    # Get owner team name
-    owner_result = await session.execute(select(TeamDB).where(TeamDB.id == asset.owner_team_id))
-    owner_team = owner_result.scalar_one_or_none()
-
-    # Get upstream dependencies (assets this asset depends on)
-    upstream = []
-    deps_result = await session.execute(
-        select(AssetDependencyDB).where(AssetDependencyDB.dependent_asset_id == asset_id)
+    # Get asset with owner team in single query (fixes N+1)
+    result = await session.execute(
+        select(AssetDB, TeamDB)
+        .join(TeamDB, AssetDB.owner_team_id == TeamDB.id)
+        .where(AssetDB.id == asset_id)
     )
-    dependencies = deps_result.scalars().all()
+    row = result.first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    asset, owner_team = row
 
-    for dep in dependencies:
-        dep_asset_result = await session.execute(
-            select(AssetDB).where(AssetDB.id == dep.dependency_asset_id)
+    # Alias for joining dependency assets and their teams
+    dep_asset = AssetDB.__table__.alias("dep_asset")
+    dep_team = TeamDB.__table__.alias("dep_team")
+
+    # Get upstream dependencies with asset and team info in single query (fixes N+1)
+    upstream_result = await session.execute(
+        select(
+            AssetDependencyDB.dependency_asset_id,
+            AssetDependencyDB.dependency_type,
+            dep_asset.c.fqn,
+            dep_team.c.name,
         )
-        dep_asset = dep_asset_result.scalar_one_or_none()
-        if dep_asset:
-            dep_team_result = await session.execute(
-                select(TeamDB).where(TeamDB.id == dep_asset.owner_team_id)
-            )
-            dep_team = dep_team_result.scalar_one_or_none()
-            upstream.append(
-                {
-                    "asset_id": str(dep.dependency_asset_id),
-                    "asset_fqn": dep_asset.fqn,
-                    "dependency_type": str(dep.dependency_type),
-                    "owner_team": dep_team.name if dep_team else "Unknown",
-                }
-            )
+        .join(dep_asset, AssetDependencyDB.dependency_asset_id == dep_asset.c.id)
+        .join(dep_team, dep_asset.c.owner_team_id == dep_team.c.id)
+        .where(AssetDependencyDB.dependent_asset_id == asset_id)
+    )
+    upstream = [
+        {
+            "asset_id": str(dep_asset_id),
+            "asset_fqn": fqn,
+            "dependency_type": str(dep_type),
+            "owner_team": team_name,
+        }
+        for dep_asset_id, dep_type, fqn, team_name in upstream_result.all()
+    ]
 
     # Get all contracts for this asset
     contracts_result = await session.execute(
-        select(ContractDB).where(ContractDB.asset_id == asset_id)
+        select(ContractDB.id).where(ContractDB.asset_id == asset_id)
     )
-    contracts = contracts_result.scalars().all()
-    contract_ids = [c.id for c in contracts]
+    contract_ids = [c for (c,) in contracts_result.all()]
 
-    # Get all registrations (consumers) for these contracts
+    # Get registrations with team info in single query (fixes N+1)
     downstream = []
     if contract_ids:
         regs_result = await session.execute(
-            select(RegistrationDB).where(RegistrationDB.contract_id.in_(contract_ids))
+            select(RegistrationDB, TeamDB)
+            .join(TeamDB, RegistrationDB.consumer_team_id == TeamDB.id)
+            .where(RegistrationDB.contract_id.in_(contract_ids))
         )
-        registrations = regs_result.scalars().all()
+        rows = regs_result.all()
 
-        # Get unique consumer teams
-        consumer_team_ids = set(reg.consumer_team_id for reg in registrations)
-        for team_id in consumer_team_ids:
-            team_result = await session.execute(select(TeamDB).where(TeamDB.id == team_id))
-            team = team_result.scalar_one_or_none()
-            if team:
-                # Get the registrations for this team
-                team_regs = [r for r in registrations if r.consumer_team_id == team_id]
-                downstream.append(
-                    {
-                        "team_id": str(team_id),
-                        "team_name": team.name,
-                        "registrations": [
-                            {
-                                "contract_id": str(r.contract_id),
-                                "status": str(r.status),
-                                "pinned_version": r.pinned_version,
-                            }
-                            for r in team_regs
-                        ],
-                    }
-                )
+        # Group registrations by team
+        team_regs: dict[UUID, list[tuple[RegistrationDB, TeamDB]]] = defaultdict(list)
+        for reg, team in rows:
+            team_regs[team.id].append((reg, team))
 
-    # Also get assets that depend on this asset (downstream assets)
-    downstream_assets = []
-    reverse_deps_result = await session.execute(
-        select(AssetDependencyDB).where(AssetDependencyDB.dependency_asset_id == asset_id)
-    )
-    reverse_deps = reverse_deps_result.scalars().all()
-
-    for dep in reverse_deps:
-        dep_asset_result = await session.execute(
-            select(AssetDB).where(AssetDB.id == dep.dependent_asset_id)
-        )
-        dep_asset = dep_asset_result.scalar_one_or_none()
-        if dep_asset:
-            dep_team_result = await session.execute(
-                select(TeamDB).where(TeamDB.id == dep_asset.owner_team_id)
-            )
-            dep_team = dep_team_result.scalar_one_or_none()
-            downstream_assets.append(
+        for team_id, regs in team_regs.items():
+            team_name = regs[0][1].name  # All regs have same team
+            downstream.append(
                 {
-                    "asset_id": str(dep.dependent_asset_id),
-                    "asset_fqn": dep_asset.fqn,
-                    "dependency_type": str(dep.dependency_type),
-                    "owner_team": dep_team.name if dep_team else "Unknown",
+                    "team_id": str(team_id),
+                    "team_name": team_name,
+                    "registrations": [
+                        {
+                            "contract_id": str(r.contract_id),
+                            "status": str(r.status),
+                            "pinned_version": r.pinned_version,
+                        }
+                        for r, _ in regs
+                    ],
                 }
             )
+
+    # Get downstream assets (assets that depend on this one) with team info (fixes N+1)
+    downstream_assets_result = await session.execute(
+        select(
+            AssetDependencyDB.dependent_asset_id,
+            AssetDependencyDB.dependency_type,
+            dep_asset.c.fqn,
+            dep_team.c.name,
+        )
+        .join(dep_asset, AssetDependencyDB.dependent_asset_id == dep_asset.c.id)
+        .join(dep_team, dep_asset.c.owner_team_id == dep_team.c.id)
+        .where(AssetDependencyDB.dependency_asset_id == asset_id)
+    )
+    downstream_assets = [
+        {
+            "asset_id": str(dep_asset_id),
+            "asset_fqn": fqn,
+            "dependency_type": str(dep_type),
+            "owner_team": team_name,
+        }
+        for dep_asset_id, dep_type, fqn, team_name in downstream_assets_result.all()
+    ]
 
     return {
         "asset_id": str(asset_id),
         "asset_fqn": asset.fqn,
         "owner_team_id": str(asset.owner_team_id),
-        "owner_team_name": owner_team.name if owner_team else "Unknown",
+        "owner_team_name": owner_team.name,
         "upstream": upstream,
         "downstream": downstream,
         "downstream_assets": downstream_assets,

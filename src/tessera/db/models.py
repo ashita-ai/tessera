@@ -76,7 +76,9 @@ class ContractDB(Base):
     status: Mapped[ContractStatus] = mapped_column(
         Enum(ContractStatus), default=ContractStatus.ACTIVE
     )
-    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    published_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, index=True
+    )
     published_by: Mapped[UUID] = mapped_column(Uuid, nullable=False)
 
     # Relationships
@@ -90,13 +92,19 @@ class RegistrationDB(Base):
     __tablename__ = "registrations"
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
-    contract_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("contracts.id"), nullable=False)
-    consumer_team_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("teams.id"), nullable=False)
+    contract_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("contracts.id"), nullable=False, index=True
+    )
+    consumer_team_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("teams.id"), nullable=False, index=True
+    )
     pinned_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
     status: Mapped[RegistrationStatus] = mapped_column(
         Enum(RegistrationStatus), default=RegistrationStatus.ACTIVE
     )
-    registered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    registered_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, index=True
+    )
     acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Relationships
@@ -117,7 +125,9 @@ class ProposalDB(Base):
         Enum(ProposalStatus), default=ProposalStatus.PENDING
     )
     proposed_by: Mapped[UUID] = mapped_column(Uuid, nullable=False)
-    proposed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    proposed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, index=True
+    )
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Relationships
@@ -180,10 +190,14 @@ class APIKeyDB(Base):
     __tablename__ = "api_keys"
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
-    key_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
-    key_prefix: Mapped[str] = mapped_column(String(20), nullable=False)
+    key_hash: Mapped[str] = mapped_column(
+        String(128), nullable=False, unique=True
+    )  # argon2 hashes are ~100 chars
+    key_prefix: Mapped[str] = mapped_column(
+        String(20), nullable=False, index=True
+    )  # indexed for prefix-based lookup
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    team_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("teams.id"), nullable=False)
+    team_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("teams.id"), nullable=False, index=True)
     scopes: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
