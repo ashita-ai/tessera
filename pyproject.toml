@@ -36,6 +36,9 @@ dev = [
 bigquery = [
     "google-cloud-bigquery>=3.25.0",
 ]
+duckdb = [
+    "duckdb>=1.0.0",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -67,4 +70,6 @@ dev = [
     "uvloop>=0.22.0",
     "httptools>=0.7.0",
     "watchfiles>=1.0.0",
+    "duckdb>=1.0.0",
+    "pyarrow>=15.0.0",
 ]

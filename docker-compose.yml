@@ -39,6 +39,9 @@ services:
       BOOTSTRAP_API_KEY: tessera-dev-key
       API_HOST: "0.0.0.0"
       API_PORT: "8000"
+      # Webhook configuration - sends events to the webhook-receiver service
+      WEBHOOK_URL: http://webhook-receiver:5555/webhooks
+      WEBHOOK_SECRET: dev-webhook-secret
       # GIT_SYNC_PATH: /app/contracts  # Optional: Set to enable git sync endpoints
     depends_on:
       db:
@@ -51,6 +54,19 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
+
+  webhook-receiver:
+    build: .
+    ports:
+      - "5555:5555"
+    environment:
+      WEBHOOK_SECRET: dev-webhook-secret
+    command: ["python", "/app/examples/webhook_receiver.py"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5555/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
 volumes:
   postgres_data:
