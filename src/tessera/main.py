@@ -9,7 +9,7 @@ from pydantic import ValidationError
 from sqlalchemy import text
 from starlette.exceptions import HTTPException
 
-from tessera.api import assets, contracts, proposals, registrations, schemas, sync, teams
+from tessera.api import api_keys, assets, contracts, proposals, registrations, schemas, sync, teams
 from tessera.api.errors import (
     APIError,
     RequestIDMiddleware,
@@ -64,6 +64,7 @@ api_v1.include_router(registrations.router, prefix="/registrations", tags=["regi
 api_v1.include_router(proposals.router, prefix="/proposals", tags=["proposals"])
 api_v1.include_router(schemas.router, prefix="/schemas", tags=["schemas"])
 api_v1.include_router(sync.router, prefix="/sync", tags=["sync"])
+api_v1.include_router(api_keys.router, prefix="/api-keys", tags=["api-keys"])
 
 app.include_router(api_v1)
 

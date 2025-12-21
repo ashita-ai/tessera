@@ -3,24 +3,88 @@
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Security
+from fastapi.security import APIKeyHeader
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.api.pagination import PaginationParams, paginate, pagination_params
+from tessera.config import settings
 from tessera.db import TeamDB, get_session
 from tessera.models import Team, TeamCreate, TeamUpdate
 
 router = APIRouter()
 
+# API key header for bootstrap check
+api_key_header = APIKeyHeader(name="Authorization", auto_error=False)
+
+
+async def _verify_can_create_team(
+    authorization: str | None = Security(api_key_header),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    """Verify the request is authorized to create a team.
+
+    Team creation is allowed if:
+    1. Auth is disabled (development mode)
+    2. Using the bootstrap API key
+    3. Using a valid API key with admin scope
+
+    Raises HTTPException if not authorized.
+    """
+    # Auth disabled = always allowed
+    if settings.auth_disabled:
+        return
+
+    if not authorization:
+        raise HTTPException(
+            status_code=401,
+            detail={"code": "MISSING_API_KEY", "message": "Authorization required"},
+        )
+
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=401,
+            detail={"code": "INVALID_AUTH_HEADER", "message": "Use 'Bearer <key>' format"},
+        )
+
+    key = authorization[7:]
+
+    # Check bootstrap key
+    if settings.bootstrap_api_key and key == settings.bootstrap_api_key:
+        return
+
+    # Check regular API key with admin scope
+    from tessera.services.auth import validate_api_key
+    from tessera.models.enums import APIKeyScope
+
+    result = await validate_api_key(session, key)
+    if not result:
+        raise HTTPException(
+            status_code=401,
+            detail={"code": "INVALID_API_KEY", "message": "Invalid or expired API key"},
+        )
+
+    api_key_db, _ = result
+    scopes = [APIKeyScope(s) for s in api_key_db.scopes]
+    if APIKeyScope.ADMIN not in scopes:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "INSUFFICIENT_SCOPE", "message": "Admin scope required"},
+        )
+
 
 @router.post("", response_model=Team, status_code=201)
 async def create_team(
     team: TeamCreate,
+    _: None = Depends(_verify_can_create_team),
     session: AsyncSession = Depends(get_session),
 ) -> TeamDB:
-    """Create a new team."""
+    """Create a new team.
+
+    Requires admin scope or bootstrap API key.
+    """
     db_team = TeamDB(name=team.name, metadata_=team.metadata)
     session.add(db_team)
     try:

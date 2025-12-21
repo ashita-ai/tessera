@@ -4,6 +4,15 @@ import os
 from collections.abc import AsyncGenerator
 from typing import Any
 
+# IMPORTANT: Set environment variables BEFORE importing tessera modules
+# This ensures settings are loaded with test configuration
+from dotenv import load_dotenv
+load_dotenv()
+
+# Disable auth for tests by default (individual auth tests can override)
+# Must be set before importing any tessera modules
+os.environ["AUTH_DISABLED"] = "true"
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
@@ -11,11 +20,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from tessera.db.models import Base
 from tessera.main import app
-
-
-# Load .env to get database URL
-from dotenv import load_dotenv
-load_dotenv()
 
 # Support both PostgreSQL and SQLite
 # SQLite: DATABASE_URL=sqlite+aiosqlite:///./test.db or sqlite+aiosqlite:///:memory:
@@ -89,8 +93,13 @@ async def test_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
 
 @pytest.fixture
 async def client(test_engine) -> AsyncGenerator[AsyncClient, None]:
-    """Create a test client with isolated database."""
+    """Create a test client with isolated database and auth disabled."""
     from tessera.db import database
+    from tessera.config import settings
+
+    # Disable auth for general tests
+    original_auth_disabled = settings.auth_disabled
+    settings.auth_disabled = True
 
     # Create schemas and tables
     async with test_engine.begin() as conn:
@@ -127,6 +136,9 @@ async def client(test_engine) -> AsyncGenerator[AsyncClient, None]:
         yield client
 
     app.dependency_overrides.clear()
+
+    # Restore original auth setting
+    settings.auth_disabled = original_auth_disabled
 
     # Clean up tables after test
     async with test_engine.begin() as conn:

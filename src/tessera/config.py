@@ -9,7 +9,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        env_prefix="",  # No prefix, use exact names
+    )
 
     # Environment
     environment: str = "development"
@@ -44,6 +48,10 @@ class Settings(BaseSettings):
     # Webhooks
     webhook_url: str | None = None
     webhook_secret: str | None = None
+
+    # Authentication
+    auth_disabled: bool = False  # Set to True to disable auth (development only)
+    bootstrap_api_key: str | None = None  # Initial admin API key for bootstrapping
 
 
 settings = Settings()

@@ -59,3 +59,11 @@ class DependencyType(StrEnum):
     CONSUMES = "consumes"  # Direct data consumption (SELECT FROM)
     REFERENCES = "references"  # Foreign key or reference
     TRANSFORMS = "transforms"  # Data transformation (dbt model)
+
+
+class APIKeyScope(StrEnum):
+    """API key permission scopes."""
+
+    READ = "read"  # GET endpoints, list/view operations
+    WRITE = "write"  # POST/PUT/PATCH, create/update operations
+    ADMIN = "admin"  # DELETE, API key management, team management

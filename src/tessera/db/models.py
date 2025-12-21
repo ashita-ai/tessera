@@ -10,6 +10,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from tessera.models.enums import (
     AcknowledgmentResponseType,
+    APIKeyScope,
     ChangeType,
     CompatibilityMode,
     ContractStatus,
@@ -218,3 +219,26 @@ class AuditEventDB(Base):
     actor_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class APIKeyDB(Base):
+    """API key database model."""
+
+    __tablename__ = "api_keys"
+    __table_args__ = _table_args("core")
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    key_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    key_prefix: Mapped[str] = mapped_column(String(12), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    team_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey(_fk_ref("teams", "core")), nullable=False
+    )
+    scopes: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Relationships
+    team: Mapped["TeamDB"] = relationship()

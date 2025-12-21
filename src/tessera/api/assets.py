@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tessera.api.auth import Auth, OptionalAuth, RequireWrite
 from tessera.api.pagination import PaginationParams, paginate, pagination_params
 from tessera.db import (
     AssetDB,
@@ -27,7 +28,7 @@ from tessera.models import (
     DependencyCreate,
     Proposal,
 )
-from tessera.models.enums import ContractStatus, RegistrationStatus
+from tessera.models.enums import APIKeyScope, ContractStatus, RegistrationStatus
 from tessera.services import (
     check_compatibility,
     diff_schemas,
@@ -42,9 +43,14 @@ router = APIRouter()
 @router.post("", response_model=Asset, status_code=201)
 async def create_asset(
     asset: AssetCreate,
+    auth: Auth,
+    _: None = RequireWrite,
     session: AsyncSession = Depends(get_session),
 ) -> AssetDB:
-    """Create a new asset."""
+    """Create a new asset.
+
+    Requires write scope.
+    """
     # Validate owner team exists
     result = await session.execute(select(TeamDB).where(TeamDB.id == asset.owner_team_id))
     if not result.scalar_one_or_none():
@@ -145,9 +151,14 @@ async def get_asset(
 async def update_asset(
     asset_id: UUID,
     update: AssetUpdate,
+    auth: Auth,
+    _: None = RequireWrite,
     session: AsyncSession = Depends(get_session),
 ) -> AssetDB:
-    """Update an asset."""
+    """Update an asset.
+
+    Requires write scope.
+    """
     result = await session.execute(select(AssetDB).where(AssetDB.id == asset_id))
     asset = result.scalar_one_or_none()
     if not asset:
@@ -169,11 +180,14 @@ async def update_asset(
 async def create_dependency(
     asset_id: UUID,
     dependency: DependencyCreate,
+    auth: Auth,
+    _: None = RequireWrite,
     session: AsyncSession = Depends(get_session),
 ) -> AssetDependencyDB:
     """Register an upstream dependency for an asset.
 
     Creates a relationship indicating that this asset depends on another asset.
+    Requires write scope.
     """
     # Verify the dependent asset exists
     result = await session.execute(select(AssetDB).where(AssetDB.id == asset_id))
@@ -233,9 +247,14 @@ async def list_dependencies(
 async def delete_dependency(
     asset_id: UUID,
     dependency_id: UUID,
+    auth: Auth,
+    _: None = RequireWrite,
     session: AsyncSession = Depends(get_session),
 ) -> None:
-    """Remove an upstream dependency."""
+    """Remove an upstream dependency.
+
+    Requires write scope.
+    """
     result = await session.execute(
         select(AssetDependencyDB)
         .where(AssetDependencyDB.id == dependency_id)
@@ -253,11 +272,15 @@ async def delete_dependency(
 async def create_contract(
     asset_id: UUID,
     contract: ContractCreate,
+    auth: Auth,
     published_by: UUID = Query(..., description="Team ID of the publisher"),
     force: bool = Query(False, description="Force publish even if breaking (creates audit trail)"),
+    _: None = RequireWrite,
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """Publish a new contract for an asset.
+
+    Requires write scope.
 
     Behavior:
     - If no active contract exists: auto-publish (first contract)
