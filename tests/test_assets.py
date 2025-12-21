@@ -377,7 +377,9 @@ class TestAssetDependencies:
             json={"depends_on_asset_id": asset_id, "dependency_type": "transforms"},
         )
         assert resp.status_code == 400
-        assert "cannot depend on itself" in resp.json()["detail"]
+        data = resp.json()
+        error_msg = data.get("detail") or data.get("error", {}).get("message", "")
+        assert "cannot depend on itself" in error_msg
 
     async def test_duplicate_dependency_fails(self, client: AsyncClient):
         """Duplicate dependencies should fail."""
@@ -404,7 +406,9 @@ class TestAssetDependencies:
             json={"depends_on_asset_id": upstream_id, "dependency_type": "transforms"},
         )
         assert resp.status_code == 400
-        assert "already exists" in resp.json()["detail"]
+        data = resp.json()
+        error_msg = data.get("detail") or data.get("error", {}).get("message", "")
+        assert "already exists" in error_msg
 
     async def test_dependency_asset_not_found(self, client: AsyncClient):
         """Dependency on nonexistent asset should fail."""

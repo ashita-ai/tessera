@@ -436,6 +436,122 @@ async def list_asset_contracts(
     return list(result.scalars().all())
 
 
+@router.get("/{asset_id}/contracts/history")
+async def get_contract_history(
+    asset_id: UUID,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Get the complete contract history for an asset with change summaries.
+
+    Returns all versions ordered by publication date with change type annotations.
+    """
+    # Verify asset exists
+    result = await session.execute(select(AssetDB).where(AssetDB.id == asset_id))
+    asset = result.scalar_one_or_none()
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    # Get all contracts ordered by published_at
+    result = await session.execute(
+        select(ContractDB)
+        .where(ContractDB.asset_id == asset_id)
+        .order_by(ContractDB.published_at.desc())
+    )
+    contracts = list(result.scalars().all())
+
+    # Build history with change analysis
+    history = []
+    for i, contract in enumerate(contracts):
+        entry = {
+            "id": str(contract.id),
+            "version": contract.version,
+            "status": str(contract.status.value),
+            "published_at": contract.published_at.isoformat(),
+            "published_by": str(contract.published_by),
+            "compatibility_mode": str(contract.compatibility_mode.value),
+        }
+
+        # Compare with next (older) contract if exists
+        if i < len(contracts) - 1:
+            older_contract = contracts[i + 1]
+            diff_result = diff_schemas(older_contract.schema_def, contract.schema_def)
+            breaking = diff_result.breaking_for_mode(older_contract.compatibility_mode)
+            entry["change_type"] = str(diff_result.change_type.value)
+            entry["breaking_changes_count"] = len(breaking)
+        else:
+            # First contract
+            entry["change_type"] = "initial"
+            entry["breaking_changes_count"] = 0
+
+        history.append(entry)
+
+    return {
+        "asset_id": str(asset_id),
+        "asset_fqn": asset.fqn,
+        "contracts": history,
+    }
+
+
+@router.get("/{asset_id}/contracts/diff")
+async def diff_contract_versions(
+    asset_id: UUID,
+    from_version: str = Query(..., description="Source version to compare from"),
+    to_version: str = Query(..., description="Target version to compare to"),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Compare two contract versions for an asset.
+
+    Returns the diff between from_version and to_version.
+    """
+    # Verify asset exists
+    result = await session.execute(select(AssetDB).where(AssetDB.id == asset_id))
+    asset = result.scalar_one_or_none()
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    # Get the from_version contract
+    result = await session.execute(
+        select(ContractDB)
+        .where(ContractDB.asset_id == asset_id)
+        .where(ContractDB.version == from_version)
+    )
+    from_contract = result.scalar_one_or_none()
+    if not from_contract:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Contract version '{from_version}' not found for this asset",
+        )
+
+    # Get the to_version contract
+    result = await session.execute(
+        select(ContractDB)
+        .where(ContractDB.asset_id == asset_id)
+        .where(ContractDB.version == to_version)
+    )
+    to_contract = result.scalar_one_or_none()
+    if not to_contract:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Contract version '{to_version}' not found for this asset",
+        )
+
+    # Perform diff
+    diff_result = diff_schemas(from_contract.schema_def, to_contract.schema_def)
+    breaking = diff_result.breaking_for_mode(from_contract.compatibility_mode)
+
+    return {
+        "asset_id": str(asset_id),
+        "asset_fqn": asset.fqn,
+        "from_version": from_version,
+        "to_version": to_version,
+        "change_type": str(diff_result.change_type.value),
+        "is_compatible": len(breaking) == 0,
+        "breaking_changes": [bc.to_dict() for bc in breaking],
+        "all_changes": [c.to_dict() for c in diff_result.changes],
+        "compatibility_mode": str(from_contract.compatibility_mode.value),
+    }
+
+
 @router.post("/{asset_id}/impact")
 async def analyze_impact(
     asset_id: UUID,

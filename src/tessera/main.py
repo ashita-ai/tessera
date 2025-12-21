@@ -5,9 +5,18 @@ from typing import AsyncGenerator
 
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import ValidationError
 from sqlalchemy import text
+from starlette.exceptions import HTTPException
 
 from tessera.api import assets, contracts, proposals, registrations, schemas, sync, teams
+from tessera.api.errors import (
+    APIError,
+    RequestIDMiddleware,
+    api_error_handler,
+    http_exception_handler,
+    validation_exception_handler,
+)
 from tessera.config import settings
 from tessera.db import init_db
 from tessera.db.database import async_session
@@ -27,6 +36,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Request ID middleware (must be added first to wrap all other middleware)
+app.add_middleware(RequestIDMiddleware)
+
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
@@ -35,6 +47,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Exception handlers
+app.add_exception_handler(APIError, api_error_handler)
+app.add_exception_handler(HTTPException, http_exception_handler)
+app.add_exception_handler(ValidationError, validation_exception_handler)
 
 # API v1 router
 api_v1 = APIRouter(prefix="/api/v1")
