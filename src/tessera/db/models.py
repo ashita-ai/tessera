@@ -67,7 +67,9 @@ class ContractDB(Base):
     __tablename__ = "contracts"
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
-    asset_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("assets.id"), nullable=False)
+    asset_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("assets.id"), nullable=False, index=True
+    )
     version: Mapped[str] = mapped_column(String(50), nullable=False)
     schema_def: Mapped[dict[str, Any]] = mapped_column("schema", JSON, nullable=False)
     compatibility_mode: Mapped[CompatibilityMode] = mapped_column(
@@ -75,7 +77,7 @@ class ContractDB(Base):
     )
     guarantees: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     status: Mapped[ContractStatus] = mapped_column(
-        Enum(ContractStatus), default=ContractStatus.ACTIVE
+        Enum(ContractStatus), default=ContractStatus.ACTIVE, index=True
     )
     published_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, index=True
@@ -118,12 +120,14 @@ class ProposalDB(Base):
     __tablename__ = "proposals"
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
-    asset_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("assets.id"), nullable=False)
+    asset_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("assets.id"), nullable=False, index=True
+    )
     proposed_schema: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     change_type: Mapped[ChangeType] = mapped_column(Enum(ChangeType), nullable=False)
     breaking_changes: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
     status: Mapped[ProposalStatus] = mapped_column(
-        Enum(ProposalStatus), default=ProposalStatus.PENDING
+        Enum(ProposalStatus), default=ProposalStatus.PENDING, index=True
     )
     proposed_by: Mapped[UUID] = mapped_column(Uuid, nullable=False)
     proposed_at: Mapped[datetime] = mapped_column(
@@ -142,8 +146,12 @@ class AcknowledgmentDB(Base):
     __tablename__ = "acknowledgments"
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
-    proposal_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("proposals.id"), nullable=False)
-    consumer_team_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("teams.id"), nullable=False)
+    proposal_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("proposals.id"), nullable=False, index=True
+    )
+    consumer_team_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("teams.id"), nullable=False, index=True
+    )
     response: Mapped[AcknowledgmentResponseType] = mapped_column(
         Enum(AcknowledgmentResponseType), nullable=False
     )
@@ -163,8 +171,12 @@ class AssetDependencyDB(Base):
     __tablename__ = "dependencies"
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
-    dependent_asset_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("assets.id"), nullable=False)
-    dependency_asset_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("assets.id"), nullable=False)
+    dependent_asset_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("assets.id"), nullable=False, index=True
+    )
+    dependency_asset_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("assets.id"), nullable=False, index=True
+    )
     dependency_type: Mapped[DependencyType] = mapped_column(
         Enum(DependencyType), default=DependencyType.CONSUMES
     )
@@ -177,8 +189,8 @@ class AuditEventDB(Base):
     __tablename__ = "audit_events"
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
-    entity_type: Mapped[str] = mapped_column(String(100), nullable=False)
-    entity_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    entity_type: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    entity_id: Mapped[UUID] = mapped_column(Uuid, nullable=False, index=True)
     action: Mapped[str] = mapped_column(String(100), nullable=False)
     actor_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
@@ -222,14 +234,10 @@ class WebhookDeliveryDB(Base):
         Enum(WebhookDeliveryStatus), default=WebhookDeliveryStatus.PENDING, index=True
     )
     attempts: Mapped[int] = mapped_column(default=0)
-    last_attempt_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, index=True
     )
-    delivered_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

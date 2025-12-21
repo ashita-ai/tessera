@@ -102,9 +102,12 @@ async def get_delivery(
     )
     delivery = result.scalar_one_or_none()
     if not delivery:
-        from tessera.api.errors import NotFoundError
+        from tessera.api.errors import ErrorCode, NotFoundError
 
-        raise NotFoundError("Webhook delivery not found")
+        raise NotFoundError(
+            code=ErrorCode.NOT_FOUND,
+            message=f"Webhook delivery with ID '{delivery_id}' not found",
+        )
 
     return WebhookDeliveryResponse(
         id=delivery.id,

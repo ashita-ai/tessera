@@ -101,7 +101,7 @@ class TestProposals:
         resp = await client.get("/api/v1/proposals")
         assert resp.status_code == 200
         data = resp.json()
-        assert "proposals" in data
+        assert "results" in data
         assert "total" in data
 
         # Filter by status
