@@ -5,10 +5,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.api.errors import ErrorCode, NotFoundError
+from tessera.api.pagination import PaginationParams, paginate, pagination_params
 from tessera.db import ContractDB, RegistrationDB, get_session
 from tessera.models import Contract, Registration
 from tessera.models.enums import CompatibilityMode, ContractStatus
@@ -42,8 +43,7 @@ async def list_contracts(
     asset_id: UUID | None = Query(None, description="Filter by asset ID"),
     status: ContractStatus | None = Query(None, description="Filter by status"),
     version: str | None = Query(None, description="Filter by version pattern"),
-    limit: int = Query(50, ge=1, le=100, description="Results per page"),
-    offset: int = Query(0, ge=0, description="Pagination offset"),
+    params: PaginationParams = Depends(pagination_params),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """List all contracts with filtering and pagination."""
@@ -54,24 +54,9 @@ async def list_contracts(
         query = query.where(ContractDB.status == status)
     if version:
         query = query.where(ContractDB.version.ilike(f"%{version}%"))
-
-    # Get total count
-    count_query = select(func.count()).select_from(query.subquery())
-    total_result = await session.execute(count_query)
-    total = total_result.scalar() or 0
-
-    # Apply pagination and ordering
     query = query.order_by(ContractDB.published_at.desc())
-    query = query.limit(limit).offset(offset)
-    result = await session.execute(query)
-    contracts = result.scalars().all()
 
-    return {
-        "results": [Contract.model_validate(c).model_dump() for c in contracts],
-        "total": total,
-        "limit": limit,
-        "offset": offset,
-    }
+    return await paginate(session, query, params, response_model=Contract)
 
 
 @router.post("/compare", response_model=ContractCompareResponse)

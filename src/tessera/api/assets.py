@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tessera.api.pagination import PaginationParams, paginate, pagination_params
 from tessera.db import (
     AssetDB,
     AssetDependencyDB,
@@ -64,8 +65,7 @@ async def create_asset(
 async def list_assets(
     owner: UUID | None = Query(None, description="Filter by owner team ID"),
     fqn: str | None = Query(None, description="Filter by FQN pattern (case-insensitive)"),
-    limit: int = Query(50, ge=1, le=100, description="Results per page"),
-    offset: int = Query(0, ge=0, description="Pagination offset"),
+    params: PaginationParams = Depends(pagination_params),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """List all assets with filtering and pagination."""
@@ -74,24 +74,9 @@ async def list_assets(
         query = query.where(AssetDB.owner_team_id == owner)
     if fqn:
         query = query.where(AssetDB.fqn.ilike(f"%{fqn}%"))
-
-    # Get total count
-    count_query = select(func.count()).select_from(query.subquery())
-    total_result = await session.execute(count_query)
-    total = total_result.scalar() or 0
-
-    # Apply pagination and ordering
     query = query.order_by(AssetDB.fqn)
-    query = query.limit(limit).offset(offset)
-    result = await session.execute(query)
-    assets = result.scalars().all()
 
-    return {
-        "results": [Asset.model_validate(a).model_dump() for a in assets],
-        "total": total,
-        "limit": limit,
-        "offset": offset,
-    }
+    return await paginate(session, query, params, response_model=Asset)
 
 
 @router.get("/search")

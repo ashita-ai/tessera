@@ -475,6 +475,77 @@ async def sync_from_dbt(
     }
 
 
+async def _check_dbt_node_impact(
+    node_id: str,
+    node: dict[str, Any],
+    session: AsyncSession,
+) -> DbtImpactResult:
+    """Check impact of a single dbt node against its registered contract.
+
+    Works for both nodes (models/seeds/snapshots) and sources.
+    """
+    # Build FQN from dbt metadata
+    database = node.get("database", "")
+    schema_name = node.get("schema", "")
+    name = node.get("name", "")
+    fqn = f"{database}.{schema_name}.{name}".lower()
+
+    # Look up existing asset and active contract
+    asset_result = await session.execute(select(AssetDB).where(AssetDB.fqn == fqn))
+    existing_asset = asset_result.scalar_one_or_none()
+
+    if not existing_asset:
+        return DbtImpactResult(
+            fqn=fqn,
+            node_id=node_id,
+            has_contract=False,
+            safe_to_publish=True,
+            change_type=None,
+            breaking_changes=[],
+        )
+
+    # Get active contract for this asset
+    contract_result = await session.execute(
+        select(ContractDB).where(
+            ContractDB.asset_id == existing_asset.id,
+            ContractDB.status == ContractStatus.ACTIVE,
+        )
+    )
+    existing_contract = contract_result.scalar_one_or_none()
+
+    if not existing_contract:
+        return DbtImpactResult(
+            fqn=fqn,
+            node_id=node_id,
+            has_contract=False,
+            safe_to_publish=True,
+            change_type=None,
+            breaking_changes=[],
+        )
+
+    # Convert dbt columns to JSON Schema and compare
+    columns = node.get("columns", {})
+    proposed_schema = dbt_columns_to_json_schema(columns)
+    existing_schema = existing_contract.schema_def
+
+    # Use schema_diff to detect changes
+    diff_result = diff_schemas(existing_schema, proposed_schema)
+    is_compatible, breaking_changes_list = check_compatibility(
+        existing_schema,
+        proposed_schema,
+        existing_contract.compatibility_mode,
+    )
+
+    return DbtImpactResult(
+        fqn=fqn,
+        node_id=node_id,
+        has_contract=True,
+        safe_to_publish=is_compatible,
+        change_type=diff_result.change_type.value,
+        breaking_changes=[bc.to_dict() for bc in breaking_changes_list],
+    )
+
+
 @router.post("/dbt/impact", response_model=DbtImpactResponse)
 async def check_dbt_impact(
     request: DbtManifestRequest,
@@ -497,148 +568,12 @@ async def check_dbt_impact(
         resource_type = node.get("resource_type")
         if resource_type not in ("model", "seed", "snapshot"):
             continue
+        results.append(await _check_dbt_node_impact(node_id, node, session))
 
-        # Build FQN from dbt metadata
-        database = node.get("database", "")
-        schema_name = node.get("schema", "")
-        name = node.get("name", "")
-        fqn = f"{database}.{schema_name}.{name}".lower()
-
-        # Look up existing asset and active contract
-        asset_result = await session.execute(select(AssetDB).where(AssetDB.fqn == fqn))
-        existing_asset = asset_result.scalar_one_or_none()
-
-        if not existing_asset:
-            # No asset registered yet - safe to create
-            results.append(
-                DbtImpactResult(
-                    fqn=fqn,
-                    node_id=node_id,
-                    has_contract=False,
-                    safe_to_publish=True,
-                    change_type=None,
-                    breaking_changes=[],
-                )
-            )
-            continue
-
-        # Get active contract for this asset
-        contract_result = await session.execute(
-            select(ContractDB).where(
-                ContractDB.asset_id == existing_asset.id,
-                ContractDB.status == ContractStatus.ACTIVE,
-            )
-        )
-        existing_contract = contract_result.scalar_one_or_none()
-
-        if not existing_contract:
-            # Asset exists but no active contract
-            results.append(
-                DbtImpactResult(
-                    fqn=fqn,
-                    node_id=node_id,
-                    has_contract=False,
-                    safe_to_publish=True,
-                    change_type=None,
-                    breaking_changes=[],
-                )
-            )
-            continue
-
-        # Convert dbt columns to JSON Schema and compare
-        columns = node.get("columns", {})
-        proposed_schema = dbt_columns_to_json_schema(columns)
-        existing_schema = existing_contract.schema_def
-
-        # Use schema_diff to detect changes
-        diff_result = diff_schemas(existing_schema, proposed_schema)
-        is_compatible, breaking_changes_list = check_compatibility(
-            existing_schema,
-            proposed_schema,
-            existing_contract.compatibility_mode,
-        )
-
-        breaking_changes = [bc.to_dict() for bc in breaking_changes_list]
-
-        results.append(
-            DbtImpactResult(
-                fqn=fqn,
-                node_id=node_id,
-                has_contract=True,
-                safe_to_publish=is_compatible,
-                change_type=diff_result.change_type.value,
-                breaking_changes=breaking_changes,
-            )
-        )
-
-    # Process sources similarly
+    # Process sources
     sources = manifest.get("sources", {})
     for source_id, source in sources.items():
-        database = source.get("database", "")
-        schema_name = source.get("schema", "")
-        name = source.get("name", "")
-        fqn = f"{database}.{schema_name}.{name}".lower()
-
-        asset_result = await session.execute(select(AssetDB).where(AssetDB.fqn == fqn))
-        existing_asset = asset_result.scalar_one_or_none()
-
-        if not existing_asset:
-            results.append(
-                DbtImpactResult(
-                    fqn=fqn,
-                    node_id=source_id,
-                    has_contract=False,
-                    safe_to_publish=True,
-                    change_type=None,
-                    breaking_changes=[],
-                )
-            )
-            continue
-
-        contract_result = await session.execute(
-            select(ContractDB).where(
-                ContractDB.asset_id == existing_asset.id,
-                ContractDB.status == ContractStatus.ACTIVE,
-            )
-        )
-        existing_contract = contract_result.scalar_one_or_none()
-
-        if not existing_contract:
-            results.append(
-                DbtImpactResult(
-                    fqn=fqn,
-                    node_id=source_id,
-                    has_contract=False,
-                    safe_to_publish=True,
-                    change_type=None,
-                    breaking_changes=[],
-                )
-            )
-            continue
-
-        columns = source.get("columns", {})
-        proposed_schema = dbt_columns_to_json_schema(columns)
-        existing_schema = existing_contract.schema_def
-
-        diff_result = diff_schemas(existing_schema, proposed_schema)
-        is_compatible, breaking_changes_list = check_compatibility(
-            existing_schema,
-            proposed_schema,
-            existing_contract.compatibility_mode,
-        )
-
-        breaking_changes = [bc.to_dict() for bc in breaking_changes_list]
-
-        results.append(
-            DbtImpactResult(
-                fqn=fqn,
-                node_id=source_id,
-                has_contract=True,
-                safe_to_publish=is_compatible,
-                change_type=diff_result.change_type.value,
-                breaking_changes=breaking_changes,
-            )
-        )
+        results.append(await _check_dbt_node_impact(source_id, source, session))
 
     models_with_contracts = sum(1 for r in results if r.has_contract)
     breaking_changes_count = sum(1 for r in results if not r.safe_to_publish)
