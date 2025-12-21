@@ -53,5 +53,9 @@ class Settings(BaseSettings):
     auth_disabled: bool = False  # Set to True to disable auth (development only)
     bootstrap_api_key: str | None = None  # Initial admin API key for bootstrapping
 
+    # Redis cache (optional)
+    redis_url: str | None = None  # e.g., redis://localhost:6379/0
+    cache_ttl: int = 300  # Default cache TTL in seconds (5 minutes)
+
 
 settings = Settings()

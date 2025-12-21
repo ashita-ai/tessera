@@ -76,8 +76,6 @@ async def get_auth_context(
 
         from sqlalchemy import select
 
-        from tessera.db.models import TeamDB
-
         result = await session.execute(select(TeamDB).limit(1))
         team = result.scalar_one_or_none()
 

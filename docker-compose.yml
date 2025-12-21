@@ -16,17 +16,34 @@ services:
       timeout: 5s
       retries: 5
 
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    command: redis-server --appendonly yes
+
   api:
     build: .
     ports:
       - "8000:8000"
     environment:
       DATABASE_URL: postgresql+asyncpg://tessera:tessera@db:5432/tessera
+      REDIS_URL: redis://redis:6379/0
+      BOOTSTRAP_API_KEY: tessera-dev-key
       API_HOST: "0.0.0.0"
       API_PORT: "8000"
       # GIT_SYNC_PATH: /app/contracts  # Optional: Set to enable git sync endpoints
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
@@ -37,3 +54,4 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:

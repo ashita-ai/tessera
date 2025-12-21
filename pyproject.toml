@@ -19,6 +19,7 @@ dependencies = [
     "jsonschema>=4.20.0",
     "typer>=0.15.0",
     "rich>=13.0.0",
+    "redis>=5.0.0",
 ]
 
 [project.scripts]
@@ -31,6 +32,9 @@ dev = [
     "pytest-cov>=6.0.0",
     "ruff>=0.8.0",
     "mypy>=1.13.0",
+]
+bigquery = [
+    "google-cloud-bigquery>=3.25.0",
 ]
 
 [build-system]
@@ -59,4 +63,5 @@ dev = [
     "pre-commit>=4.5.1",
     "types-jsonschema>=4.25.1.20251009",
     "types-pyyaml>=6.0.12.20250915",
+    "types-redis>=4.6.0",
 ]
