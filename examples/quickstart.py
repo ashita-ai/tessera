@@ -8,10 +8,15 @@ This script is self-contained - it creates all the data it needs.
 Run with: uv run python examples/quickstart.py
 """
 
+import os
 import httpx
 
 BASE_URL = "http://localhost:8000/api/v1"
-CLIENT = httpx.Client(timeout=30.0)
+API_KEY = os.environ.get("TESSERA_API_KEY", "tessera-dev-key")
+CLIENT = httpx.Client(
+    timeout=30.0,
+    headers={"Authorization": f"Bearer {API_KEY}"}
+)
 
 
 def setup():
@@ -24,7 +29,8 @@ def setup():
         producer = resp.json()
     else:
         # Team might already exist, try to find it
-        teams = CLIENT.get(f"{BASE_URL}/teams").json()
+        teams_resp = CLIENT.get(f"{BASE_URL}/teams").json()
+        teams = teams_resp.get("results", teams_resp) if isinstance(teams_resp, dict) else teams_resp
         producer = next((t for t in teams if t["name"] == "data-platform"), None)
         if not producer:
             raise Exception("Could not create or find data-platform team")
@@ -34,7 +40,8 @@ def setup():
     if resp.status_code == 201:
         consumer = resp.json()
     else:
-        teams = CLIENT.get(f"{BASE_URL}/teams").json()
+        teams_resp = CLIENT.get(f"{BASE_URL}/teams").json()
+        teams = teams_resp.get("results", teams_resp) if isinstance(teams_resp, dict) else teams_resp
         consumer = next((t for t in teams if t["name"] == "ml-team"), None)
         if not consumer:
             raise Exception("Could not create or find ml-team")
@@ -49,7 +56,8 @@ def setup():
         asset = resp.json()
     else:
         # Asset might already exist
-        assets = CLIENT.get(f"{BASE_URL}/assets").json()
+        assets_resp = CLIENT.get(f"{BASE_URL}/assets").json()
+        assets = assets_resp.get("results", assets_resp) if isinstance(assets_resp, dict) else assets_resp
         asset = next((a for a in assets if a["fqn"] == "warehouse.analytics.dim_customers"), None)
         if not asset:
             raise Exception("Could not create or find asset")
