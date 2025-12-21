@@ -67,3 +67,11 @@ class APIKeyScope(StrEnum):
     READ = "read"  # GET endpoints, list/view operations
     WRITE = "write"  # POST/PUT/PATCH, create/update operations
     ADMIN = "admin"  # DELETE, API key management, team management
+
+
+class WebhookDeliveryStatus(StrEnum):
+    """Status of a webhook delivery attempt."""
+
+    PENDING = "pending"  # Queued for delivery
+    DELIVERED = "delivered"  # Successfully delivered (2xx response)
+    FAILED = "failed"  # Failed after all retries
