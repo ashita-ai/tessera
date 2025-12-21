@@ -1,12 +1,16 @@
 """Contract models."""
 
+import json
 from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from tessera.models.enums import CompatibilityMode, ContractStatus
+
+# Maximum schema size in bytes (1MB)
+MAX_SCHEMA_SIZE_BYTES = 1_000_000
 
 
 class Guarantees(BaseModel):
@@ -33,10 +37,29 @@ class Guarantees(BaseModel):
 class ContractBase(BaseModel):
     """Base contract fields."""
 
-    version: str = Field(..., pattern=r"^\d+\.\d+\.\d+$", description="Semantic version")
+    version: str = Field(
+        ...,
+        min_length=5,  # Minimum: "0.0.0"
+        max_length=50,
+        pattern=r"^\d+\.\d+\.\d+(-[a-zA-Z0-9.-]+)?(\+[a-zA-Z0-9.-]+)?$",
+        description="Semantic version (e.g., '1.0.0', '2.1.0-beta.1')",
+    )
     schema_def: dict[str, Any] = Field(..., alias="schema", description="JSON Schema definition")
     compatibility_mode: CompatibilityMode = CompatibilityMode.BACKWARD
     guarantees: Guarantees | None = None
+
+    @field_validator("schema_def")
+    @classmethod
+    def validate_schema_size(cls, v: dict[str, Any]) -> dict[str, Any]:
+        """Validate schema size to prevent DoS attacks."""
+        serialized = json.dumps(v, separators=(",", ":"))
+        if len(serialized) > MAX_SCHEMA_SIZE_BYTES:
+            raise ValueError(
+                f"Schema too large. Maximum size: {MAX_SCHEMA_SIZE_BYTES:,} bytes "
+                f"({MAX_SCHEMA_SIZE_BYTES // 1024 // 1024}MB). "
+                f"Current size: {len(serialized):,} bytes."
+            )
+        return v
 
 
 class ContractCreate(ContractBase):
