@@ -9,7 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.api.errors import ErrorCode, NotFoundError
-from tessera.db import AssetDB, ContractDB, RegistrationDB, get_session
+from tessera.db import ContractDB, RegistrationDB, get_session
 from tessera.models import Contract, Registration
 from tessera.models.enums import CompatibilityMode, ContractStatus
 from tessera.services.schema_diff import diff_schemas
@@ -164,7 +164,7 @@ async def list_contract_registrations(
             details={"contract_id": str(contract_id)},
         )
 
-    result = await session.execute(
+    reg_result = await session.execute(
         select(RegistrationDB).where(RegistrationDB.contract_id == contract_id)
     )
-    return list(result.scalars().all())
+    return list(reg_result.scalars().all())

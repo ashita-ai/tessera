@@ -244,23 +244,23 @@ class SchemaDiff:
         """Compare required fields."""
         req_path = f"{path}.required" if path else "required"
 
-        for field in new_req - old_req:
+        for field_name in new_req - old_req:
             self.changes.append(
                 BreakingChange(
                     kind=ChangeKind.REQUIRED_ADDED,
                     path=req_path,
-                    message=f"Field '{field}' is now required",
+                    message=f"Field '{field_name}' is now required",
                     old_value=list(old_req),
                     new_value=list(new_req),
                 )
             )
 
-        for field in old_req - new_req:
+        for field_name in old_req - new_req:
             self.changes.append(
                 BreakingChange(
                     kind=ChangeKind.REQUIRED_REMOVED,
                     path=req_path,
-                    message=f"Field '{field}' is no longer required",
+                    message=f"Field '{field_name}' is no longer required",
                     old_value=list(old_req),
                     new_value=list(new_req),
                 )
@@ -350,8 +350,8 @@ class SchemaDiff:
                         new_value=new_val,
                     )
                 )
-            # Constraint changed
-            elif constraint in relaxing_increase:
+            # Constraint changed (both old_val and new_val are not None at this point)
+            elif constraint in relaxing_increase and old_val is not None and new_val is not None:
                 if new_val > old_val:
                     kind = ChangeKind.CONSTRAINT_RELAXED
                     msg = f"Constraint '{constraint}' relaxed from {old_val} to {new_val}"
@@ -359,10 +359,15 @@ class SchemaDiff:
                     kind = ChangeKind.CONSTRAINT_TIGHTENED
                     msg = f"Constraint '{constraint}' tightened from {old_val} to {new_val}"
                 self.changes.append(
-                    BreakingChange(kind=kind, path=constraint_path, message=msg,
-                                   old_value=old_val, new_value=new_val)
+                    BreakingChange(
+                        kind=kind,
+                        path=constraint_path,
+                        message=msg,
+                        old_value=old_val,
+                        new_value=new_val,
+                    )
                 )
-            elif constraint in relaxing_decrease:
+            elif constraint in relaxing_decrease and old_val is not None and new_val is not None:
                 if new_val < old_val:
                     kind = ChangeKind.CONSTRAINT_RELAXED
                     msg = f"Constraint '{constraint}' relaxed from {old_val} to {new_val}"
@@ -370,8 +375,13 @@ class SchemaDiff:
                     kind = ChangeKind.CONSTRAINT_TIGHTENED
                     msg = f"Constraint '{constraint}' tightened from {old_val} to {new_val}"
                 self.changes.append(
-                    BreakingChange(kind=kind, path=constraint_path, message=msg,
-                                   old_value=old_val, new_value=new_val)
+                    BreakingChange(
+                        kind=kind,
+                        path=constraint_path,
+                        message=msg,
+                        old_value=old_val,
+                        new_value=new_val,
+                    )
                 )
             elif constraint == "pattern":
                 # Pattern changes are always considered tightening (conservative)

@@ -2,6 +2,7 @@
 
 import os
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import JSON, DateTime, Enum, ForeignKey, String, Text, Uuid
@@ -28,7 +29,7 @@ _DATABASE_URL = os.environ.get("DATABASE_URL", "")
 _USE_SQLITE = _DATABASE_URL.startswith("sqlite")
 
 
-def _table_args(schema: str) -> dict:
+def _table_args(schema: str) -> dict[str, Any]:
     """Return table args with schema for PostgreSQL, empty for SQLite."""
     if _USE_SQLITE:
         return {}
@@ -56,8 +57,8 @@ class TeamDB(Base):
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
     name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
-    metadata_: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     # Relationships
     assets: Mapped[list["AssetDB"]] = relationship(back_populates="owner_team")
@@ -74,8 +75,8 @@ class AssetDB(Base):
     owner_team_id: Mapped[UUID] = mapped_column(
         Uuid, ForeignKey(_fk_ref("teams", "core")), nullable=False
     )
-    metadata_: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     # Relationships
     owner_team: Mapped["TeamDB"] = relationship(back_populates="assets")
@@ -94,15 +95,15 @@ class ContractDB(Base):
         Uuid, ForeignKey(_fk_ref("assets", "core")), nullable=False
     )
     version: Mapped[str] = mapped_column(String(50), nullable=False)
-    schema_def: Mapped[dict] = mapped_column("schema", JSON, nullable=False)
+    schema_def: Mapped[dict[str, Any]] = mapped_column("schema", JSON, nullable=False)
     compatibility_mode: Mapped[CompatibilityMode] = mapped_column(
         Enum(CompatibilityMode), default=CompatibilityMode.BACKWARD
     )
-    guarantees: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    guarantees: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     status: Mapped[ContractStatus] = mapped_column(
         Enum(ContractStatus), default=ContractStatus.ACTIVE
     )
-    published_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     published_by: Mapped[UUID] = mapped_column(Uuid, nullable=False)
 
     # Relationships
@@ -127,8 +128,8 @@ class RegistrationDB(Base):
     status: Mapped[RegistrationStatus] = mapped_column(
         Enum(RegistrationStatus), default=RegistrationStatus.ACTIVE
     )
-    registered_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
-    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    registered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Relationships
     contract: Mapped["ContractDB"] = relationship(back_populates="registrations")
@@ -144,15 +145,15 @@ class ProposalDB(Base):
     asset_id: Mapped[UUID] = mapped_column(
         Uuid, ForeignKey(_fk_ref("assets", "core")), nullable=False
     )
-    proposed_schema: Mapped[dict] = mapped_column(JSON, nullable=False)
+    proposed_schema: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     change_type: Mapped[ChangeType] = mapped_column(Enum(ChangeType), nullable=False)
-    breaking_changes: Mapped[list] = mapped_column(JSON, default=list)
+    breaking_changes: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
     status: Mapped[ProposalStatus] = mapped_column(
         Enum(ProposalStatus), default=ProposalStatus.PENDING
     )
     proposed_by: Mapped[UUID] = mapped_column(Uuid, nullable=False)
-    proposed_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
-    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    proposed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Relationships
     asset: Mapped["AssetDB"] = relationship(back_populates="proposals")
@@ -175,8 +176,10 @@ class AcknowledgmentDB(Base):
     response: Mapped[AcknowledgmentResponseType] = mapped_column(
         Enum(AcknowledgmentResponseType), nullable=False
     )
-    migration_deadline: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    responded_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    migration_deadline: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    responded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Relationships
@@ -199,7 +202,7 @@ class AssetDependencyDB(Base):
     dependency_type: Mapped[DependencyType] = mapped_column(
         Enum(DependencyType), default=DependencyType.CONSUMES
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
 class AuditEventDB(Base):
@@ -213,5 +216,5 @@ class AuditEventDB(Base):
     entity_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
     action: Mapped[str] = mapped_column(String(100), nullable=False)
     actor_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
-    payload: Mapped[dict] = mapped_column(JSON, default=dict)
-    occurred_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)

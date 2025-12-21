@@ -90,7 +90,7 @@ class DuplicateError(APIError):
 class RequestIDMiddleware(BaseHTTPMiddleware):
     """Middleware that adds a unique request ID to each request."""
 
-    async def dispatch(self, request: Request, call_next):
+    async def dispatch(self, request: Request, call_next: Any) -> Any:
         request_id = request.headers.get("X-Request-ID", str(uuid4()))
         request.state.request_id = request_id
         response = await call_next(request)
@@ -111,17 +111,15 @@ def build_error_response(
     details: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a standardized error response."""
-    response = {
-        "error": {
-            "code": code,
-            "message": message,
-            "request_id": request_id,
-            "timestamp": datetime.now(UTC).isoformat(),
-        }
+    error_data: dict[str, Any] = {
+        "code": code,
+        "message": message,
+        "request_id": request_id,
+        "timestamp": datetime.now(UTC).isoformat(),
     }
     if details:
-        response["error"]["details"] = details
-    return response
+        error_data["details"] = details
+    return {"error": error_data}
 
 
 async def api_error_handler(request: Request, exc: APIError) -> JSONResponse:
@@ -171,9 +169,7 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
     )
 
 
-async def validation_exception_handler(
-    request: Request, exc: ValidationError
-) -> JSONResponse:
+async def validation_exception_handler(request: Request, exc: ValidationError) -> JSONResponse:
     """Handle Pydantic ValidationError with standardized format."""
     request_id = get_request_id(request)
 

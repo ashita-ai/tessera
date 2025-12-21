@@ -2,8 +2,7 @@
 
 from typing import Any
 
-import jsonschema
-from jsonschema import Draft7Validator, ValidationError
+from jsonschema import Draft7Validator
 
 
 class SchemaValidationError(Exception):

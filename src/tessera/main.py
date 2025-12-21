@@ -1,7 +1,7 @@
 """FastAPI application entry point."""
 
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -49,10 +49,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Exception handlers
-app.add_exception_handler(APIError, api_error_handler)
-app.add_exception_handler(HTTPException, http_exception_handler)
-app.add_exception_handler(ValidationError, validation_exception_handler)
+# Exception handlers (type: ignore needed for Starlette handler signatures)
+app.add_exception_handler(APIError, api_error_handler)  # type: ignore[arg-type]
+app.add_exception_handler(HTTPException, http_exception_handler)  # type: ignore[arg-type]
+app.add_exception_handler(ValidationError, validation_exception_handler)  # type: ignore[arg-type]
 app.add_exception_handler(Exception, generic_exception_handler)
 
 # API v1 router

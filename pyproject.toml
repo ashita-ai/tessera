@@ -50,4 +50,6 @@ testpaths = ["tests"]
 [dependency-groups]
 dev = [
     "aiosqlite>=0.22.0",
+    "types-jsonschema>=4.25.1.20251009",
+    "types-pyyaml>=6.0.12.20250915",
 ]

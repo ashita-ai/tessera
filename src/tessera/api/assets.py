@@ -26,7 +26,7 @@ from tessera.models import (
     DependencyCreate,
     Proposal,
 )
-from tessera.models.enums import ChangeType, ContractStatus, RegistrationStatus
+from tessera.models.enums import ContractStatus, RegistrationStatus
 from tessera.services import (
     check_compatibility,
     diff_schemas,
@@ -124,16 +124,16 @@ async def search_assets(
     # Build response with owner team names
     results = []
     for asset in assets:
-        team_result = await session.execute(
-            select(TeamDB).where(TeamDB.id == asset.owner_team_id)
-        )
+        team_result = await session.execute(select(TeamDB).where(TeamDB.id == asset.owner_team_id))
         team = team_result.scalar_one_or_none()
-        results.append({
-            "id": str(asset.id),
-            "fqn": asset.fqn,
-            "owner_team_id": str(asset.owner_team_id),
-            "owner_team_name": team.name if team else "Unknown",
-        })
+        results.append(
+            {
+                "id": str(asset.id),
+                "fqn": asset.fqn,
+                "owner_team_id": str(asset.owner_team_id),
+                "owner_team_name": team.name if team else "Unknown",
+            }
+        )
 
     return {
         "results": results,
@@ -234,14 +234,14 @@ async def list_dependencies(
     session: AsyncSession = Depends(get_session),
 ) -> list[AssetDependencyDB]:
     """List all upstream dependencies for an asset."""
-    result = await session.execute(select(AssetDB).where(AssetDB.id == asset_id))
-    if not result.scalar_one_or_none():
+    asset_result = await session.execute(select(AssetDB).where(AssetDB.id == asset_id))
+    if not asset_result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Asset not found")
 
-    result = await session.execute(
+    deps_result = await session.execute(
         select(AssetDependencyDB).where(AssetDependencyDB.dependent_asset_id == asset_id)
     )
-    return list(result.scalars().all())
+    return list(deps_result.scalars().all())
 
 
 @router.delete("/{asset_id}/dependencies/{dependency_id}", status_code=204)
@@ -283,14 +283,14 @@ async def create_contract(
     Returns either a Contract (if published) or a Proposal (if breaking).
     """
     # Verify asset exists
-    result = await session.execute(select(AssetDB).where(AssetDB.id == asset_id))
-    asset = result.scalar_one_or_none()
+    asset_result = await session.execute(select(AssetDB).where(AssetDB.id == asset_id))
+    asset = asset_result.scalar_one_or_none()
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found")
 
     # Verify publisher team exists
-    result = await session.execute(select(TeamDB).where(TeamDB.id == published_by))
-    if not result.scalar_one_or_none():
+    team_result = await session.execute(select(TeamDB).where(TeamDB.id == published_by))
+    if not team_result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Publisher team not found")
 
     # Validate schema is valid JSON Schema
@@ -306,33 +306,35 @@ async def create_contract(
         )
 
     # Get current active contract
-    result = await session.execute(
+    contract_result = await session.execute(
         select(ContractDB)
         .where(ContractDB.asset_id == asset_id)
         .where(ContractDB.status == ContractStatus.ACTIVE)
         .order_by(ContractDB.published_at.desc())
         .limit(1)
     )
-    current_contract = result.scalar_one_or_none()
+    current_contract = contract_result.scalar_one_or_none()
 
     # Helper to create and return the new contract
+    # Uses nested transaction (savepoint) to ensure atomicity of multi-step publish
     async def publish_contract() -> ContractDB:
-        db_contract = ContractDB(
-            asset_id=asset_id,
-            version=contract.version,
-            schema_def=contract.schema_def,
-            compatibility_mode=contract.compatibility_mode,
-            guarantees=contract.guarantees.model_dump() if contract.guarantees else None,
-            published_by=published_by,
-        )
-        session.add(db_contract)
+        async with session.begin_nested():
+            db_contract = ContractDB(
+                asset_id=asset_id,
+                version=contract.version,
+                schema_def=contract.schema_def,
+                compatibility_mode=contract.compatibility_mode,
+                guarantees=contract.guarantees.model_dump() if contract.guarantees else None,
+                published_by=published_by,
+            )
+            session.add(db_contract)
 
-        # Deprecate old contract if exists
-        if current_contract:
-            current_contract.status = ContractStatus.DEPRECATED
+            # Deprecate old contract if exists
+            if current_contract:
+                current_contract.status = ContractStatus.DEPRECATED
 
-        await session.flush()
-        await session.refresh(db_contract)
+            await session.flush()
+            await session.refresh(db_contract)
         return db_contract
 
     # No existing contract = first publish, auto-approve
@@ -446,23 +448,23 @@ async def get_contract_history(
     Returns all versions ordered by publication date with change type annotations.
     """
     # Verify asset exists
-    result = await session.execute(select(AssetDB).where(AssetDB.id == asset_id))
-    asset = result.scalar_one_or_none()
+    asset_result = await session.execute(select(AssetDB).where(AssetDB.id == asset_id))
+    asset = asset_result.scalar_one_or_none()
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found")
 
     # Get all contracts ordered by published_at
-    result = await session.execute(
+    contracts_result = await session.execute(
         select(ContractDB)
         .where(ContractDB.asset_id == asset_id)
         .order_by(ContractDB.published_at.desc())
     )
-    contracts = list(result.scalars().all())
+    contracts = list(contracts_result.scalars().all())
 
     # Build history with change analysis
-    history = []
+    history: list[dict[str, Any]] = []
     for i, contract in enumerate(contracts):
-        entry = {
+        entry: dict[str, Any] = {
             "id": str(contract.id),
             "version": contract.version,
             "status": str(contract.status.value),
@@ -504,18 +506,18 @@ async def diff_contract_versions(
     Returns the diff between from_version and to_version.
     """
     # Verify asset exists
-    result = await session.execute(select(AssetDB).where(AssetDB.id == asset_id))
-    asset = result.scalar_one_or_none()
+    asset_result = await session.execute(select(AssetDB).where(AssetDB.id == asset_id))
+    asset = asset_result.scalar_one_or_none()
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found")
 
     # Get the from_version contract
-    result = await session.execute(
+    from_result = await session.execute(
         select(ContractDB)
         .where(ContractDB.asset_id == asset_id)
         .where(ContractDB.version == from_version)
     )
-    from_contract = result.scalar_one_or_none()
+    from_contract = from_result.scalar_one_or_none()
     if not from_contract:
         raise HTTPException(
             status_code=404,
@@ -523,12 +525,12 @@ async def diff_contract_versions(
         )
 
     # Get the to_version contract
-    result = await session.execute(
+    to_result = await session.execute(
         select(ContractDB)
         .where(ContractDB.asset_id == asset_id)
         .where(ContractDB.version == to_version)
     )
-    to_contract = result.scalar_one_or_none()
+    to_contract = to_result.scalar_one_or_none()
     if not to_contract:
         raise HTTPException(
             status_code=404,
@@ -576,20 +578,20 @@ async def analyze_impact(
         )
 
     # Verify asset exists
-    result = await session.execute(select(AssetDB).where(AssetDB.id == asset_id))
-    asset = result.scalar_one_or_none()
+    asset_result = await session.execute(select(AssetDB).where(AssetDB.id == asset_id))
+    asset = asset_result.scalar_one_or_none()
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found")
 
     # Get the current active contract
-    result = await session.execute(
+    contract_result = await session.execute(
         select(ContractDB)
         .where(ContractDB.asset_id == asset_id)
         .where(ContractDB.status == ContractStatus.ACTIVE)
         .order_by(ContractDB.published_at.desc())
         .limit(1)
     )
-    current_contract = result.scalar_one_or_none()
+    current_contract = contract_result.scalar_one_or_none()
 
     # No active contract = safe to publish (first contract)
     if not current_contract:
@@ -605,26 +607,26 @@ async def analyze_impact(
     breaking = diff_result.breaking_for_mode(current_contract.compatibility_mode)
 
     # Get impacted consumers (registrations for this contract)
-    result = await session.execute(
+    regs_result = await session.execute(
         select(RegistrationDB)
         .where(RegistrationDB.contract_id == current_contract.id)
         .where(RegistrationDB.status == RegistrationStatus.ACTIVE)
     )
-    registrations = result.scalars().all()
+    registrations = regs_result.scalars().all()
 
     # Get team names for impacted consumers
     impacted_consumers = []
     for reg in registrations:
-        team_result = await session.execute(
-            select(TeamDB).where(TeamDB.id == reg.consumer_team_id)
-        )
+        team_result = await session.execute(select(TeamDB).where(TeamDB.id == reg.consumer_team_id))
         team = team_result.scalar_one_or_none()
-        impacted_consumers.append({
-            "team_id": str(reg.consumer_team_id),
-            "team_name": team.name if team else "Unknown",
-            "status": str(reg.status),
-            "pinned_version": reg.pinned_version,
-        })
+        impacted_consumers.append(
+            {
+                "team_id": str(reg.consumer_team_id),
+                "team_name": team.name if team else "Unknown",
+                "status": str(reg.status),
+                "pinned_version": reg.pinned_version,
+            }
+        )
 
     return {
         "change_type": str(diff_result.change_type),
@@ -651,9 +653,7 @@ async def get_lineage(
         raise HTTPException(status_code=404, detail="Asset not found")
 
     # Get owner team name
-    owner_result = await session.execute(
-        select(TeamDB).where(TeamDB.id == asset.owner_team_id)
-    )
+    owner_result = await session.execute(select(TeamDB).where(TeamDB.id == asset.owner_team_id))
     owner_team = owner_result.scalar_one_or_none()
 
     # Get upstream dependencies (assets this asset depends on)
@@ -673,12 +673,14 @@ async def get_lineage(
                 select(TeamDB).where(TeamDB.id == dep_asset.owner_team_id)
             )
             dep_team = dep_team_result.scalar_one_or_none()
-            upstream.append({
-                "asset_id": str(dep.dependency_asset_id),
-                "asset_fqn": dep_asset.fqn,
-                "dependency_type": str(dep.dependency_type),
-                "owner_team": dep_team.name if dep_team else "Unknown",
-            })
+            upstream.append(
+                {
+                    "asset_id": str(dep.dependency_asset_id),
+                    "asset_fqn": dep_asset.fqn,
+                    "dependency_type": str(dep.dependency_type),
+                    "owner_team": dep_team.name if dep_team else "Unknown",
+                }
+            )
 
     # Get all contracts for this asset
     contracts_result = await session.execute(
@@ -703,18 +705,20 @@ async def get_lineage(
             if team:
                 # Get the registrations for this team
                 team_regs = [r for r in registrations if r.consumer_team_id == team_id]
-                downstream.append({
-                    "team_id": str(team_id),
-                    "team_name": team.name,
-                    "registrations": [
-                        {
-                            "contract_id": str(r.contract_id),
-                            "status": str(r.status),
-                            "pinned_version": r.pinned_version,
-                        }
-                        for r in team_regs
-                    ],
-                })
+                downstream.append(
+                    {
+                        "team_id": str(team_id),
+                        "team_name": team.name,
+                        "registrations": [
+                            {
+                                "contract_id": str(r.contract_id),
+                                "status": str(r.status),
+                                "pinned_version": r.pinned_version,
+                            }
+                            for r in team_regs
+                        ],
+                    }
+                )
 
     # Also get assets that depend on this asset (downstream assets)
     downstream_assets = []
@@ -733,12 +737,14 @@ async def get_lineage(
                 select(TeamDB).where(TeamDB.id == dep_asset.owner_team_id)
             )
             dep_team = dep_team_result.scalar_one_or_none()
-            downstream_assets.append({
-                "asset_id": str(dep.dependent_asset_id),
-                "asset_fqn": dep_asset.fqn,
-                "dependency_type": str(dep.dependency_type),
-                "owner_team": dep_team.name if dep_team else "Unknown",
-            })
+            downstream_assets.append(
+                {
+                    "asset_id": str(dep.dependent_asset_id),
+                    "asset_fqn": dep_asset.fqn,
+                    "dependency_type": str(dep.dependency_type),
+                    "owner_team": dep_team.name if dep_team else "Unknown",
+                }
+            )
 
     return {
         "asset_id": str(asset_id),

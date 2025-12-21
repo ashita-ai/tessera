@@ -6,7 +6,7 @@
 
 **Design Philosophy**: Simplicity wins, use good defaults, coordination over validation.
 
-**Current Phase**: Core implementation complete, building test coverage and DX.
+**Current Phase**: Core implementation complete. P0 issues from code review resolved. Building test coverage and DX.
 
 ---
 
@@ -153,11 +153,14 @@ The core logic is in `services/schema_diff.py`. It detects:
 # Fast: schema diff tests (no DB)
 uv run pytest tests/test_schema_diff.py -v
 
-# Full: all tests (requires PostgreSQL)
+# Full: all tests with SQLite (fast, in-memory)
+DATABASE_URL=sqlite+aiosqlite:///:memory: uv run pytest tests/ -v
+
+# Full: all tests with PostgreSQL
 uv run pytest tests/ -v
 
 # With coverage
-uv run pytest tests/ --cov=tessera --cov-report=term-missing
+DATABASE_URL=sqlite+aiosqlite:///:memory: uv run pytest tests/ --cov=tessera --cov-report=term-missing
 ```
 
 ### Test Structure
@@ -169,7 +172,13 @@ Tests are in `tests/`. The conftest.py provides:
 
 ### Database for Tests
 
-Tests use the same PostgreSQL database as the app (configured via DATABASE_URL in .env). Schemas isolate test data.
+**SQLite (recommended for local dev)**:
+- Set `DATABASE_URL=sqlite+aiosqlite:///:memory:` for fast, isolated tests
+- No setup required, tests run in ~1 second
+
+**PostgreSQL (CI and production)**:
+- Configured via `DATABASE_URL` in `.env`
+- Tests CI runs with both SQLite and PostgreSQL
 
 ---
 
@@ -226,6 +235,13 @@ uv run mypy src/tessera/
 
 ## Database
 
+### Supported Databases
+
+| Database | Use Case | Notes |
+|----------|----------|-------|
+| SQLite | Local dev, CI tests | Fast, no setup. Use `sqlite+aiosqlite:///:memory:` |
+| PostgreSQL | Production, Docker | Full feature set, recommended for production |
+
 ### Schemas
 
 - `core`: teams, assets, contracts, registrations
@@ -234,7 +250,21 @@ uv run mypy src/tessera/
 
 ### Connection
 
-Configured via `DATABASE_URL` in `.env`. Currently using Supabase PostgreSQL.
+Configured via `DATABASE_URL` in `.env`:
+- SQLite: `sqlite+aiosqlite:///:memory:` or `sqlite+aiosqlite:///./tessera.db`
+- PostgreSQL: `postgresql+asyncpg://user:pass@host:5432/tessera`
+
+### Transaction Handling
+
+Multi-step mutations use nested transactions (savepoints) for atomicity:
+```python
+async with session.begin_nested():
+    # Step 1: create new contract
+    # Step 2: deprecate old contract
+    # Rollback both if either fails
+```
+
+Key patterns in `api/assets.py` and `api/proposals.py`.
 
 ---
 

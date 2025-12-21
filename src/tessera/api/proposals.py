@@ -129,9 +129,7 @@ async def list_proposals(
     proposal_list = []
     for proposal in proposals:
         # Get asset FQN
-        asset_result = await session.execute(
-            select(AssetDB).where(AssetDB.id == proposal.asset_id)
-        )
+        asset_result = await session.execute(select(AssetDB).where(AssetDB.id == proposal.asset_id))
         asset = asset_result.scalar_one_or_none()
 
         # Get acknowledgment count
@@ -161,18 +159,20 @@ async def list_proposals(
                 )
                 consumer_count = reg_count_result.scalar() or 0
 
-        proposal_list.append({
-            "id": str(proposal.id),
-            "asset_id": str(proposal.asset_id),
-            "asset_fqn": asset.fqn if asset else None,
-            "status": str(proposal.status),
-            "change_type": str(proposal.change_type),
-            "breaking_changes_count": len(proposal.breaking_changes),
-            "proposed_by": str(proposal.proposed_by),
-            "proposed_at": proposal.proposed_at.isoformat(),
-            "acknowledgment_count": ack_count,
-            "total_consumers": consumer_count,
-        })
+        proposal_list.append(
+            {
+                "id": str(proposal.id),
+                "asset_id": str(proposal.asset_id),
+                "asset_fqn": asset.fqn if asset else None,
+                "status": str(proposal.status),
+                "change_type": str(proposal.change_type),
+                "breaking_changes_count": len(proposal.breaking_changes),
+                "proposed_by": str(proposal.proposed_by),
+                "proposed_at": proposal.proposed_at.isoformat(),
+                "acknowledgment_count": ack_count,
+                "total_consumers": consumer_count,
+            }
+        )
 
     return {
         "proposals": proposal_list,
@@ -208,15 +208,11 @@ async def get_proposal_status(
         raise HTTPException(status_code=404, detail="Proposal not found")
 
     # Get asset
-    asset_result = await session.execute(
-        select(AssetDB).where(AssetDB.id == proposal.asset_id)
-    )
+    asset_result = await session.execute(select(AssetDB).where(AssetDB.id == proposal.asset_id))
     asset = asset_result.scalar_one_or_none()
 
     # Get proposer team
-    proposer_result = await session.execute(
-        select(TeamDB).where(TeamDB.id == proposal.proposed_by)
-    )
+    proposer_result = await session.execute(select(TeamDB).where(TeamDB.id == proposal.proposed_by))
     proposer = proposer_result.scalar_one_or_none()
 
     # Get all acknowledgments
@@ -231,19 +227,19 @@ async def get_proposal_status(
     blocked_count = 0
     for ack in acknowledgments:
         acknowledged_team_ids.add(ack.consumer_team_id)
-        team_result = await session.execute(
-            select(TeamDB).where(TeamDB.id == ack.consumer_team_id)
-        )
+        team_result = await session.execute(select(TeamDB).where(TeamDB.id == ack.consumer_team_id))
         team = team_result.scalar_one_or_none()
         if str(ack.response) == "blocked":
             blocked_count += 1
-        ack_list.append({
-            "consumer_team_id": str(ack.consumer_team_id),
-            "consumer_team_name": team.name if team else "Unknown",
-            "response": str(ack.response),
-            "responded_at": ack.responded_at.isoformat(),
-            "notes": ack.notes,
-        })
+        ack_list.append(
+            {
+                "consumer_team_id": str(ack.consumer_team_id),
+                "consumer_team_name": team.name if team else "Unknown",
+                "response": str(ack.response),
+                "responded_at": ack.responded_at.isoformat(),
+                "notes": ack.notes,
+            }
+        )
 
     # Get registered consumers (from current active contract)
     pending_consumers = []
@@ -272,11 +268,13 @@ async def get_proposal_status(
                         select(TeamDB).where(TeamDB.id == reg.consumer_team_id)
                     )
                     team = team_result.scalar_one_or_none()
-                    pending_consumers.append({
-                        "team_id": str(reg.consumer_team_id),
-                        "team_name": team.name if team else "Unknown",
-                        "registered_at": reg.registered_at.isoformat(),
-                    })
+                    pending_consumers.append(
+                        {
+                            "team_id": str(reg.consumer_team_id),
+                            "team_name": team.name if team else "Unknown",
+                            "registered_at": reg.registered_at.isoformat(),
+                        }
+                    )
 
     return {
         "proposal_id": str(proposal.id),
@@ -329,8 +327,7 @@ async def acknowledge_proposal(
     )
     if result.scalar_one_or_none():
         raise HTTPException(
-            status_code=400,
-            detail="This team has already acknowledged this proposal"
+            status_code=400, detail="This team has already acknowledged this proposal"
         )
 
     db_ack = AcknowledgmentDB(
@@ -452,22 +449,17 @@ async def publish_from_proposal(
         raise HTTPException(
             status_code=400,
             detail=f"Cannot publish from proposal with status '{proposal.status}'. "
-            "Proposal must be approved first."
+            "Proposal must be approved first.",
         )
 
     # Validate the proposed schema before publishing
     try:
         validate_schema_or_raise(proposal.proposed_schema)
     except SchemaValidationError as e:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid schema in proposal: {e.message}"
-        )
+        raise HTTPException(status_code=400, detail=f"Invalid schema in proposal: {e.message}")
 
     # Get the asset
-    asset_result = await session.execute(
-        select(AssetDB).where(AssetDB.id == proposal.asset_id)
-    )
+    asset_result = await session.execute(select(AssetDB).where(AssetDB.id == proposal.asset_id))
     asset = asset_result.scalar_one_or_none()
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found")
@@ -482,32 +474,38 @@ async def publish_from_proposal(
     )
     current_contract = current_contract_result.scalar_one_or_none()
 
-    # Create new contract from the proposal
-    # Default to BACKWARD compatibility for new contracts (safe for existing consumers)
-    new_contract = ContractDB(
-        asset_id=proposal.asset_id,
-        version=publish_request.version,
-        schema_def=proposal.proposed_schema,
-        compatibility_mode=current_contract.compatibility_mode if current_contract else CompatibilityMode.BACKWARD,
-        guarantees=current_contract.guarantees if current_contract else {},
-        published_by=publish_request.published_by,
-    )
-    session.add(new_contract)
+    # Use nested transaction (savepoint) to ensure atomicity of the multi-step publish
+    # This ensures all-or-nothing: new contract + deprecate old + audit log
+    async with session.begin_nested():
+        # Create new contract from the proposal
+        # Default to BACKWARD compatibility for new contracts (safe for existing consumers)
+        compat_mode = (
+            current_contract.compatibility_mode if current_contract else CompatibilityMode.BACKWARD
+        )
+        new_contract = ContractDB(
+            asset_id=proposal.asset_id,
+            version=publish_request.version,
+            schema_def=proposal.proposed_schema,
+            compatibility_mode=compat_mode,
+            guarantees=current_contract.guarantees if current_contract else {},
+            published_by=publish_request.published_by,
+        )
+        session.add(new_contract)
 
-    # Deprecate old contract
-    if current_contract:
-        current_contract.status = ContractStatus.DEPRECATED
+        # Deprecate old contract
+        if current_contract:
+            current_contract.status = ContractStatus.DEPRECATED
 
-    await session.flush()
-    await session.refresh(new_contract)
+        await session.flush()
+        await session.refresh(new_contract)
 
-    await log_contract_published(
-        session=session,
-        contract_id=new_contract.id,
-        publisher_id=publish_request.published_by,
-        version=new_contract.version,
-        change_type=str(proposal.change_type),
-    )
+        await log_contract_published(
+            session=session,
+            contract_id=new_contract.id,
+            publisher_id=publish_request.published_by,
+            version=new_contract.version,
+            change_type=str(proposal.change_type),
+        )
 
     return {
         "action": "published",

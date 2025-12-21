@@ -168,8 +168,8 @@ async def sync_pull(
             asset_data = yaml.safe_load(asset_file.read_text())
             asset_id = UUID(asset_data["id"])
 
-            result = await session.execute(select(AssetDB).where(AssetDB.id == asset_id))
-            existing_asset = result.scalar_one_or_none()
+            asset_result = await session.execute(select(AssetDB).where(AssetDB.id == asset_id))
+            existing_asset = asset_result.scalar_one_or_none()
 
             if existing_asset:
                 existing_asset.fqn = asset_data["fqn"]
@@ -189,10 +189,10 @@ async def sync_pull(
             for contract_data in asset_data.get("contracts", []):
                 contract_id = UUID(contract_data["id"])
 
-                result = await session.execute(
+                contract_result = await session.execute(
                     select(ContractDB).where(ContractDB.id == contract_id)
                 )
-                existing_contract = result.scalar_one_or_none()
+                existing_contract = contract_result.scalar_one_or_none()
 
                 # Parse enums from strings
                 compat_mode = CompatibilityMode(contract_data["compatibility_mode"])
@@ -223,10 +223,10 @@ async def sync_pull(
                     reg_id = UUID(reg_data["id"])
                     reg_status = RegistrationStatus(reg_data["status"])
 
-                    result = await session.execute(
+                    reg_result = await session.execute(
                         select(RegistrationDB).where(RegistrationDB.id == reg_id)
                     )
-                    existing_reg = result.scalar_one_or_none()
+                    existing_reg = reg_result.scalar_one_or_none()
 
                     if existing_reg:
                         existing_reg.pinned_version = reg_data.get("pinned_version")

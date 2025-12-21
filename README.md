@@ -36,6 +36,38 @@ In ancient Rome, a *tessera* was a token split between two parties to prove iden
 
 That's the producer/consumer relationship. Neither side works alone. Tessera makes the agreement explicit.
 
+## Database Support
+
+**PostgreSQL** (Recommended for production)
+- Full support with schemas: `core`, `workflow`, `audit`
+- Use Alembic migrations: `alembic upgrade head`
+
+**SQLite** (Testing only)
+- Supported for unit tests via in-memory databases
+- Set `DATABASE_URL=sqlite+aiosqlite:///:memory:`
+- Tables created without schema prefixes
+- Not recommended for production
+
+## Quick Start
+
+```bash
+# Install dependencies
+uv sync --all-extras
+
+# Set up environment
+cp .env.example .env
+# Edit .env with your DATABASE_URL
+
+# Run migrations
+alembic upgrade head
+
+# Start the server
+uv run uvicorn tessera.main:app --reload
+
+# Run tests
+DATABASE_URL=sqlite+aiosqlite:///:memory: uv run pytest
+```
+
 ## Status
 
 Early development.
