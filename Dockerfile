@@ -13,8 +13,15 @@ COPY pyproject.toml uv.lock README.md ./
 COPY src/ ./src/
 COPY examples/ ./examples/
 
-# Install dependencies
-RUN uv sync --frozen --no-dev
+# Install dependencies and clean up
+RUN uv sync --frozen --no-dev && \
+    # Remove unnecessary files to reduce image size
+    find /app/.venv -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true && \
+    find /app/.venv -type f -name "*.pyc" -delete && \
+    find /app/.venv -type f -name "*.pyo" -delete && \
+    # Remove test directories from packages
+    find /app/.venv -type d -name "tests" -exec rm -rf {} + 2>/dev/null || true && \
+    find /app/.venv -type d -name "test" -exec rm -rf {} + 2>/dev/null || true
 
 FROM python:3.11-slim AS runtime
 
@@ -29,6 +36,8 @@ COPY --from=builder /app/examples /app/examples
 ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONPATH="/app/src"
 ENV PYTHONUNBUFFERED=1
+# Disable bytecode generation (saves space, we're running from source anyway)
+ENV PYTHONDONTWRITEBYTECODE=1
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
