@@ -38,8 +38,8 @@ class Settings(BaseSettings):
             return [origin.strip() for origin in v.split(",") if origin.strip()]
         return v
 
-    # Git sync
-    git_sync_path: Path = Path("./contracts")
+    # Git sync (optional - must be explicitly configured for sync endpoints)
+    git_sync_path: Path | None = None
 
     # Webhooks
     webhook_url: str | None = None

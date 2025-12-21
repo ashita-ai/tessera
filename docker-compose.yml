@@ -24,9 +24,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://tessera:tessera@db:5432/tessera
       API_HOST: "0.0.0.0"
       API_PORT: "8000"
-      GIT_SYNC_PATH: /app/contracts
-    volumes:
-      - ./contracts:/app/contracts
+      # GIT_SYNC_PATH: /app/contracts  # Optional: Set to enable git sync endpoints
     depends_on:
       db:
         condition: service_healthy

@@ -1,4 +1,4 @@
-"""Tests for /api/v1/sync endpoints (push, pull, dbt)."""
+"""Tests for /api/v1/sync endpoints (push, pull, dbt, dbt/impact)."""
 
 import json
 import tempfile
@@ -19,6 +19,35 @@ def sync_path(tmp_path: Path, monkeypatch):
     path = tmp_path / "contracts"
     monkeypatch.setattr(config.settings, "git_sync_path", path)
     return path
+
+
+@pytest.fixture
+def no_sync_path(monkeypatch):
+    """Ensure git_sync_path is not configured."""
+    from tessera import config
+    monkeypatch.setattr(config.settings, "git_sync_path", None)
+
+
+class TestSyncPathNotConfigured:
+    """Tests for when GIT_SYNC_PATH is not configured."""
+
+    async def test_push_without_git_sync_path(self, client: AsyncClient, no_sync_path):
+        """Push should return 400 when GIT_SYNC_PATH is not configured."""
+        resp = await client.post("/api/v1/sync/push")
+        assert resp.status_code == 400
+        data = resp.json()
+        # Error response may use "detail" or "message" depending on error handler
+        error_message = data.get("detail") or data.get("message") or str(data)
+        assert "GIT_SYNC_PATH not configured" in error_message
+
+    async def test_pull_without_git_sync_path(self, client: AsyncClient, no_sync_path):
+        """Pull should return 400 when GIT_SYNC_PATH is not configured."""
+        resp = await client.post("/api/v1/sync/pull")
+        assert resp.status_code == 400
+        data = resp.json()
+        # Error response may use "detail" or "message" depending on error handler
+        error_message = data.get("detail") or data.get("message") or str(data)
+        assert "GIT_SYNC_PATH not configured" in error_message
 
 
 class TestSyncPush:
@@ -394,3 +423,250 @@ class TestSyncDbt:
         assert resp.status_code == 200
         data = resp.json()
         assert data["assets"]["created"] == 2
+
+
+class TestDbtImpact:
+    """Tests for /api/v1/sync/dbt/impact endpoint."""
+
+    async def test_dbt_impact_no_contracts(self, client: AsyncClient):
+        """Impact check with no existing contracts should show all safe."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "impact-team-1"})
+        team_id = team_resp.json()["id"]
+
+        manifest = {
+            "nodes": {
+                "model.project.users": {
+                    "resource_type": "model",
+                    "database": "analytics",
+                    "schema": "public",
+                    "name": "impact_users",
+                    "columns": {
+                        "id": {"data_type": "integer"},
+                        "name": {"data_type": "varchar"},
+                    },
+                },
+            },
+            "sources": {},
+        }
+
+        resp = await client.post(
+            "/api/v1/sync/dbt/impact",
+            json={"manifest": manifest, "owner_team_id": team_id},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "success"
+        assert data["total_models"] == 1
+        assert data["models_with_contracts"] == 0
+        assert data["breaking_changes_count"] == 0
+        assert data["results"][0]["safe_to_publish"] is True
+        assert data["results"][0]["has_contract"] is False
+
+    async def test_dbt_impact_compatible_change(self, client: AsyncClient):
+        """Impact check with compatible changes should show safe."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "impact-team-2"})
+        team_id = team_resp.json()["id"]
+
+        # Create asset and contract
+        asset_resp = await client.post(
+            "/api/v1/assets",
+            json={"fqn": "analytics.public.impact_compat", "owner_team_id": team_id},
+        )
+        asset_id = asset_resp.json()["id"]
+
+        await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            json={
+                "version": "1.0.0",
+                "schema": {
+                    "type": "object",
+                    "properties": {"id": {"type": "integer"}},
+                    "required": [],
+                },
+                "compatibility_mode": "backward",
+            },
+        )
+
+        # Check impact with added optional column (compatible)
+        manifest = {
+            "nodes": {
+                "model.project.impact_compat": {
+                    "resource_type": "model",
+                    "database": "analytics",
+                    "schema": "public",
+                    "name": "impact_compat",
+                    "columns": {
+                        "id": {"data_type": "integer"},
+                        "new_col": {"data_type": "varchar"},  # Added column
+                    },
+                },
+            },
+            "sources": {},
+        }
+
+        resp = await client.post(
+            "/api/v1/sync/dbt/impact",
+            json={"manifest": manifest, "owner_team_id": team_id},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "success"
+        assert data["models_with_contracts"] == 1
+        assert data["breaking_changes_count"] == 0
+        assert data["results"][0]["safe_to_publish"] is True
+        assert data["results"][0]["has_contract"] is True
+
+    async def test_dbt_impact_breaking_change(self, client: AsyncClient):
+        """Impact check with breaking changes should detect them."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "impact-team-3"})
+        team_id = team_resp.json()["id"]
+
+        # Create asset and contract with required column
+        asset_resp = await client.post(
+            "/api/v1/assets",
+            json={"fqn": "analytics.public.impact_break", "owner_team_id": team_id},
+        )
+        asset_id = asset_resp.json()["id"]
+
+        await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            json={
+                "version": "1.0.0",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "integer"},
+                        "email": {"type": "string"},  # This will be removed
+                    },
+                    "required": [],
+                },
+                "compatibility_mode": "backward",
+            },
+        )
+
+        # Check impact with removed column (breaking)
+        manifest = {
+            "nodes": {
+                "model.project.impact_break": {
+                    "resource_type": "model",
+                    "database": "analytics",
+                    "schema": "public",
+                    "name": "impact_break",
+                    "columns": {
+                        "id": {"data_type": "integer"},
+                        # email column removed
+                    },
+                },
+            },
+            "sources": {},
+        }
+
+        resp = await client.post(
+            "/api/v1/sync/dbt/impact",
+            json={"manifest": manifest, "owner_team_id": team_id},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "breaking_changes_detected"
+        assert data["breaking_changes_count"] == 1
+        assert data["results"][0]["safe_to_publish"] is False
+        assert len(data["results"][0]["breaking_changes"]) > 0
+
+    async def test_dbt_impact_multiple_models(self, client: AsyncClient):
+        """Impact check should handle multiple models."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "impact-team-4"})
+        team_id = team_resp.json()["id"]
+
+        manifest = {
+            "nodes": {
+                "model.project.model_a": {
+                    "resource_type": "model",
+                    "database": "analytics",
+                    "schema": "public",
+                    "name": "impact_multi_a",
+                    "columns": {"id": {"data_type": "integer"}},
+                },
+                "model.project.model_b": {
+                    "resource_type": "model",
+                    "database": "analytics",
+                    "schema": "public",
+                    "name": "impact_multi_b",
+                    "columns": {"id": {"data_type": "integer"}},
+                },
+            },
+            "sources": {
+                "source.project.raw": {
+                    "database": "raw",
+                    "schema": "stripe",
+                    "name": "impact_source",
+                    "columns": {"customer_id": {"data_type": "varchar"}},
+                },
+            },
+        }
+
+        resp = await client.post(
+            "/api/v1/sync/dbt/impact",
+            json={"manifest": manifest, "owner_team_id": team_id},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total_models"] == 3
+        assert data["status"] == "success"
+
+    async def test_dbt_impact_type_mapping(self, client: AsyncClient):
+        """Impact check should correctly map dbt types to JSON Schema types."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "impact-team-5"})
+        team_id = team_resp.json()["id"]
+
+        # Create asset with specific types
+        asset_resp = await client.post(
+            "/api/v1/assets",
+            json={"fqn": "analytics.public.impact_types", "owner_team_id": team_id},
+        )
+        asset_id = asset_resp.json()["id"]
+
+        await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            json={
+                "version": "1.0.0",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "integer"},
+                        "amount": {"type": "number"},
+                        "active": {"type": "boolean"},
+                        "name": {"type": "string"},
+                    },
+                    "required": [],
+                },
+                "compatibility_mode": "backward",
+            },
+        )
+
+        # Check impact with same types in dbt format
+        manifest = {
+            "nodes": {
+                "model.project.impact_types": {
+                    "resource_type": "model",
+                    "database": "analytics",
+                    "schema": "public",
+                    "name": "impact_types",
+                    "columns": {
+                        "id": {"data_type": "bigint"},  # maps to integer
+                        "amount": {"data_type": "decimal(18,2)"},  # maps to number
+                        "active": {"data_type": "boolean"},
+                        "name": {"data_type": "varchar(255)"},  # maps to string
+                    },
+                },
+            },
+            "sources": {},
+        }
+
+        resp = await client.post(
+            "/api/v1/sync/dbt/impact",
+            json={"manifest": manifest, "owner_team_id": team_id},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "success"
+        assert data["breaking_changes_count"] == 0

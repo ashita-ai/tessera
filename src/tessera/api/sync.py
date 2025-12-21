@@ -10,14 +10,122 @@ from uuid import UUID
 
 import yaml
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.config import settings
 from tessera.db import AssetDB, ContractDB, RegistrationDB, TeamDB, get_session
 from tessera.models.enums import CompatibilityMode, ContractStatus, RegistrationStatus
+from tessera.services.schema_diff import check_compatibility, diff_schemas
 
 router = APIRouter()
+
+
+def _require_git_sync_path() -> Path:
+    """Require git_sync_path to be configured, raise 400 if not."""
+    if settings.git_sync_path is None:
+        raise HTTPException(
+            status_code=400,
+            detail="GIT_SYNC_PATH not configured. Set the GIT_SYNC_PATH environment variable.",
+        )
+    return settings.git_sync_path
+
+
+def dbt_columns_to_json_schema(columns: dict[str, Any]) -> dict[str, Any]:
+    """Convert dbt column definitions to JSON Schema.
+
+    Maps dbt data types to JSON Schema types for compatibility checking.
+    """
+    type_mapping = {
+        # String types
+        "string": "string",
+        "text": "string",
+        "varchar": "string",
+        "char": "string",
+        "character varying": "string",
+        # Numeric types
+        "integer": "integer",
+        "int": "integer",
+        "bigint": "integer",
+        "smallint": "integer",
+        "int64": "integer",
+        "int32": "integer",
+        "number": "number",
+        "numeric": "number",
+        "decimal": "number",
+        "float": "number",
+        "double": "number",
+        "real": "number",
+        "float64": "number",
+        # Boolean
+        "boolean": "boolean",
+        "bool": "boolean",
+        # Date/time (represented as strings in JSON)
+        "date": "string",
+        "datetime": "string",
+        "timestamp": "string",
+        "timestamp_ntz": "string",
+        "timestamp_tz": "string",
+        "time": "string",
+        # Other
+        "json": "object",
+        "jsonb": "object",
+        "array": "array",
+        "variant": "object",
+        "object": "object",
+    }
+
+    properties: dict[str, Any] = {}
+    required: list[str] = []
+
+    for col_name, col_info in columns.items():
+        data_type = (col_info.get("data_type") or "string").lower()
+        # Extract base type (e.g., "varchar(255)" -> "varchar")
+        base_type = data_type.split("(")[0].strip()
+
+        json_type = type_mapping.get(base_type, "string")
+        prop: dict[str, Any] = {"type": json_type}
+
+        # Add description if present
+        if col_info.get("description"):
+            prop["description"] = col_info["description"]
+
+        properties[col_name] = prop
+
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": required,
+    }
+
+
+class DbtManifestRequest(BaseModel):
+    """Request body for dbt manifest impact check."""
+
+    manifest: dict[str, Any] = Field(..., description="Full dbt manifest.json contents")
+    owner_team_id: UUID = Field(..., description="Team ID to use for new assets")
+
+
+class DbtImpactResult(BaseModel):
+    """Impact analysis result for a single dbt model."""
+
+    fqn: str
+    node_id: str
+    has_contract: bool
+    safe_to_publish: bool
+    change_type: str | None = None
+    breaking_changes: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class DbtImpactResponse(BaseModel):
+    """Response from dbt manifest impact analysis."""
+
+    status: str
+    total_models: int
+    models_with_contracts: int
+    breaking_changes_count: int
+    results: list[DbtImpactResult]
 
 
 @router.post("/push")
@@ -27,13 +135,15 @@ async def sync_push(
     """Export database state to git-friendly YAML files.
 
     Creates a directory structure:
-    contracts/
+    {git_sync_path}/
     ├── teams/
     │   └── {team_name}.yaml
     └── assets/
         └── {fqn_escaped}.yaml  (includes contracts and registrations)
+
+    Requires GIT_SYNC_PATH environment variable to be set.
     """
-    sync_path = settings.git_sync_path
+    sync_path = _require_git_sync_path()
     sync_path.mkdir(parents=True, exist_ok=True)
 
     teams_path = sync_path / "teams"
@@ -130,8 +240,9 @@ async def sync_pull(
     """Import contracts from git-friendly YAML files into the database.
 
     Reads the directory structure created by /sync/push and upserts into the database.
+    Requires GIT_SYNC_PATH environment variable to be set.
     """
-    sync_path = settings.git_sync_path
+    sync_path = _require_git_sync_path()
     if not sync_path.exists():
         raise HTTPException(status_code=404, detail=f"Sync path not found: {sync_path}")
 
@@ -362,3 +473,180 @@ async def sync_from_dbt(
             "updated": assets_updated,
         },
     }
+
+
+@router.post("/dbt/impact", response_model=DbtImpactResponse)
+async def check_dbt_impact(
+    request: DbtManifestRequest,
+    session: AsyncSession = Depends(get_session),
+) -> DbtImpactResponse:
+    """Check impact of dbt models against registered contracts.
+
+    Accepts a dbt manifest.json in the request body and checks each model's
+    schema against existing contracts. This is the primary CI/CD integration
+    point - no file system access required.
+
+    Returns impact analysis for each model, identifying breaking changes.
+    """
+    manifest = request.manifest
+    results: list[DbtImpactResult] = []
+
+    # Process nodes (models, seeds, snapshots)
+    nodes = manifest.get("nodes", {})
+    for node_id, node in nodes.items():
+        resource_type = node.get("resource_type")
+        if resource_type not in ("model", "seed", "snapshot"):
+            continue
+
+        # Build FQN from dbt metadata
+        database = node.get("database", "")
+        schema_name = node.get("schema", "")
+        name = node.get("name", "")
+        fqn = f"{database}.{schema_name}.{name}".lower()
+
+        # Look up existing asset and active contract
+        asset_result = await session.execute(select(AssetDB).where(AssetDB.fqn == fqn))
+        existing_asset = asset_result.scalar_one_or_none()
+
+        if not existing_asset:
+            # No asset registered yet - safe to create
+            results.append(
+                DbtImpactResult(
+                    fqn=fqn,
+                    node_id=node_id,
+                    has_contract=False,
+                    safe_to_publish=True,
+                    change_type=None,
+                    breaking_changes=[],
+                )
+            )
+            continue
+
+        # Get active contract for this asset
+        contract_result = await session.execute(
+            select(ContractDB).where(
+                ContractDB.asset_id == existing_asset.id,
+                ContractDB.status == ContractStatus.ACTIVE,
+            )
+        )
+        existing_contract = contract_result.scalar_one_or_none()
+
+        if not existing_contract:
+            # Asset exists but no active contract
+            results.append(
+                DbtImpactResult(
+                    fqn=fqn,
+                    node_id=node_id,
+                    has_contract=False,
+                    safe_to_publish=True,
+                    change_type=None,
+                    breaking_changes=[],
+                )
+            )
+            continue
+
+        # Convert dbt columns to JSON Schema and compare
+        columns = node.get("columns", {})
+        proposed_schema = dbt_columns_to_json_schema(columns)
+        existing_schema = existing_contract.schema_def
+
+        # Use schema_diff to detect changes
+        diff_result = diff_schemas(existing_schema, proposed_schema)
+        is_compatible, breaking_changes_list = check_compatibility(
+            existing_schema,
+            proposed_schema,
+            existing_contract.compatibility_mode,
+        )
+
+        breaking_changes = [bc.to_dict() for bc in breaking_changes_list]
+
+        results.append(
+            DbtImpactResult(
+                fqn=fqn,
+                node_id=node_id,
+                has_contract=True,
+                safe_to_publish=is_compatible,
+                change_type=diff_result.change_type.value,
+                breaking_changes=breaking_changes,
+            )
+        )
+
+    # Process sources similarly
+    sources = manifest.get("sources", {})
+    for source_id, source in sources.items():
+        database = source.get("database", "")
+        schema_name = source.get("schema", "")
+        name = source.get("name", "")
+        fqn = f"{database}.{schema_name}.{name}".lower()
+
+        asset_result = await session.execute(select(AssetDB).where(AssetDB.fqn == fqn))
+        existing_asset = asset_result.scalar_one_or_none()
+
+        if not existing_asset:
+            results.append(
+                DbtImpactResult(
+                    fqn=fqn,
+                    node_id=source_id,
+                    has_contract=False,
+                    safe_to_publish=True,
+                    change_type=None,
+                    breaking_changes=[],
+                )
+            )
+            continue
+
+        contract_result = await session.execute(
+            select(ContractDB).where(
+                ContractDB.asset_id == existing_asset.id,
+                ContractDB.status == ContractStatus.ACTIVE,
+            )
+        )
+        existing_contract = contract_result.scalar_one_or_none()
+
+        if not existing_contract:
+            results.append(
+                DbtImpactResult(
+                    fqn=fqn,
+                    node_id=source_id,
+                    has_contract=False,
+                    safe_to_publish=True,
+                    change_type=None,
+                    breaking_changes=[],
+                )
+            )
+            continue
+
+        columns = source.get("columns", {})
+        proposed_schema = dbt_columns_to_json_schema(columns)
+        existing_schema = existing_contract.schema_def
+
+        diff_result = diff_schemas(existing_schema, proposed_schema)
+        is_compatible, breaking_changes_list = check_compatibility(
+            existing_schema,
+            proposed_schema,
+            existing_contract.compatibility_mode,
+        )
+
+        breaking_changes = [bc.to_dict() for bc in breaking_changes_list]
+
+        results.append(
+            DbtImpactResult(
+                fqn=fqn,
+                node_id=source_id,
+                has_contract=True,
+                safe_to_publish=is_compatible,
+                change_type=diff_result.change_type.value,
+                breaking_changes=breaking_changes,
+            )
+        )
+
+    models_with_contracts = sum(1 for r in results if r.has_contract)
+    breaking_changes_count = sum(1 for r in results if not r.safe_to_publish)
+
+    return DbtImpactResponse(
+        status="success" if breaking_changes_count == 0 else "breaking_changes_detected",
+        total_models=len(results),
+        models_with_contracts=models_with_contracts,
+        breaking_changes_count=breaking_changes_count,
+        results=results,
+    )
