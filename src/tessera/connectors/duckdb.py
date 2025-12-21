@@ -133,8 +133,7 @@ class DuckDBConnector(WarehouseConnector):
                 import duckdb
             except ImportError:
                 raise ImportError(
-                    "DuckDB connector requires duckdb. "
-                    "Install with: pip install duckdb"
+                    "DuckDB connector requires duckdb. Install with: pip install duckdb"
                 )
             self._conn = duckdb.connect(self._database)
         return self._conn
@@ -215,10 +214,7 @@ class DuckDBConnector(WarehouseConnector):
             if col_type.upper().endswith("[]"):
                 inner_type = col_type[:-2]
                 inner_json_type, _ = _normalize_duckdb_type(inner_type)
-                prop = {
-                    "type": "array",
-                    "items": {"type": inner_json_type}
-                }
+                prop = {"type": "array", "items": {"type": inner_json_type}}
 
             properties[col_name] = prop
 
@@ -247,8 +243,7 @@ class DuckDBConnector(WarehouseConnector):
         """
         conn = self._get_connection()
         result = conn.execute(
-            "SELECT table_name FROM information_schema.tables WHERE table_schema = ?",
-            [schema_name]
+            "SELECT table_name FROM information_schema.tables WHERE table_schema = ?", [schema_name]
         ).fetchall()
         return [row[0] for row in result]
 
