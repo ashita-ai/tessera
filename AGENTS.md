@@ -277,14 +277,23 @@ Key patterns in `api/assets.py` and `api/proposals.py`.
 uv sync --all-extras
 uv run uvicorn tessera.main:app --reload
 
+# Docker (PostgreSQL)
+docker compose up -d        # Start with PostgreSQL
+docker compose logs -f api  # View logs
+docker compose down         # Stop services
+
 # Testing
-uv run pytest tests/ -v
+DATABASE_URL=sqlite+aiosqlite:///:memory: uv run pytest tests/ -v
 uv run pytest tests/test_schema_diff.py -v
 
 # Code Quality
 uv run ruff check src/tessera/
 uv run ruff format src/tessera/
 uv run mypy src/tessera/
+
+# Pre-commit hooks
+uv run pre-commit install   # Install hooks (one-time)
+uv run pre-commit run --all-files  # Run all checks
 ```
 
 ### Key Files
