@@ -281,7 +281,7 @@ def check(
                     # Try to publish (will create proposal for breaking change)
                     contracts_resp = make_request("GET", f"/assets/{asset_id}/contracts")
                     if contracts_resp.status_code == 200:
-                        contracts = contracts_resp.json()
+                        contracts = contracts_resp.json().get("results", [])
                         current = next((c for c in contracts if c["status"] == "active"), None)
                         if current:
                             # Increment version
@@ -459,7 +459,7 @@ def sync(
                         # Get current version and increment
                         contracts_resp = make_request("GET", f"/assets/{asset_id}/contracts")
                         if contracts_resp.status_code == 200:
-                            contracts = contracts_resp.json()
+                            contracts = contracts_resp.json().get("results", [])
                             current = next((c for c in contracts if c["status"] == "active"), None)
                             if current:
                                 v = current.get("version", "1.0.0")

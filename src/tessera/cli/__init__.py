@@ -276,7 +276,8 @@ def contract_list(
 ) -> None:
     """List contracts for an asset."""
     response = make_request("GET", f"/assets/{asset_id}/contracts")
-    contracts = handle_response(response)
+    result = handle_response(response)
+    contracts = result.get("results", [])
 
     if not contracts:
         console.print("[dim]No contracts found[/dim]")

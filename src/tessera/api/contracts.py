@@ -133,11 +133,12 @@ async def get_contract(
     return contract
 
 
-@router.get("/{contract_id}/registrations", response_model=list[Registration])
+@router.get("/{contract_id}/registrations")
 async def list_contract_registrations(
     contract_id: UUID,
+    params: PaginationParams = Depends(pagination_params),
     session: AsyncSession = Depends(get_session),
-) -> list[RegistrationDB]:
+) -> dict[str, Any]:
     """List all registrations for a contract."""
     # Verify contract exists
     result = await session.execute(select(ContractDB).where(ContractDB.id == contract_id))
@@ -149,7 +150,5 @@ async def list_contract_registrations(
             details={"contract_id": str(contract_id)},
         )
 
-    reg_result = await session.execute(
-        select(RegistrationDB).where(RegistrationDB.contract_id == contract_id)
-    )
-    return list(reg_result.scalars().all())
+    query = select(RegistrationDB).where(RegistrationDB.contract_id == contract_id)
+    return await paginate(session, query, params, response_model=Registration)

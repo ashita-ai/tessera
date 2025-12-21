@@ -182,9 +182,10 @@ class TestContractPublishing:
 
         resp = await client.get(f"/api/v1/assets/{asset_id}/contracts")
         assert resp.status_code == 200
-        contracts = resp.json()
-        assert len(contracts) == 1
-        assert contracts[0]["version"] == "1.0.0"
+        data = resp.json()
+        assert data["total"] == 1
+        assert len(data["results"]) == 1
+        assert data["results"][0]["version"] == "1.0.0"
 
 
 class TestContractsEndpoint:
@@ -285,5 +286,6 @@ class TestContractsEndpoint:
         resp = await client.get(f"/api/v1/contracts/{contract_id}/registrations")
         assert resp.status_code == 200
         data = resp.json()
-        assert len(data) == 1
-        assert data[0]["consumer_team_id"] == consumer_id
+        assert data["total"] == 1
+        assert len(data["results"]) == 1
+        assert data["results"][0]["consumer_team_id"] == consumer_id

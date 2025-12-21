@@ -242,20 +242,19 @@ async def create_dependency(
     return db_dependency
 
 
-@router.get("/{asset_id}/dependencies", response_model=list[Dependency])
+@router.get("/{asset_id}/dependencies")
 async def list_dependencies(
     asset_id: UUID,
+    params: PaginationParams = Depends(pagination_params),
     session: AsyncSession = Depends(get_session),
-) -> list[AssetDependencyDB]:
+) -> dict[str, Any]:
     """List all upstream dependencies for an asset."""
     asset_result = await session.execute(select(AssetDB).where(AssetDB.id == asset_id))
     if not asset_result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Asset not found")
 
-    deps_result = await session.execute(
-        select(AssetDependencyDB).where(AssetDependencyDB.dependent_asset_id == asset_id)
-    )
-    return list(deps_result.scalars().all())
+    query = select(AssetDependencyDB).where(AssetDependencyDB.dependent_asset_id == asset_id)
+    return await paginate(session, query, params, response_model=Dependency)
 
 
 @router.delete("/{asset_id}/dependencies/{dependency_id}", status_code=204)
@@ -478,16 +477,19 @@ async def create_contract(
     }
 
 
-@router.get("/{asset_id}/contracts", response_model=list[Contract])
+@router.get("/{asset_id}/contracts")
 async def list_asset_contracts(
     asset_id: UUID,
+    params: PaginationParams = Depends(pagination_params),
     session: AsyncSession = Depends(get_session),
-) -> list[ContractDB]:
+) -> dict[str, Any]:
     """List all contracts for an asset."""
-    result = await session.execute(
-        select(ContractDB).where(ContractDB.asset_id == asset_id).order_by(ContractDB.published_at)
+    query = (
+        select(ContractDB)
+        .where(ContractDB.asset_id == asset_id)
+        .order_by(ContractDB.published_at.desc())
     )
-    return list(result.scalars().all())
+    return await paginate(session, query, params, response_model=Contract)
 
 
 @router.get("/{asset_id}/contracts/history")

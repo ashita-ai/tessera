@@ -341,8 +341,9 @@ class TestAssetDependencies:
         resp = await client.get(f"/api/v1/assets/{downstream_id}/dependencies")
         assert resp.status_code == 200
         data = resp.json()
-        assert len(data) == 1
-        assert data[0]["dependency_asset_id"] == upstream_id
+        assert data["total"] == 1
+        assert len(data["results"]) == 1
+        assert data["results"][0]["dependency_asset_id"] == upstream_id
 
     async def test_delete_dependency(self, client: AsyncClient):
         """Delete a dependency."""
@@ -370,7 +371,8 @@ class TestAssetDependencies:
 
         # Verify it's gone
         list_resp = await client.get(f"/api/v1/assets/{downstream_id}/dependencies")
-        assert len(list_resp.json()) == 0
+        assert list_resp.json()["total"] == 0
+        assert len(list_resp.json()["results"]) == 0
 
     async def test_self_dependency_fails(self, client: AsyncClient):
         """Asset cannot depend on itself."""
