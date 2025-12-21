@@ -169,7 +169,7 @@ def asset_list(
 
     response = make_request("GET", "/assets", params=params)
     result = handle_response(response)
-    assets = result.get("items", [])
+    assets = result.get("results", [])
 
     if not assets:
         console.print("[dim]No assets found[/dim]")
@@ -205,7 +205,7 @@ def asset_search(
     params = {"q": query, "limit": limit}
     response = make_request("GET", "/assets/search", params=params)
     result = handle_response(response)
-    assets = result.get("items", [])
+    assets = result.get("results", [])
 
     if not assets:
         console.print(f"[dim]No assets matching '{query}'[/dim]")
@@ -382,7 +382,7 @@ def proposal_list(
 
     response = make_request("GET", "/proposals", params=params)
     result = handle_response(response)
-    proposals = result.get("items", [])
+    proposals = result.get("results", [])
 
     if not proposals:
         console.print("[dim]No proposals found[/dim]")

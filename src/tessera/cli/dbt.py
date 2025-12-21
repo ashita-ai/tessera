@@ -241,7 +241,7 @@ def check(
                 continue
 
             search_result = resp.json()
-            items = search_result.get("items", [])
+            items = search_result.get("results", [])
 
             if not items:
                 # New model, not registered
@@ -440,7 +440,7 @@ def sync(
             continue
 
         search_result = resp.json()
-        items = search_result.get("items", [])
+        items = search_result.get("results", [])
 
         if items:
             asset = items[0]
@@ -564,7 +564,7 @@ def register_consumers(
         # Search for asset in Tessera
         resp = make_request("GET", "/assets/search", params={"q": fqn, "limit": 1})
         if resp.status_code == 200:
-            items = resp.json().get("items", [])
+            items = resp.json().get("results", [])
             if items:
                 asset = items[0]
                 # Register as consumer

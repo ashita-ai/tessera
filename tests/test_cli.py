@@ -120,7 +120,7 @@ class TestAssetCommands:
     def test_asset_list_empty(self) -> None:
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
-        mock_response.json.return_value = {"items": []}
+        mock_response.json.return_value = {"results": []}
 
         with patch("tessera.cli.make_request", return_value=mock_response):
             result = runner.invoke(app, ["asset", "list"])
@@ -131,7 +131,7 @@ class TestAssetCommands:
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
         mock_response.json.return_value = {
-            "items": [
+            "results": [
                 {"id": "a1", "fqn": "db.schema.table1", "owner_team_id": "t1"},
                 {"id": "a2", "fqn": "db.schema.table2", "owner_team_id": "t2"},
             ]
@@ -147,7 +147,7 @@ class TestAssetCommands:
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
         mock_response.json.return_value = {
-            "items": [{"id": "a1", "fqn": "db.schema.users"}]
+            "results": [{"id": "a1", "fqn": "db.schema.users"}]
         }
 
         with patch("tessera.cli.make_request", return_value=mock_response):
@@ -291,7 +291,7 @@ class TestProposalCommands:
     def test_proposal_list_empty(self) -> None:
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
-        mock_response.json.return_value = {"items": []}
+        mock_response.json.return_value = {"results": []}
 
         with patch("tessera.cli.make_request", return_value=mock_response):
             result = runner.invoke(app, ["proposal", "list"])
