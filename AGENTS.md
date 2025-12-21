@@ -84,6 +84,11 @@ uv run python examples/quickstart.py
 
 Be concise and direct. No flattery or excessive praise. Focus on what needs to be done.
 
+## Git Commit Rules
+
+- Do NOT include "Co-Authored-By: Claude" or similar trailers in commits
+- Do NOT include the "Generated with Claude Code" footer in commits
+
 ---
 
 ## Project Structure
