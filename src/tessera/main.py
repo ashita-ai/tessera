@@ -4,9 +4,13 @@ from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
 from fastapi import APIRouter, FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 from tessera.api import assets, contracts, proposals, registrations, schemas, sync, teams
+from tessera.config import settings
 from tessera.db import init_db
+from tessera.db.database import async_session
 
 
 @asynccontextmanager
@@ -21,6 +25,15 @@ app = FastAPI(
     description="Data contract coordination for warehouses",
     version="0.1.0",
     lifespan=lifespan,
+)
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # API v1 router
@@ -38,5 +51,22 @@ app.include_router(api_v1)
 
 @app.get("/health")
 async def health() -> dict[str, str]:
-    """Health check endpoint."""
+    """Basic health check endpoint (liveness probe)."""
     return {"status": "healthy"}
+
+
+@app.get("/health/ready")
+async def health_ready() -> dict[str, str | bool]:
+    """Readiness probe - verifies database connectivity."""
+    try:
+        async with async_session() as session:
+            await session.execute(text("SELECT 1"))
+        return {"status": "ready", "database": True}
+    except Exception as e:
+        return {"status": "not_ready", "database": False, "error": str(e)}
+
+
+@app.get("/health/live")
+async def health_live() -> dict[str, str]:
+    """Liveness probe - basic check that app is running."""
+    return {"status": "alive"}
