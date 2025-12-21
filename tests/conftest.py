@@ -7,6 +7,7 @@ from typing import Any
 # IMPORTANT: Set environment variables BEFORE importing tessera modules
 # This ensures settings are loaded with test configuration
 from dotenv import load_dotenv
+
 load_dotenv()
 
 # Disable auth for tests by default (individual auth tests can override)
@@ -26,7 +27,7 @@ from tessera.main import app
 # PostgreSQL: DATABASE_URL=postgresql+asyncpg://user:pass@host/db
 TEST_DATABASE_URL = os.environ.get(
     "DATABASE_URL",
-    "sqlite+aiosqlite:///:memory:"  # Default to in-memory SQLite for fast tests
+    "sqlite+aiosqlite:///:memory:",  # Default to in-memory SQLite for fast tests
 )
 
 _USE_SQLITE = TEST_DATABASE_URL.startswith("sqlite")
@@ -141,6 +142,7 @@ async def client(test_engine) -> AsyncGenerator[AsyncClient, None]:
 
 # Sample data factories
 
+
 def make_team(name: str = "test-team", **kwargs) -> dict[str, Any]:
     """Create team request data."""
     return {"name": name, **kwargs}
@@ -155,9 +157,7 @@ def make_schema(**properties) -> dict[str, Any]:
     """Create a JSON schema with given properties."""
     return {
         "type": "object",
-        "properties": {
-            name: {"type": typ} for name, typ in properties.items()
-        },
+        "properties": {name: {"type": typ} for name, typ in properties.items()},
         "required": list(properties.keys()),
     }
 

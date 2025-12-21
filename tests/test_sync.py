@@ -16,6 +16,7 @@ pytestmark = pytest.mark.asyncio
 def sync_path(tmp_path: Path, monkeypatch):
     """Set up sync path for tests."""
     from tessera import config
+
     path = tmp_path / "contracts"
     monkeypatch.setattr(config.settings, "git_sync_path", path)
     return path
@@ -25,6 +26,7 @@ def sync_path(tmp_path: Path, monkeypatch):
 def no_sync_path(monkeypatch):
     """Ensure git_sync_path is not configured."""
     from tessera import config
+
     monkeypatch.setattr(config.settings, "git_sync_path", None)
 
 
@@ -144,6 +146,7 @@ class TestSyncPull:
     async def test_pull_nonexistent_path(self, client: AsyncClient, tmp_path: Path, monkeypatch):
         """Pull from nonexistent path should 404."""
         from tessera import config
+
         monkeypatch.setattr(config.settings, "git_sync_path", tmp_path / "nonexistent")
 
         resp = await client.post("/api/v1/sync/pull")

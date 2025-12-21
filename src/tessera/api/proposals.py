@@ -332,9 +332,7 @@ async def acknowledge_proposal(
         raise HTTPException(status_code=400, detail="Proposal is not pending")
 
     # Get consumer team info
-    team_result = await session.execute(
-        select(TeamDB).where(TeamDB.id == ack.consumer_team_id)
-    )
+    team_result = await session.execute(select(TeamDB).where(TeamDB.id == ack.consumer_team_id))
     consumer_team = team_result.scalar_one_or_none()
     if not consumer_team:
         raise HTTPException(status_code=404, detail="Consumer team not found")

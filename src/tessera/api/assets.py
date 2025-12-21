@@ -435,11 +435,13 @@ async def create_contract(
             .where(RegistrationDB.status == RegistrationStatus.ACTIVE)
         )
         for reg, team in reg_result.all():
-            impacted_consumers.append({
-                "team_id": team.id,
-                "team_name": team.name,
-                "pinned_version": reg.pinned_version,
-            })
+            impacted_consumers.append(
+                {
+                    "team_id": team.id,
+                    "team_name": team.name,
+                    "pinned_version": reg.pinned_version,
+                }
+            )
 
     # Notify consumers via webhook
     await send_proposal_created(

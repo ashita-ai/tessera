@@ -16,10 +16,7 @@ from tessera.models.enums import APIKeyScope
 
 
 # Test with auth enabled
-TEST_DATABASE_URL = os.environ.get(
-    "DATABASE_URL",
-    "sqlite+aiosqlite:///:memory:"
-)
+TEST_DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 _USE_SQLITE = TEST_DATABASE_URL.startswith("sqlite")
 
 

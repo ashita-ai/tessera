@@ -255,9 +255,15 @@ class TestAssetSearch:
         team_resp = await client.post("/api/v1/teams", json={"name": "search-owner"})
         team_id = team_resp.json()["id"]
 
-        await client.post("/api/v1/assets", json={"fqn": "search.test.alpha", "owner_team_id": team_id})
-        await client.post("/api/v1/assets", json={"fqn": "search.test.beta", "owner_team_id": team_id})
-        await client.post("/api/v1/assets", json={"fqn": "other.thing.gamma", "owner_team_id": team_id})
+        await client.post(
+            "/api/v1/assets", json={"fqn": "search.test.alpha", "owner_team_id": team_id}
+        )
+        await client.post(
+            "/api/v1/assets", json={"fqn": "search.test.beta", "owner_team_id": team_id}
+        )
+        await client.post(
+            "/api/v1/assets", json={"fqn": "other.thing.gamma", "owner_team_id": team_id}
+        )
 
         resp = await client.get("/api/v1/assets/search?q=search.test")
         assert resp.status_code == 200
@@ -272,8 +278,12 @@ class TestAssetSearch:
         team1_id = team1_resp.json()["id"]
         team2_id = team2_resp.json()["id"]
 
-        await client.post("/api/v1/assets", json={"fqn": "searchowner.one.table", "owner_team_id": team1_id})
-        await client.post("/api/v1/assets", json={"fqn": "searchowner.two.table", "owner_team_id": team2_id})
+        await client.post(
+            "/api/v1/assets", json={"fqn": "searchowner.one.table", "owner_team_id": team1_id}
+        )
+        await client.post(
+            "/api/v1/assets", json={"fqn": "searchowner.two.table", "owner_team_id": team2_id}
+        )
 
         resp = await client.get(f"/api/v1/assets/search?q=searchowner&owner={team1_id}")
         assert resp.status_code == 200
@@ -422,7 +432,10 @@ class TestAssetDependencies:
 
         resp = await client.post(
             f"/api/v1/assets/{asset_id}/dependencies",
-            json={"depends_on_asset_id": "00000000-0000-0000-0000-000000000000", "dependency_type": "transforms"},
+            json={
+                "depends_on_asset_id": "00000000-0000-0000-0000-000000000000",
+                "dependency_type": "transforms",
+            },
         )
         assert resp.status_code == 404
 

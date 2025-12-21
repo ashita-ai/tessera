@@ -79,10 +79,7 @@ class TestPropertyChanges:
             },
         }
         result = diff_schemas(old, new)
-        assert any(
-            c.kind == ChangeKind.PROPERTY_ADDED and "city" in c.path
-            for c in result.changes
-        )
+        assert any(c.kind == ChangeKind.PROPERTY_ADDED and "city" in c.path for c in result.changes)
 
 
 class TestRequiredChanges:

@@ -99,7 +99,8 @@ class TestRegistrationsEndpoint:
         consumer_id = consumer_resp.json()["id"]
 
         asset_resp = await client.post(
-            "/api/v1/assets", json={"fqn": "create.registration.table", "owner_team_id": producer_id}
+            "/api/v1/assets",
+            json={"fqn": "create.registration.table", "owner_team_id": producer_id},
         )
         asset_id = asset_resp.json()["id"]
 
@@ -180,7 +181,8 @@ class TestRegistrationsEndpoint:
         consumer_id = consumer_resp.json()["id"]
 
         asset_resp = await client.post(
-            "/api/v1/assets", json={"fqn": "update.registration.table", "owner_team_id": producer_id}
+            "/api/v1/assets",
+            json={"fqn": "update.registration.table", "owner_team_id": producer_id},
         )
         asset_id = asset_resp.json()["id"]
 
@@ -218,7 +220,8 @@ class TestRegistrationsEndpoint:
         consumer_id = consumer_resp.json()["id"]
 
         asset_resp = await client.post(
-            "/api/v1/assets", json={"fqn": "delete.registration.table", "owner_team_id": producer_id}
+            "/api/v1/assets",
+            json={"fqn": "delete.registration.table", "owner_team_id": producer_id},
         )
         asset_id = asset_resp.json()["id"]
 
