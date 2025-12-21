@@ -22,7 +22,7 @@ class TestTeamsAPI:
         """Creating a team with duplicate name should fail."""
         await client.post("/api/v1/teams", json={"name": "unique-team"})
         resp = await client.post("/api/v1/teams", json={"name": "unique-team"})
-        assert resp.status_code == 400
+        assert resp.status_code == 409
 
     async def test_list_teams(self, client: AsyncClient):
         """List all teams."""

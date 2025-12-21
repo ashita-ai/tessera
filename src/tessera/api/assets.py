@@ -5,6 +5,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.api.auth import Auth, RequireWrite
@@ -57,13 +58,21 @@ async def create_asset(
     if not result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Owner team not found")
 
+    # Check for duplicate FQN
+    existing = await session.execute(select(AssetDB).where(AssetDB.fqn == asset.fqn))
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail=f"Asset with FQN '{asset.fqn}' already exists")
+
     db_asset = AssetDB(
         fqn=asset.fqn,
         owner_team_id=asset.owner_team_id,
         metadata_=asset.metadata,
     )
     session.add(db_asset)
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError:
+        raise HTTPException(status_code=409, detail=f"Asset with FQN '{asset.fqn}' already exists")
     await session.refresh(db_asset)
     return db_asset
 

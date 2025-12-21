@@ -91,7 +91,7 @@ async def create_team(
         await session.flush()
     except IntegrityError:
         await session.rollback()
-        raise HTTPException(status_code=400, detail=f"Team with name '{team.name}' already exists")
+        raise HTTPException(status_code=409, detail=f"Team with name '{team.name}' already exists")
     await session.refresh(db_team)
     return db_team
 
