@@ -14,6 +14,7 @@ from tessera.api.errors import (
     APIError,
     RequestIDMiddleware,
     api_error_handler,
+    generic_exception_handler,
     http_exception_handler,
     validation_exception_handler,
 )
@@ -52,6 +53,7 @@ app.add_middleware(
 app.add_exception_handler(APIError, api_error_handler)
 app.add_exception_handler(HTTPException, http_exception_handler)
 app.add_exception_handler(ValidationError, validation_exception_handler)
+app.add_exception_handler(Exception, generic_exception_handler)
 
 # API v1 router
 api_v1 = APIRouter(prefix="/api/v1")

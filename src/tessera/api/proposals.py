@@ -18,10 +18,10 @@ from tessera.db import (
     TeamDB,
     get_session,
 )
-from tessera.models import Acknowledgment, AcknowledgmentCreate, Contract, Proposal, ProposalCreate
+from tessera.models import Acknowledgment, AcknowledgmentCreate, Contract, Proposal
 from tessera.models.enums import (
     AcknowledgmentResponseType,
-    ChangeType,
+    CompatibilityMode,
     ContractStatus,
     ProposalStatus,
     RegistrationStatus,
@@ -33,6 +33,7 @@ from tessera.services import (
     log_proposal_force_approved,
     log_proposal_rejected,
 )
+from tessera.services.schema_validator import SchemaValidationError, validate_schema_or_raise
 
 router = APIRouter()
 
@@ -92,34 +93,6 @@ async def check_proposal_completion(
     all_acknowledged = registered_team_ids <= acknowledged_team_ids
 
     return all_acknowledged, len(acknowledgments)
-
-
-@router.post("", response_model=Proposal, status_code=201)
-async def create_proposal(
-    proposal: ProposalCreate,
-    asset_id: UUID = Query(..., description="Asset ID for the proposal"),
-    proposed_by: UUID = Query(..., description="Team ID of the proposer"),
-    session: AsyncSession = Depends(get_session),
-) -> ProposalDB:
-    """Create a new breaking change proposal."""
-    # Verify asset exists
-    result = await session.execute(select(AssetDB).where(AssetDB.id == asset_id))
-    asset = result.scalar_one_or_none()
-    if not asset:
-        raise HTTPException(status_code=404, detail="Asset not found")
-
-    # TODO: Implement actual schema diffing to determine change_type and breaking_changes
-    db_proposal = ProposalDB(
-        asset_id=asset_id,
-        proposed_schema=proposal.proposed_schema,
-        change_type=ChangeType.MAJOR,  # Default to major until we implement diffing
-        breaking_changes=[],
-        proposed_by=proposed_by,
-    )
-    session.add(db_proposal)
-    await session.flush()
-    await session.refresh(db_proposal)
-    return db_proposal
 
 
 @router.get("")
@@ -482,6 +455,15 @@ async def publish_from_proposal(
             "Proposal must be approved first."
         )
 
+    # Validate the proposed schema before publishing
+    try:
+        validate_schema_or_raise(proposal.proposed_schema)
+    except SchemaValidationError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid schema in proposal: {e.message}"
+        )
+
     # Get the asset
     asset_result = await session.execute(
         select(AssetDB).where(AssetDB.id == proposal.asset_id)
@@ -501,12 +483,13 @@ async def publish_from_proposal(
     current_contract = current_contract_result.scalar_one_or_none()
 
     # Create new contract from the proposal
+    # Default to BACKWARD compatibility for new contracts (safe for existing consumers)
     new_contract = ContractDB(
         asset_id=proposal.asset_id,
         version=publish_request.version,
         schema_def=proposal.proposed_schema,
-        compatibility_mode=current_contract.compatibility_mode if current_contract else None,
-        guarantees=current_contract.guarantees if current_contract else None,
+        compatibility_mode=current_contract.compatibility_mode if current_contract else CompatibilityMode.BACKWARD,
+        guarantees=current_contract.guarantees if current_contract else {},
         published_by=publish_request.published_by,
     )
     session.add(new_contract)
