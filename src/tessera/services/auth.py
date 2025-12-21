@@ -48,9 +48,7 @@ async def create_api_key(
         Created API key with the raw key (only time it's available)
     """
     # Verify team exists
-    team_result = await session.execute(
-        select(TeamDB).where(TeamDB.id == key_data.team_id)
-    )
+    team_result = await session.execute(select(TeamDB).where(TeamDB.id == key_data.team_id))
     team = team_result.scalar_one_or_none()
     if not team:
         raise ValueError(f"Team {key_data.team_id} not found")
@@ -118,9 +116,7 @@ async def validate_api_key(
 
     # Update last_used_at
     await session.execute(
-        update(APIKeyDB)
-        .where(APIKeyDB.id == api_key_db.id)
-        .values(last_used_at=now)
+        update(APIKeyDB).where(APIKeyDB.id == api_key_db.id).values(last_used_at=now)
     )
 
     return api_key_db, team_db
@@ -139,9 +135,7 @@ async def get_api_key(
     Returns:
         API key if found, None otherwise
     """
-    result = await session.execute(
-        select(APIKeyDB).where(APIKeyDB.id == key_id)
-    )
+    result = await session.execute(select(APIKeyDB).where(APIKeyDB.id == key_id))
     api_key_db = result.scalar_one_or_none()
     if not api_key_db:
         return None
@@ -216,9 +210,7 @@ async def revoke_api_key(
     Returns:
         Revoked API key if found, None otherwise
     """
-    result = await session.execute(
-        select(APIKeyDB).where(APIKeyDB.id == key_id)
-    )
+    result = await session.execute(select(APIKeyDB).where(APIKeyDB.id == key_id))
     api_key_db = result.scalar_one_or_none()
     if not api_key_db:
         return None
