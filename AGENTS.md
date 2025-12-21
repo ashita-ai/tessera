@@ -62,6 +62,12 @@ uv run python examples/quickstart.py
 
 ### Never Do
 
+**Git (CRITICAL)**:
+- NEVER commit directly to main - always use a feature branch and PR
+- NEVER push directly to main - all changes must go through pull requests
+- NEVER merge to main without PR approval
+- Force push to shared branches
+
 **Security (CRITICAL)**:
 - NEVER commit credentials to GitHub
 - No API keys, tokens, passwords in any file
@@ -74,8 +80,6 @@ uv run python examples/quickstart.py
 - Create placeholder implementations
 
 **Destructive**:
-- Work directly on main/master branch
-- Force push to shared branches
 - Delete failing tests instead of fixing them
 
 ---
