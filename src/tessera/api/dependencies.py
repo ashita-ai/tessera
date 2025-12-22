@@ -94,9 +94,7 @@ async def list_dependencies(
     if not asset_result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Asset not found")
 
-    query = select(AssetDependencyDB).where(
-        AssetDependencyDB.dependent_asset_id == asset_id
-    )
+    query = select(AssetDependencyDB).where(AssetDependencyDB.dependent_asset_id == asset_id)
     return await paginate(session, query, params, response_model=Dependency)
 
 
