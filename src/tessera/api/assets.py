@@ -165,6 +165,19 @@ async def search_assets(
     Searches for assets whose FQN contains the search query (case-insensitive).
     Requires read scope.
     """
+    # Build filters dict for cache key
+    filters = {}
+    if owner:
+        filters["owner"] = str(owner)
+    if environment:
+        filters["environment"] = environment
+    
+    # Try cache first (only for default pagination to keep cache simple)
+    if limit == settings.pagination_limit_default and offset == 0:
+        cached = await get_cached_asset_search(q, filters)
+        if cached:
+            return cached
+    
     base_query = (
         select(AssetDB)
         .where(AssetDB.fqn.ilike(f"%{q}%"))
