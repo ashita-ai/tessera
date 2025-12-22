@@ -11,28 +11,38 @@ The Kafka ecosystem solved producer/consumer coordination with schema registries
 ## How It Works
 
 ```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#6366f1', 'primaryTextColor': '#fff', 'primaryBorderColor': '#4f46e5', 'lineColor': '#64748b', 'secondaryColor': '#f1f5f9', 'tertiaryColor': '#f8fafc', 'noteBkgColor': '#fef3c7', 'noteTextColor': '#78350f', 'noteBorderColor': '#fbbf24', 'actorBkg': '#1e293b', 'actorTextColor': '#f8fafc', 'actorBorder': '#334155', 'signalColor': '#64748b', 'signalTextColor': '#1e293b'}}}%%
 sequenceDiagram
-    participant P as Producer
-    participant T as Tessera
-    participant C as Consumer
+    autonumber
+    participant P as 📦 Producer
+    participant T as ⚡ Tessera
+    participant C as 👥 Consumer
 
-    P->>T: 1. Create Asset
-    P->>T: 2. Publish Contract v1.0.0
-    C->>T: 3. Register as consumer
+    rect rgba(99, 102, 241, 0.1)
+        Note over P,C: Setup Phase
+        P->>T: Create Asset
+        P->>T: Publish Contract v1.0.0
+        C->>T: Register as consumer
+    end
 
-    Note over P,C: Time passes...
+    rect rgba(241, 245, 249, 0.5)
+        Note over P,C: ⏳ Time passes...
+    end
 
-    P->>T: 4. Publish breaking change
-    T->>T: Detect breaking change
-    T->>C: 5. Notify affected consumers
+    rect rgba(251, 146, 60, 0.1)
+        Note over P,C: Breaking Change Flow
+        P->>T: Publish breaking change
+        T-->>T: Detect breaking change
+        T->>C: Notify affected consumers
+    end
 
-    alt Consumer approves
-        C->>T: 6. Acknowledge (approved)
+    alt ✅ Consumer approves
+        C->>T: Acknowledge (approved)
         T->>P: All acknowledged
-        P->>T: 7. Publish Contract v2.0.0
-    else Consumer blocks
-        C->>T: 6. Acknowledge (blocked)
-        T->>P: Migration required
+        P->>T: Publish Contract v2.0.0
+    else 🚫 Consumer blocks
+        C->>T: Acknowledge (blocked)
+        T-->>P: Migration required
     end
 ```
 
@@ -89,6 +99,10 @@ All endpoints under `/api/v1`. Interactive docs at `/docs`.
 | Admin | API keys, webhooks, audit trail |
 
 Full reference: [docs/api.md](docs/api.md)
+
+## Deployment
+
+Docker Compose, Kubernetes, and Helm deployment options: [docs/deployment.md](docs/deployment.md)
 
 ## Compatibility Modes
 
