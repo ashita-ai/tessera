@@ -13,6 +13,9 @@ load_dotenv()
 # Disable auth for tests by default (individual auth tests can override)
 # Must be set before importing any tessera modules
 os.environ["AUTH_DISABLED"] = "true"
+# Disable Redis for tests by default (faster, tests should mock Redis when needed)
+if "REDIS_URL" not in os.environ:
+    os.environ["REDIS_URL"] = ""
 
 import pytest
 from httpx import ASGITransport, AsyncClient

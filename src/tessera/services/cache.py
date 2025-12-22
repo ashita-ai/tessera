@@ -24,7 +24,8 @@ async def get_redis_client() -> redis.Redis | None:
     """Get or create Redis client connection."""
     global _redis_pool, _redis_client
 
-    if not settings.redis_url:
+    # Fast path: if redis_url is None or empty string, skip connection attempt
+    if not settings.redis_url or settings.redis_url.strip() == "":
         return None
 
     if _redis_client is not None:
