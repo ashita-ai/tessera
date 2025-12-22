@@ -4,6 +4,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, FastAPI
+from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import ValidationError
 from slowapi.errors import RateLimitExceeded
@@ -98,6 +99,12 @@ api_v1.include_router(webhooks.router)
 api_v1.include_router(audit.router)
 
 app.include_router(api_v1)
+
+
+@app.get("/", include_in_schema=False)
+async def root() -> RedirectResponse:
+    """Redirect root to API documentation."""
+    return RedirectResponse(url="/docs")
 
 
 @app.get("/health")
