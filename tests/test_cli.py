@@ -19,9 +19,9 @@ class TestVersion:
         result = runner.invoke(app, ["version"])
         assert result.exit_code == 0
         # Strip ANSI color codes for comparison
-    import re
-    clean_output = re.sub(r'\x1b\[[0-9;]*m', '', result.output)
-    assert "tessera 0.1.0" in clean_output
+        import re
+        clean_output = re.sub(r'\x1b\[[0-9;]*m', '', result.output)
+        assert "tessera 0.1.0" in clean_output
 
 
 class TestTeamCommands:
