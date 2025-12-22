@@ -11,38 +11,44 @@ The Kafka ecosystem solved producer/consumer coordination with schema registries
 ## How It Works
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#6366f1', 'primaryTextColor': '#fff', 'primaryBorderColor': '#4f46e5', 'lineColor': '#64748b', 'secondaryColor': '#f1f5f9', 'tertiaryColor': '#f8fafc', 'noteBkgColor': '#fef3c7', 'noteTextColor': '#78350f', 'noteBorderColor': '#fbbf24', 'actorBkg': '#1e293b', 'actorTextColor': '#f8fafc', 'actorBorder': '#334155', 'signalColor': '#64748b', 'signalTextColor': '#1e293b'}}}%%
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#6366f1', 'primaryTextColor': '#fff', 'primaryBorderColor': '#4f46e5', 'lineColor': '#475569', 'secondaryColor': '#f1f5f9', 'tertiaryColor': '#f8fafc', 'noteBkgColor': '#fef3c7', 'noteTextColor': '#78350f', 'noteBorderColor': '#f59e0b', 'actorBkg': '#1e293b', 'actorTextColor': '#f8fafc', 'actorBorder': '#475569', 'signalColor': '#475569', 'signalTextColor': '#0f172a'}}}%%
 sequenceDiagram
     autonumber
     participant P as 📦 Producer
     participant T as ⚡ Tessera
     participant C as 👥 Consumer
 
-    rect rgba(99, 102, 241, 0.1)
-        Note over P,C: Setup Phase
+    rect rgba(34, 197, 94, 0.15)
+        Note over P,C: 🟢 BEFORE: Initial Setup
         P->>T: Create Asset
         P->>T: Publish Contract v1.0.0
         C->>T: Register as consumer
+        Note over C: ✓ Using v1.0.0
     end
 
-    rect rgba(241, 245, 249, 0.5)
-        Note over P,C: ⏳ Time passes...
+    rect rgba(241, 245, 249, 0.6)
+        Note over P,C: ⏳ Production usage...
     end
 
-    rect rgba(251, 146, 60, 0.1)
-        Note over P,C: Breaking Change Flow
+    rect rgba(239, 68, 68, 0.12)
+        Note over P,C: 🔴 AFTER: Breaking Change Proposed
         P->>T: Publish breaking change
-        T-->>T: Detect breaking change
-        T->>C: Notify affected consumers
+        T-->>T: Detect incompatibility
+        T->>C: ⚠️ Notify: schema changing
     end
 
-    alt ✅ Consumer approves
-        C->>T: Acknowledge (approved)
-        T->>P: All acknowledged
-        P->>T: Publish Contract v2.0.0
-    else 🚫 Consumer blocks
-        C->>T: Acknowledge (blocked)
-        T-->>P: Migration required
+    rect rgba(59, 130, 246, 0.12)
+        Note over P,C: 🔵 RESOLUTION
+        alt ✅ Approved
+            C->>T: Acknowledge OK
+            T->>P: All clear
+            P->>T: Publish v2.0.0
+            Note over C: ✓ Migrated to v2.0.0
+        else 🚫 Blocked
+            C->>T: Acknowledge BLOCKED
+            T-->>P: Cannot proceed
+            Note over C: ✓ Still on v1.0.0
+        end
     end
 ```
 
