@@ -10,45 +10,42 @@ The Kafka ecosystem solved producer/consumer coordination with schema registries
 
 ## How It Works
 
+**Without Tessera** — breaking changes break things:
+
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#6366f1', 'primaryTextColor': '#fff', 'primaryBorderColor': '#4f46e5', 'lineColor': '#475569', 'secondaryColor': '#f1f5f9', 'tertiaryColor': '#f8fafc', 'noteBkgColor': '#fef3c7', 'noteTextColor': '#78350f', 'noteBorderColor': '#f59e0b', 'actorBkg': '#1e293b', 'actorTextColor': '#f8fafc', 'actorBorder': '#475569', 'signalColor': '#475569', 'signalTextColor': '#0f172a'}}}%%
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#dc2626', 'primaryTextColor': '#fff', 'primaryBorderColor': '#b91c1c', 'lineColor': '#6b7280', 'noteBkgColor': '#fef2f2', 'noteTextColor': '#7f1d1d', 'noteBorderColor': '#fca5a5', 'actorBkg': '#6b7280', 'actorTextColor': '#f9fafb', 'actorBorder': '#4b5563', 'signalColor': '#6b7280', 'signalTextColor': '#1f2937'}}}%%
 sequenceDiagram
-    autonumber
+    participant P as 📦 Producer
+    participant C as 👥 Consumer
+
+    P->>P: Drop column from table
+    P--xC: 💥 Pipeline fails at 3am
+    Note over C: ❌ No warning<br/>❌ No migration time<br/>❌ Broken dashboards
+    C->>P: 😡 Slack: "Who broke prod?"
+```
+
+**With Tessera** — coordinate before you ship:
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#6366f1', 'primaryTextColor': '#fff', 'primaryBorderColor': '#4f46e5', 'lineColor': '#475569', 'noteBkgColor': '#f0fdf4', 'noteTextColor': '#14532d', 'noteBorderColor': '#86efac', 'actorBkg': '#1e293b', 'actorTextColor': '#f8fafc', 'actorBorder': '#475569', 'signalColor': '#475569', 'signalTextColor': '#0f172a'}}}%%
+sequenceDiagram
     participant P as 📦 Producer
     participant T as ⚡ Tessera
     participant C as 👥 Consumer
 
-    rect rgba(34, 197, 94, 0.15)
-        Note over P,C: 🟢 BEFORE: Initial Setup
-        P->>T: Create Asset
-        P->>T: Publish Contract v1.0.0
-        C->>T: Register as consumer
-        Note over C: ✓ Using v1.0.0
-    end
+    P->>T: Propose: drop column
+    T-->>T: Detect breaking change
+    T->>C: ⚠️ "Producer wants to drop user_id"
 
-    rect rgba(241, 245, 249, 0.6)
-        Note over P,C: ⏳ Production usage...
-    end
-
-    rect rgba(239, 68, 68, 0.12)
-        Note over P,C: 🔴 AFTER: Breaking Change Proposed
-        P->>T: Publish breaking change
-        T-->>T: Detect incompatibility
-        T->>C: ⚠️ Notify: schema changing
-    end
-
-    rect rgba(59, 130, 246, 0.12)
-        Note over P,C: 🔵 RESOLUTION
-        alt ✅ Approved
-            C->>T: Acknowledge OK
-            T->>P: All clear
-            P->>T: Publish v2.0.0
-            Note over C: ✓ Migrated to v2.0.0
-        else 🚫 Blocked
-            C->>T: Acknowledge BLOCKED
-            T-->>P: Cannot proceed
-            Note over C: ✓ Still on v1.0.0
-        end
+    alt ✅ Consumer ready
+        C->>T: Approve (migrated)
+        T->>P: All consumers ready
+        P->>T: Ship v2.0.0
+        Note over P,C: ✓ Zero downtime
+    else 🚫 Consumer blocked
+        C->>T: Block (need 2 weeks)
+        T->>P: Cannot ship yet
+        Note over P,C: ✓ No one gets paged
     end
 ```
 
