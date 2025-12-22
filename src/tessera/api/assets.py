@@ -559,16 +559,6 @@ async def create_contract(
             },
         )
 
-    # Resource-level auth: published_by must match auth.team_id or be admin
-    if published_by != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": "INSUFFICIENT_PERMISSIONS",
-                "message": "You can only publish contracts on behalf of your own team",
-            },
-        )
-
     # Validate schema is valid JSON Schema
     is_valid, errors = validate_json_schema(contract.schema_def)
     if not is_valid:

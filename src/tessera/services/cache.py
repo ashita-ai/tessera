@@ -238,11 +238,13 @@ async def invalidate_asset(asset_id: str) -> bool:
     """Invalidate cached asset and its contracts."""
     # Invalidate asset
     asset_deleted = await asset_cache.delete(asset_id)
-    # Invalidate asset contracts list
+    # Invalidate asset contracts list (stored in asset_cache with key "contracts:{asset_id}")
+    contracts_list_deleted = await asset_cache.delete(f"contracts:{asset_id}")
+    # Invalidate individual contract caches
     contracts_deleted = await invalidate_asset_contracts(asset_id)
     # Invalidate all search caches (search results may include this asset)
     await asset_cache.invalidate_pattern("search:*")
-    return asset_deleted or contracts_deleted > 0
+    return asset_deleted or contracts_list_deleted or contracts_deleted > 0
 
 
 async def cache_asset_search(query: str, filters: dict[str, Any], results: dict[str, Any]) -> bool:
