@@ -732,12 +732,24 @@ async def list_asset_contracts(
 
     Requires read scope.
     """
+    # Try cache first (only for default pagination to keep cache simple)
+    if params.limit == settings.pagination_limit_default and params.offset == 0:
+        cached = await get_cached_asset_contracts_list(str(asset_id))
+        if cached:
+            return cached
+    
     query = (
         select(ContractDB)
         .where(ContractDB.asset_id == asset_id)
         .order_by(ContractDB.published_at.desc())
     )
-    return await paginate(session, query, params, response_model=Contract)
+    result = await paginate(session, query, params, response_model=Contract)
+    
+    # Cache result if default pagination
+    if params.limit == settings.pagination_limit_default and params.offset == 0:
+        await cache_asset_contracts_list(str(asset_id), result)
+    
+    return result
 
 
 @router.get("/{asset_id}/contracts/history")
