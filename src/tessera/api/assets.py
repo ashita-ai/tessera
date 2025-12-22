@@ -38,10 +38,12 @@ from tessera.services.cache import (
     asset_cache,
     cache_asset,
     cache_asset_contracts_list,
+    cache_asset_search,
     cache_contract,
     contract_cache,
     get_cached_asset,
     get_cached_asset_contracts_list,
+    get_cached_asset_search,
     get_cached_contract,
     get_cached_schema_diff,
     invalidate_asset,
@@ -206,12 +208,18 @@ async def search_assets(
         for asset, team in rows
     ]
 
-    return {
+    response = {
         "results": results,
         "total": total,
         "limit": limit,
         "offset": offset,
     }
+    
+    # Cache result if default pagination
+    if limit == settings.pagination_limit_default and offset == 0:
+        await cache_asset_search(q, filters, response)
+    
+    return response
 
 
 @router.get("/{asset_id}", response_model=Asset)

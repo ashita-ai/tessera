@@ -240,4 +240,24 @@ async def invalidate_asset(asset_id: str) -> bool:
     asset_deleted = await asset_cache.delete(asset_id)
     # Invalidate asset contracts list
     contracts_deleted = await invalidate_asset_contracts(asset_id)
+    # Invalidate all search caches (search results may include this asset)
+    await asset_cache.invalidate_pattern("search:*")
     return asset_deleted or contracts_deleted > 0
+
+
+async def cache_asset_search(query: str, filters: dict[str, Any], results: dict[str, Any]) -> bool:
+    """Cache asset search results."""
+    # Create cache key from query and filters
+    filter_str = ":".join(f"{k}={v}" for k, v in sorted(filters.items()))
+    cache_key = f"search:{_hash_dict({'q': query, 'filters': filter_str})}"
+    return await asset_cache.set(cache_key, results)
+
+
+async def get_cached_asset_search(query: str, filters: dict[str, Any]) -> dict[str, Any] | None:
+    """Get cached asset search results."""
+    filter_str = ":".join(f"{k}={v}" for k, v in sorted(filters.items()))
+    cache_key = f"search:{_hash_dict({'q': query, 'filters': filter_str})}"
+    result = await asset_cache.get(cache_key)
+    if isinstance(result, dict):
+        return result
+    return None
