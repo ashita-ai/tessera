@@ -16,6 +16,8 @@ from tessera.api import (
     assets,
     audit,
     contracts,
+    dependencies,
+    impact,
     proposals,
     registrations,
     schemas,
@@ -84,6 +86,8 @@ app.add_exception_handler(Exception, generic_exception_handler)
 api_v1 = APIRouter(prefix="/api/v1")
 api_v1.include_router(teams.router, prefix="/teams", tags=["teams"])
 api_v1.include_router(assets.router, prefix="/assets", tags=["assets"])
+api_v1.include_router(dependencies.router, prefix="/assets", tags=["dependencies"])
+api_v1.include_router(impact.router, prefix="/assets", tags=["impact"])
 api_v1.include_router(contracts.router, prefix="/contracts", tags=["contracts"])
 api_v1.include_router(registrations.router, prefix="/registrations", tags=["registrations"])
 api_v1.include_router(proposals.router, prefix="/proposals", tags=["proposals"])
