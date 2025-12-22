@@ -737,18 +737,18 @@ async def list_asset_contracts(
         cached = await get_cached_asset_contracts_list(str(asset_id))
         if cached:
             return cached
-    
+
     query = (
         select(ContractDB)
         .where(ContractDB.asset_id == asset_id)
         .order_by(ContractDB.published_at.desc())
     )
     result = await paginate(session, query, params, response_model=Contract)
-    
+
     # Cache result if default pagination
     if params.limit == settings.pagination_limit_default and params.offset == 0:
         await cache_asset_contracts_list(str(asset_id), result)
-    
+
     return result
 
 

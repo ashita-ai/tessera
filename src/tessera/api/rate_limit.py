@@ -57,6 +57,7 @@ def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded) -> Res
     return response
 
 # Helper decorators for common scopes using callables for dynamic settings
-limit_read = limiter.limit(lambda: settings.rate_limit_read)
-limit_write = limiter.limit(lambda: settings.rate_limit_write)
-limit_admin = limiter.limit(lambda: settings.rate_limit_admin)
+# When rate limiting is disabled, use empty string to disable limits
+limit_read = limiter.limit(lambda: settings.rate_limit_read if settings.rate_limit_enabled else "")
+limit_write = limiter.limit(lambda: settings.rate_limit_write if settings.rate_limit_enabled else "")
+limit_admin = limiter.limit(lambda: settings.rate_limit_admin if settings.rate_limit_enabled else "")

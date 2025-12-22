@@ -89,29 +89,29 @@ async def compare_contracts(
     """
     # Fetch both contracts
     result1 = await session.execute(
-        select(ContractDB).where(ContractDB.id == request.contract_id_1)
+        select(ContractDB).where(ContractDB.id == compare_req.contract_id_1)
     )
     contract1 = result1.scalar_one_or_none()
     if not contract1:
         raise NotFoundError(
             code=ErrorCode.CONTRACT_NOT_FOUND,
-            message=f"Contract with ID '{request.contract_id_1}' not found",
-            details={"contract_id": str(request.contract_id_1)},
+            message=f"Contract with ID '{compare_req.contract_id_1}' not found",
+            details={"contract_id": str(compare_req.contract_id_1)},
         )
 
     result2 = await session.execute(
-        select(ContractDB).where(ContractDB.id == request.contract_id_2)
+        select(ContractDB).where(ContractDB.id == compare_req.contract_id_2)
     )
     contract2 = result2.scalar_one_or_none()
     if not contract2:
         raise NotFoundError(
             code=ErrorCode.CONTRACT_NOT_FOUND,
-            message=f"Contract with ID '{request.contract_id_2}' not found",
-            details={"contract_id": str(request.contract_id_2)},
+            message=f"Contract with ID '{compare_req.contract_id_2}' not found",
+            details={"contract_id": str(compare_req.contract_id_2)},
         )
 
     # Use specified compatibility mode or default to first contract's mode
-    mode = request.compatibility_mode or contract1.compatibility_mode
+    mode = compare_req.compatibility_mode or contract1.compatibility_mode
 
     # Try cache first for schema diff
     cached_diff = await get_cached_schema_diff(contract1.schema_def, contract2.schema_def)

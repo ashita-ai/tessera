@@ -89,10 +89,34 @@ class TestRateLimiting:
         # Third request - rate limit exceeded
         response = await client.get("/api/v1/assets", headers=headers)
         assert response.status_code == 429
-        # slowapi might use X-RateLimit-Retry-After or similar
-        # but the TODO specifically mentioned Retry-After.
-        # Let's see what we have.
-        print(f"Headers: {response.headers}")
-        assert any(h for h in response.headers if "ratelimit" in h.lower() or "retry" in h.lower())
-        assert "Too Many Requests" in response.text
+        # Check for Retry-After header (required by TODO.md)
+        assert "Retry-After" in response.headers
+        assert "Too Many Requests" in response.text or "RATE_LIMIT_EXCEEDED" in response.text
+
+    async def test_rate_limit_disabled(self, session: AsyncSession):
+        """Test that rate limiting can be disabled."""
+        from tessera.db import database
+        from tessera.config import settings
+        
+        # Disable rate limiting
+        original_rate_limit_enabled = settings.rate_limit_enabled
+        settings.rate_limit_enabled = False
+        
+        team, key = await create_team_and_key(session, "no-limit-team", [APIKeyScope.READ])
+        headers = {"Authorization": f"Bearer {key}"}
+        
+        async def get_test_session() -> AsyncGenerator[AsyncSession, None]:
+            yield session
+        
+        app.dependency_overrides[database.get_session] = get_test_session
+        
+        try:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                # Make many requests - should all succeed when rate limiting is disabled
+                for i in range(10):
+                    response = await client.get("/api/v1/assets", headers=headers)
+                    assert response.status_code == 200, f"Request {i+1} should succeed when rate limiting is disabled"
+        finally:
+            app.dependency_overrides.clear()
+            settings.rate_limit_enabled = original_rate_limit_enabled
 
