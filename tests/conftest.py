@@ -28,10 +28,14 @@ from tessera.main import app
 # Support both PostgreSQL and SQLite
 # SQLite: DATABASE_URL=sqlite+aiosqlite:///./test.db or sqlite+aiosqlite:///:memory:
 # PostgreSQL: DATABASE_URL=postgresql+asyncpg://user:pass@host/db
+# Default to SQLite for fast tests - override with DATABASE_URL env var if needed
 TEST_DATABASE_URL = os.environ.get(
     "DATABASE_URL",
     "sqlite+aiosqlite:///:memory:",  # Default to in-memory SQLite for fast tests
 )
+# Ensure DATABASE_URL is set for tests if not already set
+if "DATABASE_URL" not in os.environ:
+    os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 
 _USE_SQLITE = TEST_DATABASE_URL.startswith("sqlite")
 
