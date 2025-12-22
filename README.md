@@ -36,17 +36,10 @@ sequenceDiagram
     P->>T: Propose: drop column
     T-->>T: Detect breaking change
     T->>C: ⚠️ "Producer wants to drop user_id"
-
-    alt ✅ Consumer ready
-        C->>T: Approve (migrated)
-        T->>P: All consumers ready
-        P->>T: Ship v2.0.0
-        Note over P,C: ✓ Zero downtime
-    else 🚫 Consumer blocked
-        C->>T: Block (need 2 weeks)
-        T->>P: Cannot ship yet
-        Note over P,C: ✓ No one gets paged
-    end
+    C->>T: ✅ Approve (migrated)
+    T->>P: All consumers ready
+    P->>T: Ship v2.0.0
+    Note over P,C: ✓ Zero downtime, no one paged
 ```
 
 **Producers** own assets and publish versioned contracts (JSON Schema + guarantees).
