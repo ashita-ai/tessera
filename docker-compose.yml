@@ -37,6 +37,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://tessera:tessera@db:5432/tessera
       REDIS_URL: redis://redis:6379/0
       BOOTSTRAP_API_KEY: tessera-dev-key
+      AUTH_DISABLED: "true"
       API_HOST: "0.0.0.0"
       API_PORT: "8000"
       # Webhook configuration - sends events to the webhook-receiver service
