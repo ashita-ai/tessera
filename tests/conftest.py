@@ -57,6 +57,32 @@ def create_tables(connection):
 
 def drop_tables(connection):
     """Drop all tables."""
+    # For PostgreSQL, drop with CASCADE to handle type dependencies
+    if not _USE_SQLITE:
+        # Drop all tables with CASCADE to handle dependencies
+        from sqlalchemy import inspect
+        inspector = inspect(connection)
+        tables = inspector.get_table_names(schema="core")
+        tables.extend(inspector.get_table_names(schema="workflow"))
+        tables.extend(inspector.get_table_names(schema="audit"))
+        for table in tables:
+            try:
+                connection.execute(text(f'DROP TABLE IF EXISTS core."{table}" CASCADE'))
+            except Exception:
+                pass
+            try:
+                connection.execute(text(f'DROP TABLE IF EXISTS workflow."{table}" CASCADE'))
+            except Exception:
+                pass
+            try:
+                connection.execute(text(f'DROP TABLE IF EXISTS audit."{table}" CASCADE'))
+            except Exception:
+                pass
+        # Also drop types that might have dependencies
+        try:
+            connection.execute(text("DROP TYPE IF EXISTS dependencytype CASCADE"))
+        except Exception:
+            pass
     Base.metadata.drop_all(connection)
 
 
