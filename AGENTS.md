@@ -62,6 +62,13 @@ uv run python examples/quickstart.py
 
 ### Never Do
 
+**GitHub Issues (CRITICAL)**:
+- NEVER close an issue unless ALL acceptance criteria are met
+- NEVER mark work as done if it's partially complete
+- If an issue has checkboxes, ALL boxes must be checked before closing
+- If you can't complete all criteria, leave the issue open and comment on what remains
+- Closing issues prematurely erodes trust and creates hidden technical debt
+
 **Git (CRITICAL)**:
 - NEVER commit directly to main - always use a feature branch and PR
 - NEVER push directly to main - all changes must go through pull requests
