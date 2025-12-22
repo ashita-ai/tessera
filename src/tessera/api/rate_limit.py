@@ -27,10 +27,11 @@ def get_rate_limit_key(request: Request) -> str:
 
 # Initialize limiter
 # Rate limiting can be disabled via settings.rate_limit_enabled
+# Note: enabled must be a boolean, not a callable. We'll control it via middleware.
 limiter = Limiter(
     key_func=get_rate_limit_key,
-    enabled=lambda: settings.rate_limit_enabled,
-    default_limits=[lambda: settings.rate_limit_global if settings.rate_limit_enabled else ""],
+    enabled=True,  # Always enabled at limiter level, controlled via middleware
+    default_limits=[lambda: settings.rate_limit_global],
 )
 
 def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded) -> Response:
@@ -58,6 +59,10 @@ def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded) -> Res
 
 # Helper decorators for common scopes using callables for dynamic settings
 # When rate limiting is disabled, use empty string to disable limits
-limit_read = limiter.limit(lambda: settings.rate_limit_read if settings.rate_limit_enabled else "")
-limit_write = limiter.limit(lambda: settings.rate_limit_write if settings.rate_limit_enabled else "")
-limit_admin = limiter.limit(lambda: settings.rate_limit_admin if settings.rate_limit_enabled else "")
+def _get_rate_limit(limit_str: str) -> str:
+    """Get rate limit string, or empty string if rate limiting is disabled."""
+    return limit_str if settings.rate_limit_enabled else ""
+
+limit_read = limiter.limit(lambda: _get_rate_limit(settings.rate_limit_read))
+limit_write = limiter.limit(lambda: _get_rate_limit(settings.rate_limit_write))
+limit_admin = limiter.limit(lambda: _get_rate_limit(settings.rate_limit_admin))
