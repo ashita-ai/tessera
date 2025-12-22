@@ -36,9 +36,13 @@ from tessera.models import (
 from tessera.models.enums import APIKeyScope, ContractStatus, RegistrationStatus
 from tessera.services.cache import (
     asset_cache,
+    cache_asset,
+    cache_contract,
     contract_cache,
+    get_cached_asset,
     get_cached_contract,
     get_cached_schema_diff,
+    invalidate_asset,
     cache_schema_diff,
 )
 from tessera.services import (
@@ -221,8 +225,8 @@ async def get_asset(
 
     Requires read scope.
     """
-    # Try cache
-    cached = await asset_cache.get(str(asset_id))
+    # Try cache first
+    cached = await get_cached_asset(str(asset_id))
     if cached:
         return cached
 
@@ -236,7 +240,7 @@ async def get_asset(
         raise HTTPException(status_code=404, detail="Asset not found")
 
     # Cache result
-    await asset_cache.set(str(asset_id), Asset.model_validate(asset).model_dump())
+    await cache_asset(str(asset_id), Asset.model_validate(asset).model_dump())
 
     return asset
 
@@ -286,8 +290,8 @@ async def update_asset(
     await session.flush()
     await session.refresh(asset)
 
-    # Invalidate cache
-    await asset_cache.delete(str(asset_id))
+    # Invalidate asset and contract caches
+    await invalidate_asset(str(asset_id))
 
     return asset
 
@@ -595,6 +599,9 @@ async def create_contract(
             publisher_id=published_by,
             version=new_contract.version,
         )
+        # Invalidate asset and contract caches, cache new contract
+        await invalidate_asset(str(asset_id))
+        await cache_contract(str(new_contract.id), Contract.model_validate(new_contract).model_dump())
         return {
             "action": "published",
             "contract": Contract.model_validate(new_contract).model_dump(),
@@ -618,6 +625,9 @@ async def create_contract(
             version=new_contract.version,
             change_type=str(diff_result.change_type),
         )
+        # Invalidate asset and contract caches, cache new contract
+        await invalidate_asset(str(asset_id))
+        await cache_contract(str(new_contract.id), Contract.model_validate(new_contract).model_dump())
         return {
             "action": "published",
             "change_type": str(diff_result.change_type),
@@ -635,6 +645,9 @@ async def create_contract(
             change_type=str(diff_result.change_type),
             force=True,
         )
+        # Invalidate asset and contract caches, cache new contract
+        await invalidate_asset(str(asset_id))
+        await cache_contract(str(new_contract.id), Contract.model_validate(new_contract).model_dump())
         return {
             "action": "force_published",
             "change_type": str(diff_result.change_type),

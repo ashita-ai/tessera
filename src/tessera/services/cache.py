@@ -206,3 +206,25 @@ async def get_cached_schema_diff(
     if isinstance(result, dict):
         return result
     return None
+
+
+async def cache_asset(asset_id: str, asset_data: dict[str, Any]) -> bool:
+    """Cache an asset by ID."""
+    return await asset_cache.set(asset_id, asset_data)
+
+
+async def get_cached_asset(asset_id: str) -> dict[str, Any] | None:
+    """Get an asset from cache."""
+    result = await asset_cache.get(asset_id)
+    if isinstance(result, dict):
+        return result
+    return None
+
+
+async def invalidate_asset(asset_id: str) -> bool:
+    """Invalidate cached asset and its contracts."""
+    # Invalidate asset
+    asset_deleted = await asset_cache.delete(asset_id)
+    # Invalidate asset contracts list
+    contracts_deleted = await invalidate_asset_contracts(asset_id)
+    return asset_deleted or contracts_deleted > 0
