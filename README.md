@@ -10,40 +10,30 @@ The Kafka ecosystem solved producer/consumer coordination with schema registries
 
 ## How It Works
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              TESSERA                                        │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  PRODUCER                          CONSUMER                                 │
-│  ────────                          ────────                                 │
-│                                                                             │
-│  1. Create Asset ──────────────────────────────────────────────────────┐    │
-│     (table, view, model)                                               │    │
-│                                                                        │    │
-│  2. Publish Contract ──────────┐                                       │    │
-│     (schema + guarantees)      │                                       │    │
-│                                ▼                                       │    │
-│                         ┌────────────┐                                 │    │
-│                         │  CONTRACT  │◄───── 3. Register ──────────────┘    │
-│                         │   v1.0.0   │       (declare dependency)           │
-│                         └────────────┘                                      │
-│                                                                             │
-│  4. Breaking Change ───────────┐                                            │
-│     (drop column, change type) │                                            │
-│                                ▼                                            │
-│                         ┌────────────┐                                      │
-│                         │  PROPOSAL  │──────► 5. Notify ──────────────┐     │
-│                         │  (pending) │        (affected consumers)    │     │
-│                         └────────────┘                                │     │
-│                                ▲                                      │     │
-│                                │                                      ▼     │
-│                                └─────────── 6. Acknowledge ───────────┘     │
-│                                             (approve/block/migrate)         │
-│                                                                             │
-│  7. Publish v2.0.0 ◄─────── (all acknowledged)                              │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+sequenceDiagram
+    participant P as Producer
+    participant T as Tessera
+    participant C as Consumer
+
+    P->>T: 1. Create Asset
+    P->>T: 2. Publish Contract v1.0.0
+    C->>T: 3. Register as consumer
+
+    Note over P,C: Time passes...
+
+    P->>T: 4. Publish breaking change
+    T->>T: Detect breaking change
+    T->>C: 5. Notify affected consumers
+
+    alt Consumer approves
+        C->>T: 6. Acknowledge (approved)
+        T->>P: All acknowledged
+        P->>T: 7. Publish Contract v2.0.0
+    else Consumer blocks
+        C->>T: 6. Acknowledge (blocked)
+        T->>P: Migration required
+    end
 ```
 
 **Producers** own assets and publish versioned contracts (JSON Schema + guarantees).
@@ -75,9 +65,9 @@ DATABASE_URL=sqlite+aiosqlite:///:memory: uv run pytest
 ## CLI
 
 ```bash
-tessera team create --name "Analytics" --slug analytics
-tessera asset create --team <id> --fqn warehouse.core.users --type table
-tessera contract publish --asset <id> --schema @schema.json
+tessera team create "Analytics"
+tessera asset create warehouse.core.users --team <team-id>
+tessera contract publish --asset <id> --team <id> --version 1.0.0 --schema schema.json
 tessera register --asset <id> --team <consumer-id>
 tessera proposal acknowledge <id> --team <id> --response approved
 ```

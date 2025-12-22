@@ -8,7 +8,16 @@ Tessera provides a command-line interface for managing data contracts.
 uv sync --all-extras
 ```
 
-## Commands
+## Global Options
+
+```bash
+tessera --help              # Show all commands
+tessera --install-completion # Install shell completion
+```
+
+---
+
+## Server
 
 ### `tessera serve`
 
@@ -31,8 +40,14 @@ Show Tessera version.
 Create a new team.
 
 ```bash
-tessera team create --name "Data Platform" --slug data-platform
+tessera team create "Data Platform"
+tessera team create "Analytics" --metadata '{"slack": "#analytics"}'
 ```
+
+| Argument/Option | Description |
+|-----------------|-------------|
+| `NAME` | Team name (required) |
+| `-m, --metadata` | JSON metadata |
 
 ### `tessera team list`
 
@@ -59,17 +74,22 @@ tessera team get <team-id>
 Create a new asset.
 
 ```bash
-tessera asset create \
-  --team <team-id> \
-  --fqn warehouse.schema.table \
-  --type table
+tessera asset create warehouse.analytics.users --team <team-id>
+tessera asset create warehouse.core.orders --team <team-id> --metadata '{"owner": "jane"}'
 ```
+
+| Argument/Option | Description |
+|-----------------|-------------|
+| `FQN` | Fully qualified name (required) |
+| `-t, --team` | Owner team ID (required) |
+| `-m, --metadata` | JSON metadata |
 
 ### `tessera asset list`
 
 List assets with optional filters.
 
 ```bash
+tessera asset list
 tessera asset list --team <team-id>
 ```
 
@@ -86,7 +106,7 @@ tessera asset get <asset-id>
 Search assets by fully-qualified name.
 
 ```bash
-tessera asset search --fqn warehouse.schema.%
+tessera asset search --fqn warehouse.analytics.%
 ```
 
 ---
@@ -100,13 +120,27 @@ Publish a new contract version.
 ```bash
 tessera contract publish \
   --asset <asset-id> \
-  --schema @schema.json \
-  --compatibility backward
+  --team <team-id> \
+  --version 1.0.0 \
+  --schema schema.json
+
+# Force breaking change
+tessera contract publish \
+  --asset <asset-id> \
+  --team <team-id> \
+  --version 2.0.0 \
+  --schema new-schema.json \
+  --force
 ```
 
-Options:
-- `--compatibility`: `backward` (default), `forward`, `full`, `none`
-- `--force`: Skip breaking change workflow
+| Option | Description |
+|--------|-------------|
+| `-a, --asset` | Asset ID (required) |
+| `-t, --team` | Publisher team ID (required) |
+| `-v, --version` | Contract version (required) |
+| `-s, --schema` | Path to JSON schema file (required) |
+| `-c, --compat` | Compatibility mode: `backward`, `forward`, `full`, `none` (default: backward) |
+| `-f, --force` | Force publish breaking changes |
 
 ### `tessera contract list`
 
@@ -121,7 +155,7 @@ tessera contract list --asset <asset-id>
 Show differences between contract versions.
 
 ```bash
-tessera contract diff --asset <asset-id> --from v1 --to v2
+tessera contract diff --asset <asset-id> --from 1.0.0 --to 2.0.0
 ```
 
 ### `tessera contract impact`
@@ -129,7 +163,7 @@ tessera contract diff --asset <asset-id> --from v1 --to v2
 Analyze impact of a proposed schema change.
 
 ```bash
-tessera contract impact --asset <asset-id> --schema @new-schema.json
+tessera contract impact --asset <asset-id> --schema new-schema.json
 ```
 
 ---
@@ -142,10 +176,16 @@ Register as a consumer of an asset.
 
 ```bash
 tessera register --asset <asset-id> --team <consumer-team-id>
+
+# Pin to specific version
+tessera register --asset <asset-id> --team <consumer-team-id> --pin 1.0.0
 ```
 
-Options:
-- `--pin`: Pin to a specific contract version
+| Option | Description |
+|--------|-------------|
+| `-a, --asset` | Asset ID (required) |
+| `-t, --team` | Consumer team ID (required) |
+| `-p, --pin` | Pin to specific contract version |
 
 ---
 
@@ -156,7 +196,9 @@ Options:
 List breaking change proposals.
 
 ```bash
-tessera proposal list --asset <asset-id> --status pending
+tessera proposal list
+tessera proposal list --asset <asset-id>
+tessera proposal list --status pending
 ```
 
 ### `tessera proposal get`
@@ -180,12 +222,16 @@ tessera proposal status <proposal-id>
 Acknowledge a breaking change proposal.
 
 ```bash
-tessera proposal acknowledge <proposal-id> \
-  --team <team-id> \
-  --response approved
+tessera proposal acknowledge <proposal-id> --team <team-id>
+tessera proposal acknowledge <proposal-id> --team <team-id> --response blocked --notes "Need migration time"
 ```
 
-Responses: `approved`, `blocked`, `will_migrate`
+| Argument/Option | Description |
+|-----------------|-------------|
+| `PROPOSAL_ID` | Proposal ID (required) |
+| `-t, --team` | Consumer team ID (required) |
+| `-r, --response` | Response: `approved`, `blocked`, `migrating` (default: approved) |
+| `-n, --notes` | Optional notes |
 
 ### `tessera proposal withdraw`
 
@@ -220,8 +266,22 @@ tessera proposal publish <proposal-id>
 Sync dbt models with Tessera.
 
 ```bash
+# Basic sync
 tessera dbt sync --manifest target/manifest.json --team <team-id>
+
+# Create assets for new models
+tessera dbt sync --manifest target/manifest.json --team <team-id> --create-assets
+
+# Auto-publish compatible changes
+tessera dbt sync --manifest target/manifest.json --team <team-id> --publish-compatible
 ```
+
+| Option | Description |
+|--------|-------------|
+| `-m, --manifest` | Path to manifest.json (default: target/manifest.json) |
+| `-t, --team` | Owner team ID for new assets |
+| `-c, --create-assets` | Create assets for new models |
+| `--publish-compatible` | Auto-publish compatible schema changes |
 
 ### `tessera dbt check`
 
@@ -247,19 +307,13 @@ tessera dbt register --manifest target/manifest.json --team <team-id>
 |----------|-------------|---------|
 | `TESSERA_API_URL` | API server URL | `http://localhost:8000` |
 | `TESSERA_API_KEY` | API key for authentication | - |
-| `DATABASE_URL` | Database connection string | - |
 
 ---
 
 ## Shell Completion
 
 ```bash
-# Bash
 tessera --install-completion bash
-
-# Zsh
 tessera --install-completion zsh
-
-# Fish
 tessera --install-completion fish
 ```
