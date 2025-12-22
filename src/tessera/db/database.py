@@ -92,17 +92,18 @@ async def dispose_engine() -> None:
 async def init_db() -> None:
     """Initialize database schemas and tables.
 
-    Note: This function requires PostgreSQL. For SQLite, use Alembic migrations
-    which handle schema differences automatically.
+    Supports both PostgreSQL (with schemas) and SQLite (without schemas).
     """
     engine = get_engine()
+    is_sqlite = settings.database_url.startswith("sqlite")
+
     async with engine.begin() as conn:
-        # Create schemas first (required for table creation)
-        # These statements will fail on SQLite - use Alembic migrations instead
-        await conn.execute(text("CREATE SCHEMA IF NOT EXISTS core"))
-        await conn.execute(text("CREATE SCHEMA IF NOT EXISTS workflow"))
-        await conn.execute(text("CREATE SCHEMA IF NOT EXISTS audit"))
-        # Then create tables
+        if not is_sqlite:
+            # PostgreSQL: Create schemas first (required for table creation)
+            await conn.execute(text("CREATE SCHEMA IF NOT EXISTS core"))
+            await conn.execute(text("CREATE SCHEMA IF NOT EXISTS workflow"))
+            await conn.execute(text("CREATE SCHEMA IF NOT EXISTS audit"))
+        # Create tables
         await conn.run_sync(Base.metadata.create_all)
 
 

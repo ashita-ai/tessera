@@ -70,7 +70,13 @@ def generate_customers_v2_breaking():
     data = {
         "customer_id": ["C001", "C002", "C003", "C004", "C005"],  # Changed from int to string!
         # email removed - breaking change!
-        "full_name": ["Alice Smith", "Bob Jones", "Charlie Brown", "Diana Ross", "Eve Wilson"],  # renamed
+        "full_name": [
+            "Alice Smith",
+            "Bob Jones",
+            "Charlie Brown",
+            "Diana Ross",
+            "Eve Wilson",
+        ],  # renamed
         "created_at": [
             datetime(2024, 1, 15, 10, 30, 0),
             datetime(2024, 2, 20, 14, 45, 0),
@@ -101,7 +107,16 @@ def generate_orders():
             date(2024, 6, 12),
             date(2024, 6, 15),
         ],
-        "status": ["shipped", "delivered", "delivered", "processing", "shipped", "delivered", "shipped", "processing"],
+        "status": [
+            "shipped",
+            "delivered",
+            "delivered",
+            "processing",
+            "shipped",
+            "delivered",
+            "shipped",
+            "processing",
+        ],
     }
 
     table = pa.table(data)

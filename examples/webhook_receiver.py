@@ -40,11 +40,14 @@ def verify_signature(payload: bytes, signature: str | None) -> bool:
     if not signature or not signature.startswith("sha256="):
         return False
 
-    expected = "sha256=" + hmac.new(
-        WEBHOOK_SECRET.encode(),
-        payload,
-        hashlib.sha256,
-    ).hexdigest()
+    expected = (
+        "sha256="
+        + hmac.new(
+            WEBHOOK_SECRET.encode(),
+            payload,
+            hashlib.sha256,
+        ).hexdigest()
+    )
 
     return hmac.compare_digest(expected, signature)
 
@@ -56,14 +59,16 @@ def format_breaking_change(bc: dict) -> str:
 
 def display_proposal_created(payload: dict):
     """Display proposal.created event."""
-    console.print(Panel.fit(
-        f"[bold red]BREAKING CHANGE PROPOSED[/bold red]\n\n"
-        f"Asset: {payload.get('asset_fqn', 'unknown')}\n"
-        f"Version: {payload.get('proposed_version', 'unknown')}\n"
-        f"Producer: {payload.get('producer_team_name', 'unknown')}",
-        title="proposal.created",
-        border_style="red"
-    ))
+    console.print(
+        Panel.fit(
+            f"[bold red]BREAKING CHANGE PROPOSED[/bold red]\n\n"
+            f"Asset: {payload.get('asset_fqn', 'unknown')}\n"
+            f"Version: {payload.get('proposed_version', 'unknown')}\n"
+            f"Producer: {payload.get('producer_team_name', 'unknown')}",
+            title="proposal.created",
+            border_style="red",
+        )
+    )
 
     if payload.get("breaking_changes"):
         console.print("\n[bold]Breaking Changes:[/bold]")
@@ -78,38 +83,44 @@ def display_proposal_created(payload: dict):
 
 def display_proposal_acknowledged(payload: dict):
     """Display proposal.acknowledged event."""
-    console.print(Panel.fit(
-        f"[bold green]CONSUMER ACKNOWLEDGED[/bold green]\n\n"
-        f"Asset: {payload.get('asset_fqn', 'unknown')}\n"
-        f"Consumer: {payload.get('consumer_team_name', 'unknown')}\n"
-        f"Response: {payload.get('response', 'unknown')}\n"
-        f"Pending: {payload.get('pending_count', '?')} | "
-        f"Acknowledged: {payload.get('acknowledged_count', '?')}",
-        title="proposal.acknowledged",
-        border_style="green"
-    ))
+    console.print(
+        Panel.fit(
+            f"[bold green]CONSUMER ACKNOWLEDGED[/bold green]\n\n"
+            f"Asset: {payload.get('asset_fqn', 'unknown')}\n"
+            f"Consumer: {payload.get('consumer_team_name', 'unknown')}\n"
+            f"Response: {payload.get('response', 'unknown')}\n"
+            f"Pending: {payload.get('pending_count', '?')} | "
+            f"Acknowledged: {payload.get('acknowledged_count', '?')}",
+            title="proposal.acknowledged",
+            border_style="green",
+        )
+    )
 
 
 def display_contract_published(payload: dict):
     """Display contract.published event."""
-    console.print(Panel.fit(
-        f"[bold blue]CONTRACT PUBLISHED[/bold blue]\n\n"
-        f"Asset: {payload.get('asset_fqn', 'unknown')}\n"
-        f"Version: {payload.get('version', 'unknown')}\n"
-        f"Producer: {payload.get('producer_team_name', 'unknown')}",
-        title="contract.published",
-        border_style="blue"
-    ))
+    console.print(
+        Panel.fit(
+            f"[bold blue]CONTRACT PUBLISHED[/bold blue]\n\n"
+            f"Asset: {payload.get('asset_fqn', 'unknown')}\n"
+            f"Version: {payload.get('version', 'unknown')}\n"
+            f"Producer: {payload.get('producer_team_name', 'unknown')}",
+            title="contract.published",
+            border_style="blue",
+        )
+    )
 
 
 def display_generic_event(event_type: str, payload: dict):
     """Display any other event type."""
-    console.print(Panel.fit(
-        f"[bold]{event_type.upper()}[/bold]\n\n"
-        f"{json.dumps(payload, indent=2, default=str)[:500]}",
-        title=event_type,
-        border_style="yellow"
-    ))
+    console.print(
+        Panel.fit(
+            f"[bold]{event_type.upper()}[/bold]\n\n"
+            f"{json.dumps(payload, indent=2, default=str)[:500]}",
+            title=event_type,
+            border_style="yellow",
+        )
+    )
 
 
 @app.post("/webhooks")
@@ -130,16 +141,20 @@ async def receive_webhook(request: Request):
         raise HTTPException(status_code=400, detail="Invalid JSON")
 
     # Store event
-    received_events.append({
-        "received_at": datetime.now().isoformat(),
-        "event": event,
-    })
+    received_events.append(
+        {
+            "received_at": datetime.now().isoformat(),
+            "event": event,
+        }
+    )
 
     # Display event
     event_type = event.get("event", "unknown")
     event_payload = event.get("payload", {})
 
-    console.print(f"\n[dim]{datetime.now().strftime('%H:%M:%S')}[/dim] Received: [bold]{event_type}[/bold]")
+    console.print(
+        f"\n[dim]{datetime.now().strftime('%H:%M:%S')}[/dim] Received: [bold]{event_type}[/bold]"
+    )
 
     if event_type == "proposal.created":
         display_proposal_created(event_payload)
@@ -169,17 +184,19 @@ def main():
     """Run the webhook receiver."""
     import uvicorn
 
-    console.print(Panel.fit(
-        "[bold]Tessera Webhook Receiver[/bold]\n\n"
-        f"Listening on: http://0.0.0.0:5555\n"
-        f"Webhook endpoint: http://localhost:5555/webhooks\n"
-        f"Secret: {WEBHOOK_SECRET[:10]}...\n\n"
-        "Configure Tessera with:\n"
-        "  WEBHOOK_URL=http://host.docker.internal:5555/webhooks\n"
-        "  WEBHOOK_SECRET=dev-webhook-secret",
-        title="Starting",
-        border_style="cyan"
-    ))
+    console.print(
+        Panel.fit(
+            "[bold]Tessera Webhook Receiver[/bold]\n\n"
+            f"Listening on: http://0.0.0.0:5555\n"
+            f"Webhook endpoint: http://localhost:5555/webhooks\n"
+            f"Secret: {WEBHOOK_SECRET[:10]}...\n\n"
+            "Configure Tessera with:\n"
+            "  WEBHOOK_URL=http://host.docker.internal:5555/webhooks\n"
+            "  WEBHOOK_SECRET=dev-webhook-secret",
+            title="Starting",
+            border_style="cyan",
+        )
+    )
 
     uvicorn.run(app, host="0.0.0.0", port=5555, log_level="warning")
 

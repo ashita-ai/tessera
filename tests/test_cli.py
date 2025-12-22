@@ -1,6 +1,7 @@
 """Tests for the Tessera CLI."""
 
 import json
+import re
 from unittest.mock import MagicMock, patch
 
 import httpx
@@ -12,16 +13,18 @@ from tessera.cli import app
 runner = CliRunner()
 
 
+def clean_ansi(text: str) -> str:
+    """Strip ANSI color codes from string."""
+    return re.sub(r"\x1b\[[0-9;]*m", "", text)
+
+
 class TestVersion:
     """Tests for the version command."""
 
     def test_version(self) -> None:
         result = runner.invoke(app, ["version"])
         assert result.exit_code == 0
-        # Strip ANSI color codes for comparison
-        import re
-        clean_output = re.sub(r'\x1b\[[0-9;]*m', '', result.output)
-        assert "tessera 0.1.0" in clean_output
+        assert "tessera 0.1.0" in clean_ansi(result.output)
 
 
 class TestTeamCommands:
@@ -209,7 +212,7 @@ class TestContractCommands:
             )
             assert result.exit_code == 0
             assert "Published contract:" in result.output
-            assert "v1.0.0" in result.output
+            assert "v1.0.0" in clean_ansi(result.output)
 
     def test_contract_publish_breaking_change(self, tmp_path: pytest.TempPathFactory) -> None:
         schema_file = tmp_path / "schema.json"  # type: ignore[operator]
@@ -300,9 +303,10 @@ class TestContractCommands:
         with patch("tessera.cli.make_request", return_value=mock_response):
             result = runner.invoke(app, ["contract", "diff", "asset-123"])
             assert result.exit_code == 0
-            assert "1.0.0" in result.output
-            assert "2.0.0" in result.output
-            assert "field_added" in result.output
+            output = clean_ansi(result.output)
+            assert "1.0.0" in output
+            assert "2.0.0" in output
+            assert "field_added" in output
 
 
 class TestProposalCommands:
@@ -394,7 +398,7 @@ class TestRegisterCommand:
             )
             assert result.exit_code == 0
             assert "Pinned to:" in result.output
-            assert "v1.0.0" in result.output
+            assert "v1.0.0" in clean_ansi(result.output)
 
 
 class TestErrorHandling:
@@ -409,8 +413,9 @@ class TestErrorHandling:
         with patch("tessera.cli.make_request", return_value=mock_response):
             result = runner.invoke(app, ["team", "get", "nonexistent"])
             assert result.exit_code == 1
-            assert "Error (404)" in result.output
-            assert "Team not found" in result.output
+            output = clean_ansi(result.output)
+            assert "Error (404)" in output
+            assert "Team not found" in output
 
     def test_api_error_no_json(self) -> None:
         mock_response = MagicMock(spec=httpx.Response)
@@ -421,7 +426,7 @@ class TestErrorHandling:
         with patch("tessera.cli.make_request", return_value=mock_response):
             result = runner.invoke(app, ["team", "get", "team-1"])
             assert result.exit_code == 1
-            assert "Error (500)" in result.output
+            assert "Error (500)" in clean_ansi(result.output)
 
 
 class TestHelpOutput:

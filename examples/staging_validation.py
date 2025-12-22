@@ -27,10 +27,7 @@ import httpx
 # Tessera API
 BASE_URL = "http://localhost:8000/api/v1"
 API_KEY = os.environ.get("TESSERA_API_KEY", "tessera-dev-key")
-CLIENT = httpx.Client(
-    timeout=30.0,
-    headers={"Authorization": f"Bearer {API_KEY}"}
-)
+CLIENT = httpx.Client(timeout=30.0, headers={"Authorization": f"Bearer {API_KEY}"})
 
 # Sample data directory
 DATA_DIR = Path(__file__).parent / "data"
@@ -64,10 +61,13 @@ def setup_tessera():
             raise Exception("Could not create or find data-platform team")
 
     # Create asset
-    resp = CLIENT.post(f"{BASE_URL}/assets", json={
-        "fqn": "warehouse.staging.customers",
-        "owner_team_id": team["id"],
-    })
+    resp = CLIENT.post(
+        f"{BASE_URL}/assets",
+        json={
+            "fqn": "warehouse.staging.customers",
+            "owner_team_id": team["id"],
+        },
+    )
     if resp.status_code == 201:
         asset = resp.json()
     else:
@@ -87,7 +87,7 @@ def setup_tessera():
                 "version": "1.0.0",
                 "schema": CUSTOMERS_CONTRACT_SCHEMA,
                 "compatibility_mode": "backward",
-            }
+            },
         )
         if resp.status_code != 201:
             raise Exception(f"Could not publish contract: {resp.text}")

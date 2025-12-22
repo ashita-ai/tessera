@@ -13,10 +13,7 @@ import httpx
 
 BASE_URL = "http://localhost:8000/api/v1"
 API_KEY = os.environ.get("TESSERA_API_KEY", "tessera-dev-key")
-CLIENT = httpx.Client(
-    timeout=30.0,
-    headers={"Authorization": f"Bearer {API_KEY}"}
-)
+CLIENT = httpx.Client(timeout=30.0, headers={"Authorization": f"Bearer {API_KEY}"})
 
 
 def setup():
@@ -30,7 +27,9 @@ def setup():
     else:
         # Team might already exist, try to find it
         teams_resp = CLIENT.get(f"{BASE_URL}/teams").json()
-        teams = teams_resp.get("results", teams_resp) if isinstance(teams_resp, dict) else teams_resp
+        teams = (
+            teams_resp.get("results", teams_resp) if isinstance(teams_resp, dict) else teams_resp
+        )
         producer = next((t for t in teams if t["name"] == "data-platform"), None)
         if not producer:
             raise Exception("Could not create or find data-platform team")
@@ -41,29 +40,43 @@ def setup():
         consumer = resp.json()
     else:
         teams_resp = CLIENT.get(f"{BASE_URL}/teams").json()
-        teams = teams_resp.get("results", teams_resp) if isinstance(teams_resp, dict) else teams_resp
+        teams = (
+            teams_resp.get("results", teams_resp) if isinstance(teams_resp, dict) else teams_resp
+        )
         consumer = next((t for t in teams if t["name"] == "ml-team"), None)
         if not consumer:
             raise Exception("Could not create or find ml-team")
 
     # Create an asset
-    resp = CLIENT.post(f"{BASE_URL}/assets", json={
-        "fqn": "warehouse.analytics.dim_customers",
-        "owner_team_id": producer["id"],
-        "metadata": {"description": "Customer dimension table"}
-    })
+    resp = CLIENT.post(
+        f"{BASE_URL}/assets",
+        json={
+            "fqn": "warehouse.analytics.dim_customers",
+            "owner_team_id": producer["id"],
+            "metadata": {"description": "Customer dimension table"},
+        },
+    )
     if resp.status_code == 201:
         asset = resp.json()
     else:
         # Asset might already exist
         assets_resp = CLIENT.get(f"{BASE_URL}/assets").json()
-        assets = assets_resp.get("results", assets_resp) if isinstance(assets_resp, dict) else assets_resp
+        assets = (
+            assets_resp.get("results", assets_resp)
+            if isinstance(assets_resp, dict)
+            else assets_resp
+        )
         asset = next((a for a in assets if a["fqn"] == "warehouse.analytics.dim_customers"), None)
         if not asset:
             raise Exception("Could not create or find asset")
 
     # Publish initial contract
-    contracts = CLIENT.get(f"{BASE_URL}/assets/{asset['id']}/contracts").json()
+    contracts_resp = CLIENT.get(f"{BASE_URL}/assets/{asset['id']}/contracts").json()
+    contracts = (
+        contracts_resp.get("results", contracts_resp)
+        if isinstance(contracts_resp, dict)
+        else contracts_resp
+    )
     if not any(c["status"] == "active" for c in contracts):
         resp = CLIENT.post(
             f"{BASE_URL}/assets/{asset['id']}/contracts",
@@ -76,12 +89,12 @@ def setup():
                         "customer_id": {"type": "integer"},
                         "email": {"type": "string", "format": "email"},
                         "name": {"type": "string"},
-                        "created_at": {"type": "string", "format": "date-time"}
+                        "created_at": {"type": "string", "format": "date-time"},
                     },
-                    "required": ["customer_id", "email"]
+                    "required": ["customer_id", "email"],
                 },
-                "compatibility_mode": "backward"
-            }
+                "compatibility_mode": "backward",
+            },
         )
         if resp.status_code != 201:
             raise Exception(f"Could not create contract: {resp.text}")
@@ -106,7 +119,12 @@ def example_1_register_as_consumer(asset: dict, consumer: dict):
     print("=" * 70)
 
     # Get the active contract
-    contracts = CLIENT.get(f"{BASE_URL}/assets/{asset['id']}/contracts").json()
+    contracts_resp = CLIENT.get(f"{BASE_URL}/assets/{asset['id']}/contracts").json()
+    contracts = (
+        contracts_resp.get("results", contracts_resp)
+        if isinstance(contracts_resp, dict)
+        else contracts_resp
+    )
     contract = next((c for c in contracts if c["status"] == "active"), None)
 
     if not contract:
@@ -119,7 +137,7 @@ def example_1_register_as_consumer(asset: dict, consumer: dict):
     resp = CLIENT.post(
         f"{BASE_URL}/registrations",
         params={"contract_id": contract["id"]},
-        json={"consumer_team_id": consumer["id"]}
+        json={"consumer_team_id": consumer["id"]},
     )
     registration = resp.json()
 
@@ -148,13 +166,10 @@ def example_2_check_impact(asset: dict):
             "name": {"type": "string"},
             # email field removed!
         },
-        "required": ["customer_id"]
+        "required": ["customer_id"],
     }
 
-    impact = CLIENT.post(
-        f"{BASE_URL}/assets/{asset['id']}/impact",
-        json=proposed_schema
-    ).json()
+    impact = CLIENT.post(f"{BASE_URL}/assets/{asset['id']}/impact", json=proposed_schema).json()
 
     print(f"\nChange type: {impact['change_type'].upper()}")
     print(f"Safe to publish: {impact['safe_to_publish']}")
@@ -196,10 +211,10 @@ def example_3_breaking_change_creates_proposal(asset: dict, producer: dict):
                     "full_name": {"type": "string"},  # renamed from 'name'
                     # 'email' removed - breaking change!
                 },
-                "required": ["customer_id"]
+                "required": ["customer_id"],
             },
-            "compatibility_mode": "backward"
-        }
+            "compatibility_mode": "backward",
+        },
     ).json()
 
     print(f"\nAction: {result['action']}")
@@ -233,8 +248,8 @@ def example_4_acknowledge_proposal(proposal: dict, consumer: dict):
         json={
             "consumer_team_id": consumer["id"],
             "response": "acknowledged",
-            "notes": "We've updated our ML pipeline. Ready for the change."
-        }
+            "notes": "We've updated our ML pipeline. Ready for the change.",
+        },
     ).json()
 
     print(f"\n✓ Proposal acknowledged!")
@@ -256,7 +271,12 @@ def example_5_compatible_change_auto_publishes(asset: dict, producer: dict):
     print("=" * 70)
 
     # Get current contract
-    contracts = CLIENT.get(f"{BASE_URL}/assets/{asset['id']}/contracts").json()
+    contracts_resp = CLIENT.get(f"{BASE_URL}/assets/{asset['id']}/contracts").json()
+    contracts = (
+        contracts_resp.get("results", contracts_resp)
+        if isinstance(contracts_resp, dict)
+        else contracts_resp
+    )
     current = next((c for c in contracts if c["status"] == "active"), None)
 
     if not current:
@@ -273,20 +293,16 @@ def example_5_compatible_change_auto_publishes(asset: dict, producer: dict):
             "loyalty_tier": {
                 "type": "string",
                 "enum": ["bronze", "silver", "gold", "platinum"],
-                "description": "Customer loyalty program tier"
-            }
+                "description": "Customer loyalty program tier",
+            },
         },
-        "required": current_schema.get("required", [])
+        "required": current_schema.get("required", []),
     }
 
     result = CLIENT.post(
         f"{BASE_URL}/assets/{asset['id']}/contracts",
         params={"published_by": producer["id"]},
-        json={
-            "version": "1.1.0",
-            "schema": new_schema,
-            "compatibility_mode": "backward"
-        }
+        json={"version": "1.1.0", "schema": new_schema, "compatibility_mode": "backward"},
     ).json()
 
     print(f"\nAction: {result['action']}")
