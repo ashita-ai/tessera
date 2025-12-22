@@ -6,7 +6,6 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from collections.abc import AsyncGenerator
 import os
-from uuid import uuid4
 
 from tessera.db.models import Base, TeamDB, AssetDB, ContractDB, ProposalDB, RegistrationDB
 from tessera.main import app
@@ -92,9 +91,14 @@ class TestResourceLevelAuth:
         team1, key1 = await create_team_and_key(session, "team1", [APIKeyScope.READ, APIKeyScope.WRITE])
         team2, _ = await create_team_and_key(session, "team2", [APIKeyScope.READ, APIKeyScope.WRITE])
 
+        # Create asset for the proposal (required for FK constraint)
+        asset = AssetDB(fqn="team2.proposal-asset", owner_team_id=team2.id)
+        session.add(asset)
+        await session.flush()
+
         # Create proposal
         proposal = ProposalDB(
-            asset_id=uuid4(), # Dummy UUID
+            asset_id=asset.id,
             proposed_schema={"type": "object"},
             change_type="major",
             proposed_by=team2.id
@@ -118,9 +122,14 @@ class TestResourceLevelAuth:
         team1, key1 = await create_team_and_key(session, "team1", [APIKeyScope.READ, APIKeyScope.WRITE])
         team2, _ = await create_team_and_key(session, "team2", [APIKeyScope.READ, APIKeyScope.WRITE])
 
-        # Create dummy contract
+        # Create asset for the contract (required for FK constraint)
+        asset = AssetDB(fqn="team2.contract-asset", owner_team_id=team2.id)
+        session.add(asset)
+        await session.flush()
+
+        # Create contract
         contract = ContractDB(
-            asset_id=uuid4(),
+            asset_id=asset.id,
             version="1.0.0",
             schema_def={"type": "object"},
             published_by=team2.id
