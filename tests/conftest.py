@@ -51,7 +51,12 @@ async def test_engine():
 
 
 def create_tables(connection):
-    """Create all tables, checking if they exist first."""
+    """Create all tables, dropping existing ones first to ensure fresh schema."""
+    # Drop all tables first to ensure we have a clean schema
+    # This is important for PostgreSQL where schema might be stale
+    if not _USE_SQLITE:
+        # Drop all tables with CASCADE first
+        Base.metadata.drop_all(connection)
     Base.metadata.create_all(connection, checkfirst=True)
 
 

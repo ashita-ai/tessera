@@ -283,12 +283,16 @@ class TestCachingIntegration:
         )
         contract1_id = contract1_resp.json()["contract"]["id"]
 
-        # Publish second contract
+        # Publish second contract (compatible change - adds optional field)
         contract2_resp = await client.post(
             f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
-            json={"version": "2.0.0", "schema": {"type": "object", "properties": {"bar": {"type": "string"}}}},
+            json={"version": "2.0.0", "schema": {"type": "object", "properties": {"foo": {"type": "string"}, "bar": {"type": "string"}}}},
         )
-        contract2_id = contract2_resp.json()["contract"]["id"]
+        assert contract2_resp.status_code == 201
+        contract2_data = contract2_resp.json()
+        # Response should have "contract" key for published contracts
+        assert "contract" in contract2_data, f"Expected 'contract' key, got: {contract2_data}"
+        contract2_id = contract2_data["contract"]["id"]
 
         # Should still be able to compare contracts (falls back to direct diff)
         compare_resp = await client.post(

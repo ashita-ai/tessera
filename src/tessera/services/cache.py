@@ -3,6 +3,7 @@
 Provides optional caching layer that gracefully degrades when Redis is unavailable.
 """
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -34,15 +35,18 @@ async def get_redis_client() -> redis.Redis | None:
             settings.redis_url,
             decode_responses=False,
             max_connections=10,
+            socket_connect_timeout=0.05,  # 50ms timeout for fast failure in tests
+            socket_timeout=0.05,  # 50ms timeout for operations
         )
         _redis_client = redis.Redis(connection_pool=_redis_pool)
-        # Test connection
-        await _redis_client.ping()
+        # Test connection with very short timeout
+        await asyncio.wait_for(_redis_client.ping(), timeout=0.05)
         logger.info("Connected to Redis cache")
         return _redis_client
-    except Exception as e:
-        logger.warning(f"Redis connection failed, caching disabled: {e}")
+    except (asyncio.TimeoutError, Exception) as e:
+        logger.debug(f"Redis connection failed, caching disabled: {e}")
         _redis_client = None
+        _redis_pool = None
         return None
 
 
