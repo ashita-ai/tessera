@@ -64,7 +64,7 @@ class TestCaching:
     async def test_cache_service_redis_absent_get(self, no_redis):
         """Test cache get gracefully degrades when Redis is unavailable."""
         cache = CacheService(prefix="test", ttl=60)
-        
+
         # Should return None without raising exception
         val = await cache.get("key")
         assert val is None
@@ -73,7 +73,7 @@ class TestCaching:
     async def test_cache_service_redis_absent_set(self, no_redis):
         """Test cache set gracefully degrades when Redis is unavailable."""
         cache = CacheService(prefix="test", ttl=60)
-        
+
         # Should return False without raising exception
         result = await cache.set("key", {"foo": "bar"})
         assert result is False
@@ -82,7 +82,7 @@ class TestCaching:
     async def test_cache_service_redis_absent_delete(self, no_redis):
         """Test cache delete gracefully degrades when Redis is unavailable."""
         cache = CacheService(prefix="test", ttl=60)
-        
+
         # Should return False without raising exception
         result = await cache.delete("key")
         assert result is False
@@ -189,13 +189,13 @@ class TestCaching:
     async def test_cache_redis_connection_error(self):
         """Test cache handles Redis connection errors gracefully."""
         cache = CacheService(prefix="test", ttl=60)
-        
+
         with patch("tessera.services.cache.get_redis_client") as mock_get:
             # Simulate connection error
             mock_client = AsyncMock()
             mock_client.get.side_effect = Exception("Connection failed")
             mock_get.return_value = mock_client
-            
+
             # Should return None without raising exception
             val = await cache.get("key")
             assert val is None
@@ -204,13 +204,13 @@ class TestCaching:
     async def test_cache_redis_set_error(self):
         """Test cache handles Redis set errors gracefully."""
         cache = CacheService(prefix="test", ttl=60)
-        
+
         with patch("tessera.services.cache.get_redis_client") as mock_get:
             # Simulate set error
             mock_client = AsyncMock()
             mock_client.set.side_effect = Exception("Set failed")
             mock_get.return_value = mock_client
-            
+
             # Should return False without raising exception
             result = await cache.set("key", {"foo": "bar"})
             assert result is False
@@ -225,14 +225,14 @@ class TestCachingIntegration:
         # Create a team and asset
         team_resp = await client.post("/api/v1/teams", json={"name": "cache-test-team"})
         team_id = team_resp.json()["id"]
-        
+
         asset_resp = await client.post(
             "/api/v1/assets",
             json={"fqn": "cache.test.asset", "owner_team_id": team_id},
         )
         assert asset_resp.status_code == 201
         asset_id = asset_resp.json()["id"]
-        
+
         # Should still be able to get the asset (falls back to DB)
         get_resp = await client.get(f"/api/v1/assets/{asset_id}")
         assert get_resp.status_code == 200
@@ -244,20 +244,20 @@ class TestCachingIntegration:
         # Create team, asset, and contract
         team_resp = await client.post("/api/v1/teams", json={"name": "contract-cache-team"})
         team_id = team_resp.json()["id"]
-        
+
         asset_resp = await client.post(
             "/api/v1/assets",
             json={"fqn": "contract.cache.test", "owner_team_id": team_id},
         )
         asset_id = asset_resp.json()["id"]
-        
+
         contract_resp = await client.post(
             f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
             json={"version": "1.0.0", "schema": {"type": "object", "properties": {"foo": {"type": "string"}}}},
         )
         assert contract_resp.status_code == 201
         contract_id = contract_resp.json()["contract"]["id"]
-        
+
         # Should still be able to get the contract (falls back to DB)
         get_resp = await client.get(f"/api/v1/contracts/{contract_id}")
         assert get_resp.status_code == 200
@@ -269,27 +269,27 @@ class TestCachingIntegration:
         # Create team, asset, and two contracts
         team_resp = await client.post("/api/v1/teams", json={"name": "compare-cache-team"})
         team_id = team_resp.json()["id"]
-        
+
         asset_resp = await client.post(
             "/api/v1/assets",
             json={"fqn": "compare.cache.test", "owner_team_id": team_id},
         )
         asset_id = asset_resp.json()["id"]
-        
+
         # Publish first contract
         contract1_resp = await client.post(
             f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
             json={"version": "1.0.0", "schema": {"type": "object", "properties": {"foo": {"type": "string"}}}},
         )
         contract1_id = contract1_resp.json()["contract"]["id"]
-        
+
         # Publish second contract
         contract2_resp = await client.post(
             f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
             json={"version": "2.0.0", "schema": {"type": "object", "properties": {"bar": {"type": "string"}}}},
         )
         contract2_id = contract2_resp.json()["contract"]["id"]
-        
+
         # Should still be able to compare contracts (falls back to direct diff)
         compare_resp = await client.post(
             "/api/v1/contracts/compare",
