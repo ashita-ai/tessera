@@ -50,6 +50,7 @@ from tessera.services.cache import (
     get_cached_schema_diff,
     invalidate_asset,
 )
+from tessera.services.slack import notify_proposal_created
 from tessera.services.webhooks import send_proposal_created
 
 router = APIRouter()
@@ -596,6 +597,15 @@ async def create_contract(
         proposed_version=contract.version,
         breaking_changes=[bc.to_dict() for bc in breaking_changes],
         impacted_consumers=impacted_consumers,
+    )
+
+    # Send Slack notification
+    await notify_proposal_created(
+        asset_fqn=asset.fqn,
+        version=contract.version,
+        producer_team=publisher_team.name,
+        affected_consumers=[c["team_name"] for c in impacted_consumers],
+        breaking_changes=[bc.to_dict() for bc in breaking_changes],
     )
 
     return {

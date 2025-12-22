@@ -38,6 +38,7 @@ from tessera.services import (
     log_proposal_rejected,
 )
 from tessera.services.schema_validator import SchemaValidationError, validate_schema_or_raise
+from tessera.services.slack import notify_proposal_acknowledged, notify_proposal_approved
 from tessera.services.webhooks import (
     send_contract_published,
     send_proposal_acknowledged,
@@ -455,6 +456,13 @@ async def acknowledge_proposal(
             actor_team_id=consumer_team.id,
             actor_team_name=consumer_team.name,
         )
+        # Send Slack notification
+        await notify_proposal_acknowledged(
+            asset_fqn=asset.fqn,
+            consumer_team=consumer_team.name,
+            response="blocked",
+            notes=ack.notes,
+        )
         return db_ack
 
     # Send webhook for acknowledgment
@@ -469,6 +477,14 @@ async def acknowledge_proposal(
         notes=ack.notes,
         pending_count=ack_count - 1 if not all_acknowledged else 0,
         acknowledged_count=ack_count,
+    )
+
+    # Send Slack notification for acknowledgment
+    await notify_proposal_acknowledged(
+        asset_fqn=asset.fqn,
+        consumer_team=consumer_team.name,
+        response=str(ack.response),
+        notes=ack.notes,
     )
 
     # Check for auto-approval (all consumers acknowledged, none blocked)
@@ -489,6 +505,12 @@ async def acknowledge_proposal(
             asset_id=asset.id,
             asset_fqn=asset.fqn,
             status="approved",
+        )
+        # Send Slack notification for approval
+        # Note: We don't have version here, would need to get from proposal
+        await notify_proposal_approved(
+            asset_fqn=asset.fqn,
+            version="pending",  # Version is determined at publish time
         )
 
     return db_ack

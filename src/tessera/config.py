@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     webhook_url: str | None = None
     webhook_secret: str | None = None
 
+    # Slack notifications
+    slack_webhook_url: str | None = None
+
     # Authentication
     auth_disabled: bool = False  # Set to True to disable auth (development only)
     bootstrap_api_key: str | None = None  # Initial admin API key for bootstrapping
