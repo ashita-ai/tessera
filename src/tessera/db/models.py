@@ -4,7 +4,17 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import JSON, DateTime, Enum, ForeignKey, Integer, String, Text, Uuid, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    Uuid,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from tessera.models.enums import (
@@ -39,7 +49,9 @@ class TeamDB(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
-    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
 
     # Relationships
     assets: Mapped[list["AssetDB"]] = relationship(back_populates="owner_team")
@@ -53,10 +65,14 @@ class AssetDB(Base):
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
     fqn: Mapped[str] = mapped_column(String(1000), nullable=False)
     owner_team_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("teams.id"), nullable=False)
-    environment: Mapped[str] = mapped_column(String(50), nullable=False, default="production", index=True)
+    environment: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="production", index=True
+    )
     metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
-    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
 
     __table_args__ = (
         UniqueConstraint("fqn", "environment", name="uq_asset_fqn_environment"),

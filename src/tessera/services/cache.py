@@ -16,11 +16,11 @@ from tessera.config import settings
 logger = logging.getLogger(__name__)
 
 # Global Redis connection pool
-_redis_pool: redis.ConnectionPool | None = None
-_redis_client: redis.Redis | None = None
+_redis_pool: "redis.ConnectionPool[Any] | None" = None
+_redis_client: "redis.Redis[Any] | None" = None
 
 
-async def get_redis_client() -> redis.Redis | None:
+async def get_redis_client() -> "redis.Redis[Any] | None":
     """Get or create Redis client connection."""
     global _redis_pool, _redis_client
 
@@ -44,7 +44,7 @@ async def get_redis_client() -> redis.Redis | None:
         await asyncio.wait_for(_redis_client.ping(), timeout=0.05)
         logger.info("Connected to Redis cache")
         return _redis_client
-    except (asyncio.TimeoutError, Exception) as e:
+    except (TimeoutError, Exception) as e:
         logger.debug(f"Redis connection failed, caching disabled: {e}")
         _redis_client = None
         _redis_pool = None

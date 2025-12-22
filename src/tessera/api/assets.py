@@ -1,7 +1,7 @@
 """Assets API endpoints."""
 
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -34,27 +34,25 @@ from tessera.models import (
     Proposal,
 )
 from tessera.models.enums import APIKeyScope, ContractStatus, RegistrationStatus
-from tessera.services.cache import (
-    asset_cache,
-    cache_asset,
-    cache_asset_contracts_list,
-    cache_asset_search,
-    cache_contract,
-    contract_cache,
-    get_cached_asset,
-    get_cached_asset_contracts_list,
-    get_cached_asset_search,
-    get_cached_contract,
-    get_cached_schema_diff,
-    invalidate_asset,
-    cache_schema_diff,
-)
 from tessera.services import (
     check_compatibility,
     diff_schemas,
     log_contract_published,
     log_proposal_created,
     validate_json_schema,
+)
+from tessera.services.cache import (
+    asset_cache,
+    cache_asset,
+    cache_asset_contracts_list,
+    cache_asset_search,
+    cache_contract,
+    cache_schema_diff,
+    get_cached_asset,
+    get_cached_asset_contracts_list,
+    get_cached_asset_search,
+    get_cached_schema_diff,
+    invalidate_asset,
 )
 from tessera.services.webhooks import send_proposal_created
 
@@ -97,7 +95,10 @@ async def create_asset(
         .where(AssetDB.deleted_at.is_(None))
     )
     if existing.scalar_one_or_none():
-        raise HTTPException(status_code=409, detail=f"Asset with FQN '{asset.fqn}' already exists in environment '{asset.environment}'")
+        raise HTTPException(
+            status_code=409,
+            detail=f"Asset '{asset.fqn}' already exists in environment '{asset.environment}'",
+        )
 
     db_asset = AssetDB(
         fqn=asset.fqn,
@@ -351,7 +352,7 @@ async def delete_asset(
             },
         )
 
-    asset.deleted_at = datetime.now(timezone.utc)
+    asset.deleted_at = datetime.now(UTC)
     await session.flush()
 
     # Invalidate cache
@@ -614,10 +615,11 @@ async def create_contract(
         )
         # Invalidate asset and contract caches, cache new contract
         await invalidate_asset(str(asset_id))
-        await cache_contract(str(new_contract.id), Contract.model_validate(new_contract).model_dump())
+        contract_data = Contract.model_validate(new_contract).model_dump()
+        await cache_contract(str(new_contract.id), contract_data)
         return {
             "action": "published",
-            "contract": Contract.model_validate(new_contract).model_dump(),
+            "contract": contract_data,
         }
 
     # Diff schemas and check compatibility
@@ -640,11 +642,12 @@ async def create_contract(
         )
         # Invalidate asset and contract caches, cache new contract
         await invalidate_asset(str(asset_id))
-        await cache_contract(str(new_contract.id), Contract.model_validate(new_contract).model_dump())
+        contract_data = Contract.model_validate(new_contract).model_dump()
+        await cache_contract(str(new_contract.id), contract_data)
         return {
             "action": "published",
             "change_type": str(diff_result.change_type),
-            "contract": Contract.model_validate(new_contract).model_dump(),
+            "contract": contract_data,
         }
 
     # Breaking change with force flag = publish anyway (logged)
@@ -660,12 +663,13 @@ async def create_contract(
         )
         # Invalidate asset and contract caches, cache new contract
         await invalidate_asset(str(asset_id))
-        await cache_contract(str(new_contract.id), Contract.model_validate(new_contract).model_dump())
+        contract_data = Contract.model_validate(new_contract).model_dump()
+        await cache_contract(str(new_contract.id), contract_data)
         return {
             "action": "force_published",
             "change_type": str(diff_result.change_type),
             "breaking_changes": [bc.to_dict() for bc in breaking_changes],
-            "contract": Contract.model_validate(new_contract).model_dump(),
+            "contract": contract_data,
             "warning": "Breaking change was force-published. Consumers may be affected.",
         }
 
@@ -976,7 +980,7 @@ async def analyze_impact(
     impacted_teams: dict[UUID, dict[str, Any]] = {}
     impacted_assets: list[dict[str, Any]] = []
 
-    async def traverse(current_id: UUID, current_depth: int):
+    async def traverse(current_id: UUID, current_depth: int) -> None:
         if current_depth > depth or current_id in visited_assets:
             return
         visited_assets.add(current_id)
@@ -1059,7 +1063,7 @@ async def get_lineage(
     cache_key = f"lineage:{asset_id}"
     cached = await asset_cache.get(cache_key)
     if cached:
-        return cached
+        return dict(cached)
 
     # Get asset with owner team in single query (fixes N+1)
     result = await session.execute(

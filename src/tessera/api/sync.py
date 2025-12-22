@@ -577,7 +577,7 @@ async def check_dbt_impact(
 
     Returns impact analysis for each model, identifying breaking changes.
     """
-    manifest = request.manifest
+    manifest = compare_req.manifest
     results: list[DbtImpactResult] = []
 
     # Process nodes (models, seeds, snapshots)

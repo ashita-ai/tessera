@@ -1,6 +1,6 @@
 """Teams API endpoints."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -61,7 +61,6 @@ async def _verify_can_create_team(
         return
 
     # Check regular API key with admin scope
-    from tessera.models.enums import APIKeyScope
     from tessera.services.auth import validate_api_key
 
     result = await validate_api_key(session, key)
@@ -207,7 +206,7 @@ async def delete_team(
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
 
-    team.deleted_at = datetime.now(timezone.utc)
+    team.deleted_at = datetime.now(UTC)
     await session.flush()
 
     # Invalidate cache

@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.api.auth import Auth, RequireAdmin
-from tessera.api.rate_limit import limit_admin, limit_read
+from tessera.api.rate_limit import limit_admin
 from tessera.db.database import get_session
 from tessera.models.api_key import APIKey, APIKeyCreate, APIKeyCreated, APIKeyList
 from tessera.models.enums import APIKeyScope

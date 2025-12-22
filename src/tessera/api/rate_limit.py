@@ -3,10 +3,11 @@
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 from slowapi import Limiter
-from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 from tessera.config import settings
+
 
 def get_rate_limit_key(request: Request) -> str:
     """Get a unique key for rate limiting.
@@ -34,18 +35,19 @@ limiter = Limiter(
     default_limits=[lambda: settings.rate_limit_global],
 )
 
-def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded) -> Response:
+def rate_limit_exceeded_handler(request: Request, exc: Exception) -> Response:
     """Custom handler for rate limit exceeded errors.
 
     Adds the 'Retry-After' header as required by the spec.
     """
+    detail = str(getattr(exc, "detail", str(exc)))
     response = JSONResponse(
         status_code=429,
         content={
             "error": {
                 "code": "RATE_LIMIT_EXCEEDED",
                 "message": "Too Many Requests",
-                "detail": str(exc.detail),
+                "detail": detail,
             }
         },
     )

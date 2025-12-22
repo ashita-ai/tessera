@@ -6,6 +6,8 @@ from contextlib import asynccontextmanager
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import ValidationError
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 from sqlalchemy import text
 from starlette.exceptions import HTTPException
 
@@ -21,9 +23,6 @@ from tessera.api import (
     teams,
     webhooks,
 )
-from tessera.api.rate_limit import limiter, rate_limit_exceeded_handler
-from slowapi.errors import RateLimitExceeded
-from slowapi.middleware import SlowAPIMiddleware
 from tessera.api.errors import (
     APIError,
     RequestIDMiddleware,
@@ -32,6 +31,7 @@ from tessera.api.errors import (
     http_exception_handler,
     validation_exception_handler,
 )
+from tessera.api.rate_limit import limiter, rate_limit_exceeded_handler
 from tessera.config import settings
 from tessera.db import init_db
 from tessera.db.database import dispose_engine, get_async_session_maker
