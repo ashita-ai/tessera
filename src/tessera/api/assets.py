@@ -180,9 +180,7 @@ async def search_assets(
             return cached
 
     base_query = (
-        select(AssetDB)
-        .where(AssetDB.fqn.ilike(f"%{q}%"))
-        .where(AssetDB.deleted_at.is_(None))
+        select(AssetDB).where(AssetDB.fqn.ilike(f"%{q}%")).where(AssetDB.deleted_at.is_(None))
     )
     if owner:
         base_query = base_query.where(AssetDB.owner_team_id == owner)
@@ -255,9 +253,7 @@ async def get_asset(
         return cached
 
     result = await session.execute(
-        select(AssetDB)
-        .where(AssetDB.id == asset_id)
-        .where(AssetDB.deleted_at.is_(None))
+        select(AssetDB).where(AssetDB.id == asset_id).where(AssetDB.deleted_at.is_(None))
     )
     asset = result.scalar_one_or_none()
     if not asset:
@@ -284,9 +280,7 @@ async def update_asset(
     Requires write scope.
     """
     result = await session.execute(
-        select(AssetDB)
-        .where(AssetDB.id == asset_id)
-        .where(AssetDB.deleted_at.is_(None))
+        select(AssetDB).where(AssetDB.id == asset_id).where(AssetDB.deleted_at.is_(None))
     )
     asset = result.scalar_one_or_none()
     if not asset:
@@ -334,9 +328,7 @@ async def delete_asset(
     Requires write scope. Resource-level auth: must own the asset's team or be admin.
     """
     result = await session.execute(
-        select(AssetDB)
-        .where(AssetDB.id == asset_id)
-        .where(AssetDB.deleted_at.is_(None))
+        select(AssetDB).where(AssetDB.id == asset_id).where(AssetDB.deleted_at.is_(None))
     )
     asset = result.scalar_one_or_none()
     if not asset:
@@ -372,9 +364,7 @@ async def restore_asset(
 
     Requires admin scope.
     """
-    result = await session.execute(
-        select(AssetDB).where(AssetDB.id == asset_id)
-    )
+    result = await session.execute(select(AssetDB).where(AssetDB.id == asset_id))
     asset = result.scalar_one_or_none()
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found")
@@ -889,7 +879,7 @@ async def diff_contract_versions(
         }
         await cache_schema_diff(from_contract.schema_def, to_contract.schema_def, diff_result_data)
 
-    breaking = [] # Re-calculate breaking based on compatibility mode of from_contract
+    breaking = []  # Re-calculate breaking based on compatibility mode of from_contract
     # We need to re-check compatibility because it depends on the mode
     # actually we should just cache the whole result including compatibility if possible
     # but the mode can change.
@@ -1020,12 +1010,14 @@ async def analyze_impact(
         )
         for ds_asset, dep_type in downstream_result.all():
             if ds_asset.id not in visited_assets:
-                impacted_assets.append({
-                    "asset_id": str(ds_asset.id),
-                    "fqn": ds_asset.fqn,
-                    "dependency_type": str(dep_type),
-                    "depth": current_depth,
-                })
+                impacted_assets.append(
+                    {
+                        "asset_id": str(ds_asset.id),
+                        "fqn": ds_asset.fqn,
+                        "dependency_type": str(dep_type),
+                        "depth": current_depth,
+                    }
+                )
                 await traverse(ds_asset.id, current_depth + 1)
 
     # Start traversal

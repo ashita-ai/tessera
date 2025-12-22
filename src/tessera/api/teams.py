@@ -138,9 +138,7 @@ async def get_team(
     Requires read scope.
     """
     result = await session.execute(
-        select(TeamDB)
-        .where(TeamDB.id == team_id)
-        .where(TeamDB.deleted_at.is_(None))
+        select(TeamDB).where(TeamDB.id == team_id).where(TeamDB.deleted_at.is_(None))
     )
     team = result.scalar_one_or_none()
     if not team:
@@ -164,9 +162,7 @@ async def update_team(
     Requires admin scope.
     """
     result = await session.execute(
-        select(TeamDB)
-        .where(TeamDB.id == team_id)
-        .where(TeamDB.deleted_at.is_(None))
+        select(TeamDB).where(TeamDB.id == team_id).where(TeamDB.deleted_at.is_(None))
     )
     team = result.scalar_one_or_none()
     if not team:
@@ -198,9 +194,7 @@ async def delete_team(
     Requires admin scope.
     """
     result = await session.execute(
-        select(TeamDB)
-        .where(TeamDB.id == team_id)
-        .where(TeamDB.deleted_at.is_(None))
+        select(TeamDB).where(TeamDB.id == team_id).where(TeamDB.deleted_at.is_(None))
     )
     team = result.scalar_one_or_none()
     if not team:
@@ -226,9 +220,7 @@ async def restore_team(
 
     Requires admin scope.
     """
-    result = await session.execute(
-        select(TeamDB).where(TeamDB.id == team_id)
-    )
+    result = await session.execute(select(TeamDB).where(TeamDB.id == team_id))
     team = result.scalar_one_or_none()
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")

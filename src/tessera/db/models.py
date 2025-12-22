@@ -74,9 +74,7 @@ class AssetDB(Base):
         DateTime(timezone=True), nullable=True, index=True
     )
 
-    __table_args__ = (
-        UniqueConstraint("fqn", "environment", name="uq_asset_fqn_environment"),
-    )
+    __table_args__ = (UniqueConstraint("fqn", "environment", name="uq_asset_fqn_environment"),)
 
     # Relationships
     owner_team: Mapped["TeamDB"] = relationship(back_populates="assets")

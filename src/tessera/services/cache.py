@@ -165,9 +165,7 @@ class CacheService:
 
 
 # Pre-configured cache instances for different domains
-contract_cache = CacheService(
-    prefix="contracts", ttl=settings.cache_ttl_contract
-)
+contract_cache = CacheService(prefix="contracts", ttl=settings.cache_ttl_contract)
 asset_cache = CacheService(prefix="assets", ttl=settings.cache_ttl_asset)
 team_cache = CacheService(prefix="teams", ttl=settings.cache_ttl_team)
 schema_cache = CacheService(prefix="schemas", ttl=settings.cache_ttl_schema)
