@@ -7,10 +7,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from tessera.config import settings
 from tessera.models.enums import CompatibilityMode, ContractStatus
-
-# Maximum schema size in bytes (1MB)
-MAX_SCHEMA_SIZE_BYTES = 1_000_000
 
 
 class Guarantees(BaseModel):
@@ -51,14 +49,24 @@ class ContractBase(BaseModel):
     @field_validator("schema_def")
     @classmethod
     def validate_schema_size(cls, v: dict[str, Any]) -> dict[str, Any]:
-        """Validate schema size to prevent DoS attacks."""
+        """Validate schema size and property count to prevent DoS attacks."""
+        # 1. Check byte size
         serialized = json.dumps(v, separators=(",", ":"))
-        if len(serialized) > MAX_SCHEMA_SIZE_BYTES:
+        if len(serialized) > settings.max_schema_size_bytes:
             raise ValueError(
-                f"Schema too large. Maximum size: {MAX_SCHEMA_SIZE_BYTES:,} bytes "
-                f"({MAX_SCHEMA_SIZE_BYTES // 1024 // 1024}MB). "
+                f"Schema too large. Maximum size: {settings.max_schema_size_bytes:,} bytes "
+                f"({settings.max_schema_size_bytes // 1024 // 1024}MB). "
                 f"Current size: {len(serialized):,} bytes."
             )
+
+        # 2. Check property count (if object)
+        if v.get("type") == "object" and "properties" in v:
+            props_count = len(v["properties"])
+            if props_count > settings.max_schema_properties:
+                raise ValueError(
+                    f"Too many properties in schema. Maximum: {settings.max_schema_properties}. "
+                    f"Found: {props_count}."
+                )
         return v
 
 

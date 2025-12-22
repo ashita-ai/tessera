@@ -7,6 +7,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from tessera.config import settings
+
 # FQN pattern: alphanumeric/underscores separated by dots, at least 2 segments
 # Examples: db.schema.table, schema.table, my_db.my_schema.my_table
 FQN_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)+$")
@@ -18,10 +20,16 @@ class AssetBase(BaseModel):
     fqn: str = Field(
         ...,
         min_length=3,  # Minimum: "a.b"
-        max_length=1000,
+        max_length=settings.max_fqn_length,
         description="Fully qualified name (e.g., 'snowflake.analytics.dim_customers')",
     )
     metadata: dict[str, Any] = Field(default_factory=dict)
+    environment: str = Field(
+        default_factory=lambda: settings.default_environment,
+        min_length=1,
+        max_length=50,
+        description="Environment (e.g., 'dev', 'staging', 'production')",
+    )
 
     @field_validator("fqn")
     @classmethod
@@ -45,8 +53,9 @@ class AssetCreate(AssetBase):
 class AssetUpdate(BaseModel):
     """Fields for updating an asset."""
 
-    fqn: str | None = Field(None, min_length=1, max_length=1000)
+    fqn: str | None = Field(None, min_length=1, max_length=settings.max_fqn_length)
     owner_team_id: UUID | None = None
+    environment: str | None = Field(None, min_length=1, max_length=50)
     metadata: dict[str, Any] | None = None
 
 
@@ -58,5 +67,6 @@ class Asset(BaseModel):
     id: UUID
     fqn: str
     owner_team_id: UUID
+    environment: str
     metadata: dict[str, Any] = Field(default_factory=dict, validation_alias="metadata_")
     created_at: datetime

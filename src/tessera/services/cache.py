@@ -15,11 +15,11 @@ from tessera.config import settings
 logger = logging.getLogger(__name__)
 
 # Global Redis connection pool
-_redis_pool: redis.ConnectionPool[redis.Connection] | None = None
-_redis_client: redis.Redis[bytes] | None = None
+_redis_pool: redis.ConnectionPool | None = None
+_redis_client: redis.Redis | None = None
 
 
-async def get_redis_client() -> redis.Redis[bytes] | None:
+async def get_redis_client() -> redis.Redis | None:
     """Get or create Redis client connection."""
     global _redis_pool, _redis_client
 
@@ -160,10 +160,12 @@ class CacheService:
 
 
 # Pre-configured cache instances for different domains
-contract_cache = CacheService(prefix="contracts", ttl=600)  # 10 minutes
-asset_cache = CacheService(prefix="assets", ttl=300)  # 5 minutes
-team_cache = CacheService(prefix="teams", ttl=300)  # 5 minutes
-schema_cache = CacheService(prefix="schemas", ttl=3600)  # 1 hour (schemas rarely change)
+contract_cache = CacheService(
+    prefix="contracts", ttl=settings.cache_ttl_contract
+)
+asset_cache = CacheService(prefix="assets", ttl=settings.cache_ttl_asset)
+team_cache = CacheService(prefix="teams", ttl=settings.cache_ttl_team)
+schema_cache = CacheService(prefix="schemas", ttl=settings.cache_ttl_schema)
 
 
 async def cache_contract(contract_id: str, contract_data: dict[str, Any]) -> bool:

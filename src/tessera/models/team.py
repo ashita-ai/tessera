@@ -7,6 +7,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from tessera.config import settings
+
 # Team name pattern: alphanumeric, underscores, hyphens, spaces
 TEAM_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_\- ]*[a-zA-Z0-9]$|^[a-zA-Z0-9]$")
 
@@ -14,7 +16,7 @@ TEAM_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_\- ]*[a-zA-Z0-9]$|^[a-zA
 class TeamBase(BaseModel):
     """Base team fields."""
 
-    name: str = Field(..., min_length=1, max_length=255)
+    name: str = Field(..., min_length=1, max_length=settings.max_team_name_length)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("name")
@@ -41,7 +43,7 @@ class TeamCreate(TeamBase):
 class TeamUpdate(BaseModel):
     """Fields for updating a team."""
 
-    name: str | None = Field(None, min_length=1, max_length=255)
+    name: str | None = Field(None, min_length=1, max_length=settings.max_team_name_length)
     metadata: dict[str, Any] | None = None
 
 

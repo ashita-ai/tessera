@@ -93,11 +93,13 @@ async def get_auth_context(
             team_id=team.id,
             scopes=[s.value for s in APIKeyScope],
         )
-        return AuthContext(
+        auth_context = AuthContext(
             team=team,
             api_key=mock_key,
             scopes=list(APIKeyScope),
         )
+        request.state.auth = auth_context
+        return auth_context
 
     # Check for Authorization header
     if not authorization:
@@ -145,11 +147,13 @@ async def get_auth_context(
             team_id=team.id,
             scopes=[s.value for s in APIKeyScope],
         )
-        return AuthContext(
+        auth_context = AuthContext(
             team=team,
             api_key=mock_key,
             scopes=list(APIKeyScope),
         )
+        request.state.auth = auth_context
+        return auth_context
 
     # Validate the API key
     validated = await validate_api_key(session, api_key)
@@ -166,11 +170,13 @@ async def get_auth_context(
     api_key_db, team_db = validated
     scopes = [APIKeyScope(s) for s in api_key_db.scopes]
 
-    return AuthContext(
+    auth_context = AuthContext(
         team=team_db,
         api_key=api_key_db,
         scopes=scopes,
     )
+    request.state.auth = auth_context
+    return auth_context
 
 
 # Type alias for dependency injection

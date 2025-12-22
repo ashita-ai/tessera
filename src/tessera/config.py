@@ -33,6 +33,7 @@ class Settings(BaseSettings):
         "http://127.0.0.1:3000",
         "http://127.0.0.1:5173",
     ]
+    cors_allow_methods: list[str] = ["GET", "POST", "PATCH", "DELETE", "OPTIONS"]
 
     @field_validator("cors_origins", mode="before")
     @classmethod
@@ -56,6 +57,32 @@ class Settings(BaseSettings):
     # Redis cache (optional)
     redis_url: str | None = None  # e.g., redis://localhost:6379/0
     cache_ttl: int = 300  # Default cache TTL in seconds (5 minutes)
+    cache_ttl_contract: int = 600  # 10 minutes
+    cache_ttl_asset: int = 300  # 5 minutes
+    cache_ttl_team: int = 300  # 5 minutes
+    cache_ttl_schema: int = 3600  # 1 hour
+
+    # Rate Limiting
+    rate_limit_read: str = "1000/minute"
+    rate_limit_write: str = "100/minute"
+    rate_limit_admin: str = "50/minute"
+    rate_limit_global: str = "5000/minute"
+    rate_limit_enabled: bool = True
+
+    # Resource Constraints
+    max_schema_size_bytes: int = 1_000_000  # 1MB
+    max_schema_properties: int = 1000
+    max_fqn_length: int = 1000
+    max_team_name_length: int = 255
+    default_environment: str = "production"
+
+    # Analysis Defaults
+    impact_depth_default: int = 5
+    impact_depth_max: int = 10
+
+    # Pagination Defaults
+    pagination_limit_default: int = 50
+    pagination_limit_max: int = 100
 
     # Database connection pool
     db_pool_size: int = 20  # Base pool size

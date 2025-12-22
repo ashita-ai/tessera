@@ -1,0 +1,109 @@
+"""Tests for audit trail query API."""
+
+import pytest
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from collections.abc import AsyncGenerator
+import os
+from uuid import uuid4
+from datetime import datetime, UTC
+
+from tessera.db.models import Base, AuditEventDB, TeamDB
+from tessera.main import app
+
+TEST_DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+_USE_SQLITE = TEST_DATABASE_URL.startswith("sqlite")
+
+@pytest.fixture
+async def test_engine():
+    engine = create_async_engine(TEST_DATABASE_URL, echo=False)
+    yield engine
+    await engine.dispose()
+
+@pytest.fixture
+async def session(test_engine) -> AsyncGenerator[AsyncSession, None]:
+    async with test_engine.begin() as conn:
+        if not _USE_SQLITE:
+            await conn.execute(text("CREATE SCHEMA IF NOT EXISTS core"))
+            await conn.execute(text("CREATE SCHEMA IF NOT EXISTS workflow"))
+            await conn.execute(text("CREATE SCHEMA IF NOT EXISTS audit"))
+        await conn.run_sync(Base.metadata.create_all)
+
+    async_session = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+    async with async_session() as session:
+        yield session
+        await session.rollback()
+
+    async with test_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+
+@pytest.fixture
+async def client(session) -> AsyncGenerator[AsyncClient, None]:
+    from tessera.db import database
+    from tessera.config import settings
+
+    original_auth_disabled = settings.auth_disabled
+    settings.auth_disabled = True # Disable auth for simpler setup
+
+    async def get_test_session() -> AsyncGenerator[AsyncSession, None]:
+        yield session
+
+    app.dependency_overrides[database.get_session] = get_test_session
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        yield client
+
+    app.dependency_overrides.clear()
+    settings.auth_disabled = original_auth_disabled
+
+class TestAuditAPI:
+    """Tests for GET /api/v1/audit/events."""
+
+    async def test_list_audit_events_basic(self, session: AsyncSession, client: AsyncClient):
+        # Create some audit events
+        event1 = AuditEventDB(
+            entity_type="asset",
+            entity_id=uuid4(),
+            action="created",
+            actor_id=uuid4(),
+            payload={"fqn": "test.asset"}
+        )
+        session.add(event1)
+        await session.flush()
+
+        response = await client.get("/api/v1/audit/events")
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["results"]) == 1
+        assert data["results"][0]["entity_type"] == "asset"
+
+    async def test_list_audit_events_filters(self, session: AsyncSession, client: AsyncClient):
+        entity_id = uuid4()
+        event1 = AuditEventDB(
+            entity_type="asset",
+            entity_id=entity_id,
+            action="created",
+            actor_id=uuid4(),
+            payload={"fqn": "test.asset"}
+        )
+        event2 = AuditEventDB(
+            entity_type="contract",
+            entity_id=uuid4(),
+            action="published",
+            actor_id=uuid4(),
+            payload={"version": "1.0.0"}
+        )
+        session.add_all([event1, event2])
+        await session.flush()
+
+        # Filter by entity_type
+        response = await client.get("/api/v1/audit/events", params={"entity_type": "asset"})
+        assert response.status_code == 200
+        assert len(response.json()["results"]) == 1
+
+        # Filter by entity_id
+        response = await client.get("/api/v1/audit/events", params={"entity_id": str(entity_id)})
+        assert response.status_code == 200
+        assert len(response.json()["results"]) == 1
+
+

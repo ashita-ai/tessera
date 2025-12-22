@@ -3,16 +3,19 @@
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tessera.api.auth import Auth, RequireRead
 from tessera.api.errors import ErrorCode, NotFoundError
 from tessera.api.pagination import PaginationParams, paginate, pagination_params
+from tessera.api.rate_limit import limit_read
 from tessera.db import ContractDB, RegistrationDB, get_session
 from tessera.models import Contract, Registration
 from tessera.models.enums import CompatibilityMode, ContractStatus
+from tessera.services.cache import get_cached_contract, cache_contract
 from tessera.services.schema_diff import diff_schemas
 
 router = APIRouter()
@@ -39,14 +42,21 @@ class ContractCompareResponse(BaseModel):
 
 
 @router.get("")
+@limit_read
 async def list_contracts(
+    request: Request,
+    auth: Auth,
     asset_id: UUID | None = Query(None, description="Filter by asset ID"),
     status: ContractStatus | None = Query(None, description="Filter by status"),
     version: str | None = Query(None, description="Filter by version pattern"),
     params: PaginationParams = Depends(pagination_params),
+    _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    """List all contracts with filtering and pagination."""
+    """List all contracts with filtering and pagination.
+
+    Requires read scope.
+    """
     query = select(ContractDB)
     if asset_id:
         query = query.where(ContractDB.asset_id == asset_id)
@@ -60,11 +70,18 @@ async def list_contracts(
 
 
 @router.post("/compare", response_model=ContractCompareResponse)
+@limit_read
 async def compare_contracts(
-    request: ContractCompareRequest,
+    request: Request,
+    compare_req: ContractCompareRequest,
+    auth: Auth,
+    _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
 ) -> ContractCompareResponse:
-    """Compare two contracts and return the differences."""
+    """Compare two contracts and return the differences.
+
+    Requires read scope.
+    """
     # Fetch both contracts
     result1 = await session.execute(
         select(ContractDB).where(ContractDB.id == request.contract_id_1)
@@ -117,11 +134,23 @@ async def compare_contracts(
 
 
 @router.get("/{contract_id}", response_model=Contract)
+@limit_read
 async def get_contract(
+    request: Request,
     contract_id: UUID,
+    auth: Auth,
+    _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
-) -> ContractDB:
-    """Get a contract by ID."""
+) -> ContractDB | dict[str, Any]:
+    """Get a contract by ID.
+
+    Requires read scope.
+    """
+    # Try cache first
+    cached = await get_cached_contract(str(contract_id))
+    if cached:
+        return cached
+
     result = await session.execute(select(ContractDB).where(ContractDB.id == contract_id))
     contract = result.scalar_one_or_none()
     if not contract:
@@ -130,16 +159,27 @@ async def get_contract(
             message=f"Contract with ID '{contract_id}' not found",
             details={"contract_id": str(contract_id)},
         )
+
+    # Cache result
+    await cache_contract(str(contract_id), Contract.model_validate(contract).model_dump())
+
     return contract
 
 
 @router.get("/{contract_id}/registrations")
+@limit_read
 async def list_contract_registrations(
+    request: Request,
+    auth: Auth,
     contract_id: UUID,
     params: PaginationParams = Depends(pagination_params),
+    _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    """List all registrations for a contract."""
+    """List all registrations for a contract.
+
+    Requires read scope.
+    """
     # Verify contract exists
     result = await session.execute(select(ContractDB).where(ContractDB.id == contract_id))
     contract = result.scalar_one_or_none()

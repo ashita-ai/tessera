@@ -8,13 +8,15 @@ from pydantic import BaseModel
 from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tessera.config import settings
+
 T = TypeVar("T")
 
 
 class PaginationParams(BaseModel):
     """Pagination parameters extracted from query params."""
 
-    limit: int = 50
+    limit: int = settings.pagination_limit_default
     offset: int = 0
 
 
@@ -28,7 +30,12 @@ class PaginatedResponse(BaseModel, Generic[T]):
 
 
 def pagination_params(
-    limit: int = Query(50, ge=1, le=100, description="Results per page"),
+    limit: int = Query(
+        settings.pagination_limit_default,
+        ge=1,
+        le=settings.pagination_limit_max,
+        description="Results per page",
+    ),
     offset: int = Query(0, ge=0, description="Pagination offset"),
 ) -> PaginationParams:
     """FastAPI dependency for pagination parameters."""

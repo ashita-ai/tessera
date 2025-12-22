@@ -4,11 +4,13 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tessera.api.auth import Auth, RequireAdmin, RequireRead
+from tessera.api.rate_limit import limit_admin
 from tessera.db.database import get_session
 from tessera.db.models import WebhookDeliveryDB
 from tessera.models.enums import WebhookDeliveryStatus
@@ -40,14 +42,22 @@ class WebhookDeliveriesListResponse(BaseModel):
 
 
 @router.get("/deliveries", response_model=WebhookDeliveriesListResponse)
+@limit_admin
 async def list_deliveries(
+    request: Request,
+    auth: Auth,
     status: WebhookDeliveryStatus | None = Query(None, description="Filter by status"),
     event_type: str | None = Query(None, description="Filter by event type"),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
+    _: None = RequireAdmin,
+    __: None = RequireRead,
     session: AsyncSession = Depends(get_session),
 ) -> WebhookDeliveriesListResponse:
-    """List webhook deliveries with optional filtering."""
+    """List webhook deliveries with optional filtering.
+
+    Requires admin and read scope.
+    """
     query = select(WebhookDeliveryDB)
 
     if status:
@@ -92,11 +102,19 @@ async def list_deliveries(
 
 
 @router.get("/deliveries/{delivery_id}", response_model=WebhookDeliveryResponse)
+@limit_admin
 async def get_delivery(
+    request: Request,
     delivery_id: UUID,
+    auth: Auth,
+    _: None = RequireAdmin,
+    __: None = RequireRead,
     session: AsyncSession = Depends(get_session),
 ) -> WebhookDeliveryResponse:
-    """Get a specific webhook delivery by ID."""
+    """Get a specific webhook delivery by ID.
+
+    Requires admin and read scope.
+    """
     result = await session.execute(
         select(WebhookDeliveryDB).where(WebhookDeliveryDB.id == delivery_id)
     )

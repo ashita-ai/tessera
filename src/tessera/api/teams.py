@@ -1,18 +1,23 @@
 """Teams API endpoints."""
 
+from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Security
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Security
 from fastapi.security import APIKeyHeader
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tessera.api.auth import Auth, RequireAdmin, RequireRead
 from tessera.api.pagination import PaginationParams, paginate, pagination_params
+from tessera.api.rate_limit import limit_read, limit_write
 from tessera.config import settings
 from tessera.db import TeamDB, get_session
 from tessera.models import Team, TeamCreate, TeamUpdate
+from tessera.models.enums import APIKeyScope
+from tessera.services.cache import team_cache
 
 router = APIRouter()
 
@@ -76,7 +81,9 @@ async def _verify_can_create_team(
 
 
 @router.post("", response_model=Team, status_code=201)
+@limit_write
 async def create_team(
+    request: Request,
     team: TeamCreate,
     _: None = Depends(_verify_can_create_team),
     session: AsyncSession = Depends(get_session),
@@ -97,13 +104,20 @@ async def create_team(
 
 
 @router.get("")
+@limit_read
 async def list_teams(
+    request: Request,
+    auth: Auth,
     name: str | None = Query(None, description="Filter by name pattern (case-insensitive)"),
     params: PaginationParams = Depends(pagination_params),
+    _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    """List all teams with filtering and pagination."""
-    query = select(TeamDB)
+    """List all teams with filtering and pagination.
+
+    Requires read scope.
+    """
+    query = select(TeamDB).where(TeamDB.deleted_at.is_(None))
     if name:
         query = query.where(TeamDB.name.ilike(f"%{name}%"))
     query = query.order_by(TeamDB.name)
@@ -112,12 +126,23 @@ async def list_teams(
 
 
 @router.get("/{team_id}", response_model=Team)
+@limit_read
 async def get_team(
+    request: Request,
     team_id: UUID,
+    auth: Auth,
+    _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
 ) -> TeamDB:
-    """Get a team by ID."""
-    result = await session.execute(select(TeamDB).where(TeamDB.id == team_id))
+    """Get a team by ID.
+
+    Requires read scope.
+    """
+    result = await session.execute(
+        select(TeamDB)
+        .where(TeamDB.id == team_id)
+        .where(TeamDB.deleted_at.is_(None))
+    )
     team = result.scalar_one_or_none()
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
@@ -125,13 +150,25 @@ async def get_team(
 
 
 @router.patch("/{team_id}", response_model=Team)
+@router.put("/{team_id}", response_model=Team)
+@limit_write
 async def update_team(
+    request: Request,
     team_id: UUID,
     update: TeamUpdate,
+    auth: Auth,
+    _: None = RequireAdmin,
     session: AsyncSession = Depends(get_session),
 ) -> TeamDB:
-    """Update a team."""
-    result = await session.execute(select(TeamDB).where(TeamDB.id == team_id))
+    """Update a team.
+
+    Requires admin scope.
+    """
+    result = await session.execute(
+        select(TeamDB)
+        .where(TeamDB.id == team_id)
+        .where(TeamDB.deleted_at.is_(None))
+    )
     team = result.scalar_one_or_none()
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
@@ -143,4 +180,68 @@ async def update_team(
 
     await session.flush()
     await session.refresh(team)
+    # Invalidate cache
+    await team_cache.delete(str(team_id))
+    return team
+
+
+@router.delete("/{team_id}", status_code=204)
+@limit_write
+async def delete_team(
+    request: Request,
+    team_id: UUID,
+    auth: Auth,
+    _: None = RequireAdmin,
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    """Soft delete a team.
+
+    Requires admin scope.
+    """
+    result = await session.execute(
+        select(TeamDB)
+        .where(TeamDB.id == team_id)
+        .where(TeamDB.deleted_at.is_(None))
+    )
+    team = result.scalar_one_or_none()
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+
+    team.deleted_at = datetime.now(timezone.utc)
+    await session.flush()
+
+    # Invalidate cache
+    await team_cache.delete(str(team_id))
+
+
+@router.post("/{team_id}/restore", response_model=Team)
+@limit_write
+async def restore_team(
+    request: Request,
+    team_id: UUID,
+    auth: Auth,
+    _: None = RequireAdmin,
+    session: AsyncSession = Depends(get_session),
+) -> TeamDB:
+    """Restore a soft-deleted team.
+
+    Requires admin scope.
+    """
+    result = await session.execute(
+        select(TeamDB).where(TeamDB.id == team_id)
+    )
+    team = result.scalar_one_or_none()
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+
+    if team.deleted_at is None:
+        return team
+
+    team.deleted_at = None
+    await session.flush()
+    await session.refresh(team)
+
+    # Invalidate cache
+    await team_cache.delete(str(team_id))
+
     return team

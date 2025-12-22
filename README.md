@@ -68,6 +68,20 @@ uv run uvicorn tessera.main:app --reload
 DATABASE_URL=sqlite+aiosqlite:///:memory: uv run pytest
 ```
 
+## Production Configuration
+
+For production deployments, ensure the following environment variables are set:
+
+- `ENVIRONMENT=production`: Enables security restrictions (e.g., tighter CORS).
+- `CORS_ORIGINS`: Comma-separated list of allowed origins (no `*`).
+- `AUTH_DISABLED=false`: Ensure authentication is enabled.
+- `BOOTSTRAP_API_KEY`: Set a strong bootstrap key for initial setup.
+- `DATABASE_URL`: Use a robust PostgreSQL database.
+- `REDIS_URL`: Enable Redis for caching.
+
+### CORS in Production
+In production, Tessera restricts allowed HTTP methods to `GET, POST, PATCH, DELETE, OPTIONS`. Wildcard origins are disabled; you must explicitly list your frontend domains in `CORS_ORIGINS`.
+
 ## Status
 
 Early development.

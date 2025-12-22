@@ -59,6 +59,19 @@ class TestTeamsAPI:
         data = resp.json()
         assert data["name"] == "updated-team-name"
 
+    async def test_update_team_put(self, client: AsyncClient):
+        """Update a team using PUT."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "put-team"})
+        team_id = team_resp.json()["id"]
+
+        resp = await client.put(
+            f"/api/v1/teams/{team_id}",
+            json={"name": "put-team-updated"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["name"] == "put-team-updated"
+
     async def test_update_team_not_found(self, client: AsyncClient):
         """Updating nonexistent team should 404."""
         resp = await client.patch(

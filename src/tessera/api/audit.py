@@ -4,12 +4,14 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tessera.api.auth import Auth, RequireAdmin, RequireRead
 from tessera.api.errors import ErrorCode, NotFoundError
+from tessera.api.rate_limit import limit_admin
 from tessera.db.database import get_session
 from tessera.db.models import AuditEventDB
 
@@ -51,7 +53,10 @@ def _to_response(event: AuditEventDB) -> AuditEventResponse:
 
 
 @router.get("/events", response_model=AuditEventsListResponse)
+@limit_admin
 async def list_audit_events(
+    request: Request,
+    auth: Auth,
     entity_type: str | None = Query(None, description="Filter by entity type"),
     entity_id: UUID | None = Query(None, description="Filter by entity ID"),
     action: str | None = Query(None, description="Filter by action"),
@@ -60,9 +65,14 @@ async def list_audit_events(
     to_date: datetime | None = Query(None, alias="to", description="End datetime"),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
+    _: None = RequireAdmin,
+    __: None = RequireRead,
     session: AsyncSession = Depends(get_session),
 ) -> AuditEventsListResponse:
-    """List audit events with optional filtering."""
+    """List audit events with optional filtering.
+
+    Requires admin and read scope.
+    """
     query = select(AuditEventDB)
     count_query = select(func.count(AuditEventDB.id))
 
@@ -105,11 +115,19 @@ async def list_audit_events(
 
 
 @router.get("/events/{event_id}", response_model=AuditEventResponse)
+@limit_admin
 async def get_audit_event(
+    request: Request,
     event_id: UUID,
+    auth: Auth,
+    _: None = RequireAdmin,
+    __: None = RequireRead,
     session: AsyncSession = Depends(get_session),
 ) -> AuditEventResponse:
-    """Get a specific audit event by ID."""
+    """Get a specific audit event by ID.
+
+    Requires admin and read scope.
+    """
     result = await session.execute(select(AuditEventDB).where(AuditEventDB.id == event_id))
     event = result.scalar_one_or_none()
     if not event:
@@ -125,14 +143,22 @@ async def get_audit_event(
     "/entities/{entity_type}/{entity_id}/history",
     response_model=AuditEventsListResponse,
 )
+@limit_admin
 async def get_entity_history(
+    request: Request,
     entity_type: str,
     entity_id: UUID,
+    auth: Auth,
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
+    _: None = RequireAdmin,
+    __: None = RequireRead,
     session: AsyncSession = Depends(get_session),
 ) -> AuditEventsListResponse:
-    """Get audit history for a specific entity."""
+    """Get audit history for a specific entity.
+
+    Requires admin and read scope.
+    """
     # Get total count for this entity
     count_query = select(func.count(AuditEventDB.id)).where(
         AuditEventDB.entity_type == entity_type,

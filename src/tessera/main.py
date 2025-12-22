@@ -21,6 +21,9 @@ from tessera.api import (
     teams,
     webhooks,
 )
+from tessera.api.rate_limit import limiter, rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 from tessera.api.errors import (
     APIError,
     RequestIDMiddleware,
@@ -49,16 +52,23 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 # Request ID middleware (must be added first to wrap all other middleware)
 app.add_middleware(RequestIDMiddleware)
 
 # CORS middleware
+allow_methods = ["*"]
+if settings.environment == "production":
+    allow_methods = settings.cors_allow_methods
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=allow_methods,
     allow_headers=["*"],
 )
 

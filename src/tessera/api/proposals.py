@@ -4,11 +4,13 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tessera.api.auth import Auth, RequireRead, RequireWrite
+from tessera.api.rate_limit import limit_read, limit_write
 from tessera.db import (
     AcknowledgmentDB,
     AssetDB,
@@ -21,6 +23,7 @@ from tessera.db import (
 from tessera.models import Acknowledgment, AcknowledgmentCreate, Contract, Proposal
 from tessera.models.enums import (
     AcknowledgmentResponseType,
+    APIKeyScope,
     CompatibilityMode,
     ContractStatus,
     ProposalStatus,
@@ -102,15 +105,22 @@ async def check_proposal_completion(
 
 
 @router.get("")
+@limit_read
 async def list_proposals(
+    request: Request,
+    auth: Auth,
     asset_id: UUID | None = Query(None, description="Filter by asset ID"),
     status: ProposalStatus | None = Query(None, description="Filter by status"),
     proposed_by: UUID | None = Query(None, description="Filter by proposer team ID"),
     limit: int = Query(50, ge=1, le=100, description="Results per page"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
+    _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    """List all proposals with optional filtering and pagination."""
+    """List all proposals with optional filtering and pagination.
+
+    Requires read scope.
+    """
     # Build base query with filters
     base_query = select(ProposalDB)
     if asset_id:
@@ -210,11 +220,18 @@ async def list_proposals(
 
 
 @router.get("/{proposal_id}", response_model=Proposal)
+@limit_read
 async def get_proposal(
+    request: Request,
+    auth: Auth,
     proposal_id: UUID,
+    _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
 ) -> ProposalDB:
-    """Get a proposal by ID."""
+    """Get a proposal by ID.
+
+    Requires read scope.
+    """
     result = await session.execute(select(ProposalDB).where(ProposalDB.id == proposal_id))
     proposal = result.scalar_one_or_none()
     if not proposal:
@@ -223,11 +240,18 @@ async def get_proposal(
 
 
 @router.get("/{proposal_id}/status")
+@limit_read
 async def get_proposal_status(
+    request: Request,
+    auth: Auth,
     proposal_id: UUID,
+    _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    """Get detailed status of a proposal including acknowledgment progress."""
+    """Get detailed status of a proposal including acknowledgment progress.
+
+    Requires read scope.
+    """
     # Get proposal with asset in single query
     result = await session.execute(
         select(ProposalDB, AssetDB)
@@ -331,16 +355,31 @@ async def get_proposal_status(
 
 
 @router.post("/{proposal_id}/acknowledge", response_model=Acknowledgment, status_code=201)
+@limit_write
 async def acknowledge_proposal(
+    request: Request,
     proposal_id: UUID,
     ack: AcknowledgmentCreate,
+    auth: Auth,
+    _: None = RequireWrite,
     session: AsyncSession = Depends(get_session),
 ) -> AcknowledgmentDB:
     """Acknowledge a proposal as a consumer.
 
     If the acknowledgment response is 'blocked', the proposal is rejected.
     If all registered consumers have acknowledged (non-blocked), the proposal is auto-approved.
+    Requires write scope.
     """
+    # Resource-level auth: must own the consumer team or be admin
+    if ack.consumer_team_id != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "INSUFFICIENT_PERMISSIONS",
+                "message": "You can only acknowledge proposals on behalf of your own team",
+            },
+        )
+
     # Verify proposal exists and get asset info
     result = await session.execute(
         select(ProposalDB, AssetDB)
@@ -456,11 +495,18 @@ async def acknowledge_proposal(
 
 
 @router.post("/{proposal_id}/withdraw", response_model=Proposal)
+@limit_write
 async def withdraw_proposal(
+    request: Request,
     proposal_id: UUID,
+    auth: Auth,
+    _: None = RequireWrite,
     session: AsyncSession = Depends(get_session),
 ) -> ProposalDB:
-    """Withdraw a proposal."""
+    """Withdraw a proposal.
+
+    Requires write scope.
+    """
     result = await session.execute(
         select(ProposalDB, AssetDB)
         .join(AssetDB, ProposalDB.asset_id == AssetDB.id)
@@ -471,6 +517,16 @@ async def withdraw_proposal(
         raise HTTPException(status_code=404, detail="Proposal not found")
     proposal: ProposalDB = row[0]
     asset: AssetDB = row[1]
+
+    # Resource-level auth: must own the proposer team or be admin
+    if proposal.proposed_by != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "INSUFFICIENT_PERMISSIONS",
+                "message": "You can only withdraw your own proposals",
+            },
+        )
 
     if proposal.status != ProposalStatus.PENDING:
         raise HTTPException(status_code=400, detail="Proposal is not pending")
@@ -493,12 +549,29 @@ async def withdraw_proposal(
 
 
 @router.post("/{proposal_id}/force", response_model=Proposal)
+@limit_write
 async def force_proposal(
+    request: Request,
+    auth: Auth,
     proposal_id: UUID,
     actor_id: UUID = Query(..., description="Team ID of the actor forcing approval"),
+    _: None = RequireWrite,
     session: AsyncSession = Depends(get_session),
 ) -> ProposalDB:
-    """Force-approve a proposal (bypassing consumer acknowledgments)."""
+    """Force-approve a proposal (bypassing consumer acknowledgments).
+
+    Requires write scope.
+    """
+    # Resource-level auth: actor_id must match auth.team_id or be admin
+    if actor_id != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "INSUFFICIENT_PERMISSIONS",
+                "message": "You can only force approve on behalf of your own team",
+            },
+        )
+
     result = await session.execute(
         select(ProposalDB, AssetDB)
         .join(AssetDB, ProposalDB.asset_id == AssetDB.id)
@@ -543,16 +616,31 @@ async def force_proposal(
 
 
 @router.post("/{proposal_id}/publish")
+@limit_write
 async def publish_from_proposal(
+    request: Request,
+    auth: Auth,
     proposal_id: UUID,
     publish_request: PublishRequest,
+    _: None = RequireWrite,
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """Publish a contract from an approved proposal.
 
     Only works on proposals with status=APPROVED.
     Creates a new contract with the proposed schema and deprecates the old one.
+    Requires write scope.
     """
+    # Resource-level auth: publish_request.published_by must match auth.team_id or be admin
+    if publish_request.published_by != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "INSUFFICIENT_PERMISSIONS",
+                "message": "You can only publish on behalf of your own team",
+            },
+        )
+
     # Get the proposal
     result = await session.execute(select(ProposalDB).where(ProposalDB.id == proposal_id))
     proposal = result.scalar_one_or_none()

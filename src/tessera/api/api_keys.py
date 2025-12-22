@@ -2,10 +2,11 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.api.auth import Auth, RequireAdmin
+from tessera.api.rate_limit import limit_admin, limit_read
 from tessera.db.database import get_session
 from tessera.models.api_key import APIKey, APIKeyCreate, APIKeyCreated, APIKeyList
 from tessera.models.enums import APIKeyScope
@@ -22,7 +23,9 @@ router = APIRouter()
 
 
 @router.post("", response_model=APIKeyCreated, status_code=201)
+@limit_admin
 async def create_key(
+    request: Request,
     key_data: APIKeyCreate,
     auth: Auth,
     _: None = RequireAdmin,
@@ -56,7 +59,9 @@ async def create_key(
 
 
 @router.get("", response_model=APIKeyList)
+@limit_admin
 async def list_keys(
+    request: Request,
     auth: Auth,
     team_id: UUID | None = None,
     include_revoked: bool = False,
@@ -76,7 +81,9 @@ async def list_keys(
 
 
 @router.get("/{key_id}", response_model=APIKey)
+@limit_admin
 async def get_key(
+    request: Request,
     key_id: UUID,
     auth: Auth,
     session: AsyncSession = Depends(get_session),
@@ -103,7 +110,9 @@ async def get_key(
 
 
 @router.delete("/{key_id}", response_model=APIKey)
+@limit_admin
 async def revoke_key(
+    request: Request,
     key_id: UUID,
     auth: Auth,
     _: None = RequireAdmin,

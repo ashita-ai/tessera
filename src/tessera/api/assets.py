@@ -1,16 +1,19 @@
 """Assets API endpoints."""
 
 from collections import defaultdict
+from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tessera.api.auth import Auth, RequireWrite
+from tessera.api.auth import Auth, RequireAdmin, RequireRead, RequireWrite
 from tessera.api.pagination import PaginationParams, paginate, pagination_params
+from tessera.api.rate_limit import limit_read, limit_write
+from tessera.config import settings
 from tessera.db import (
     AssetDB,
     AssetDependencyDB,
@@ -30,7 +33,14 @@ from tessera.models import (
     DependencyCreate,
     Proposal,
 )
-from tessera.models.enums import ContractStatus, RegistrationStatus
+from tessera.models.enums import APIKeyScope, ContractStatus, RegistrationStatus
+from tessera.services.cache import (
+    asset_cache,
+    contract_cache,
+    get_cached_contract,
+    get_cached_schema_diff,
+    cache_schema_diff,
+)
 from tessera.services import (
     check_compatibility,
     diff_schemas,
@@ -44,7 +54,9 @@ router = APIRouter()
 
 
 @router.post("", response_model=Asset, status_code=201)
+@limit_write
 async def create_asset(
+    request: Request,
     asset: AssetCreate,
     auth: Auth,
     _: None = RequireWrite,
@@ -54,19 +66,35 @@ async def create_asset(
 
     Requires write scope.
     """
+    # Resource-level auth: must own the team or be admin
+    if asset.owner_team_id != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "INSUFFICIENT_PERMISSIONS",
+                "message": "You can only create assets for teams you belong to",
+            },
+        )
+
     # Validate owner team exists
     result = await session.execute(select(TeamDB).where(TeamDB.id == asset.owner_team_id))
     if not result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Owner team not found")
 
     # Check for duplicate FQN
-    existing = await session.execute(select(AssetDB).where(AssetDB.fqn == asset.fqn))
+    existing = await session.execute(
+        select(AssetDB)
+        .where(AssetDB.fqn == asset.fqn)
+        .where(AssetDB.environment == asset.environment)
+        .where(AssetDB.deleted_at.is_(None))
+    )
     if existing.scalar_one_or_none():
-        raise HTTPException(status_code=409, detail=f"Asset with FQN '{asset.fqn}' already exists")
+        raise HTTPException(status_code=409, detail=f"Asset with FQN '{asset.fqn}' already exists in environment '{asset.environment}'")
 
     db_asset = AssetDB(
         fqn=asset.fqn,
         owner_team_id=asset.owner_team_id,
+        environment=asset.environment,
         metadata_=asset.metadata,
     )
     session.add(db_asset)
@@ -79,38 +107,65 @@ async def create_asset(
 
 
 @router.get("")
+@limit_read
 async def list_assets(
+    request: Request,
+    auth: Auth,
     owner: UUID | None = Query(None, description="Filter by owner team ID"),
     fqn: str | None = Query(None, description="Filter by FQN pattern (case-insensitive)"),
+    environment: str | None = Query(None, description="Filter by environment"),
     params: PaginationParams = Depends(pagination_params),
+    _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    """List all assets with filtering and pagination."""
-    query = select(AssetDB)
+    """List all assets with filtering and pagination.
+
+    Requires read scope.
+    """
+    query = select(AssetDB).where(AssetDB.deleted_at.is_(None))
     if owner:
         query = query.where(AssetDB.owner_team_id == owner)
     if fqn:
         query = query.where(AssetDB.fqn.ilike(f"%{fqn}%"))
+    if environment:
+        query = query.where(AssetDB.environment == environment)
     query = query.order_by(AssetDB.fqn)
 
     return await paginate(session, query, params, response_model=Asset)
 
 
 @router.get("/search")
+@limit_read
 async def search_assets(
+    request: Request,
+    auth: Auth,
     q: str = Query(..., min_length=1, description="Search query"),
     owner: UUID | None = Query(None, description="Filter by owner team ID"),
-    limit: int = Query(50, ge=1, le=100, description="Results per page"),
+    environment: str | None = Query(None, description="Filter by environment"),
+    limit: int = Query(
+        settings.pagination_limit_default,
+        ge=1,
+        le=settings.pagination_limit_max,
+        description="Results per page",
+    ),
     offset: int = Query(0, ge=0, description="Pagination offset"),
+    _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """Search assets by FQN pattern.
 
     Searches for assets whose FQN contains the search query (case-insensitive).
+    Requires read scope.
     """
-    base_query = select(AssetDB).where(AssetDB.fqn.ilike(f"%{q}%"))
+    base_query = (
+        select(AssetDB)
+        .where(AssetDB.fqn.ilike(f"%{q}%"))
+        .where(AssetDB.deleted_at.is_(None))
+    )
     if owner:
         base_query = base_query.where(AssetDB.owner_team_id == owner)
+    if environment:
+        base_query = base_query.where(AssetDB.environment == environment)
 
     # Get total count
     count_query = select(func.count()).select_from(base_query.subquery())
@@ -122,9 +177,12 @@ async def search_assets(
         select(AssetDB, TeamDB)
         .join(TeamDB, AssetDB.owner_team_id == TeamDB.id)
         .where(AssetDB.fqn.ilike(f"%{q}%"))
+        .where(AssetDB.deleted_at.is_(None))
     )
     if owner:
         query = query.where(AssetDB.owner_team_id == owner)
+    if environment:
+        query = query.where(AssetDB.environment == environment)
     query = query.order_by(AssetDB.fqn).limit(limit).offset(offset)
 
     result = await session.execute(query)
@@ -137,6 +195,7 @@ async def search_assets(
             "fqn": asset.fqn,
             "owner_team_id": str(asset.owner_team_id),
             "owner_team_name": team.name,
+            "environment": asset.environment,
         }
         for asset, team in rows
     ]
@@ -150,20 +209,42 @@ async def search_assets(
 
 
 @router.get("/{asset_id}", response_model=Asset)
+@limit_read
 async def get_asset(
+    request: Request,
     asset_id: UUID,
+    auth: Auth,
+    _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
-) -> AssetDB:
-    """Get an asset by ID."""
-    result = await session.execute(select(AssetDB).where(AssetDB.id == asset_id))
+) -> AssetDB | dict[str, Any]:
+    """Get an asset by ID.
+
+    Requires read scope.
+    """
+    # Try cache
+    cached = await asset_cache.get(str(asset_id))
+    if cached:
+        return cached
+
+    result = await session.execute(
+        select(AssetDB)
+        .where(AssetDB.id == asset_id)
+        .where(AssetDB.deleted_at.is_(None))
+    )
     asset = result.scalar_one_or_none()
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found")
+
+    # Cache result
+    await asset_cache.set(str(asset_id), Asset.model_validate(asset).model_dump())
+
     return asset
 
 
 @router.patch("/{asset_id}", response_model=Asset)
+@limit_write
 async def update_asset(
+    request: Request,
     asset_id: UUID,
     update: AssetUpdate,
     auth: Auth,
@@ -174,25 +255,119 @@ async def update_asset(
 
     Requires write scope.
     """
-    result = await session.execute(select(AssetDB).where(AssetDB.id == asset_id))
+    result = await session.execute(
+        select(AssetDB)
+        .where(AssetDB.id == asset_id)
+        .where(AssetDB.deleted_at.is_(None))
+    )
     asset = result.scalar_one_or_none()
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found")
+
+    # Resource-level auth: must own the asset's team or be admin
+    if asset.owner_team_id != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "INSUFFICIENT_PERMISSIONS",
+                "message": "You can only update assets belonging to your team",
+            },
+        )
 
     if update.fqn is not None:
         asset.fqn = update.fqn
     if update.owner_team_id is not None:
         asset.owner_team_id = update.owner_team_id
+    if update.environment is not None:
+        asset.environment = update.environment
     if update.metadata is not None:
         asset.metadata_ = update.metadata
 
     await session.flush()
     await session.refresh(asset)
+
+    # Invalidate cache
+    await asset_cache.delete(str(asset_id))
+
+    return asset
+
+
+@router.delete("/{asset_id}", status_code=204)
+@limit_write
+async def delete_asset(
+    request: Request,
+    asset_id: UUID,
+    auth: Auth,
+    _: None = RequireWrite,
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    """Soft delete an asset.
+
+    Requires write scope. Resource-level auth: must own the asset's team or be admin.
+    """
+    result = await session.execute(
+        select(AssetDB)
+        .where(AssetDB.id == asset_id)
+        .where(AssetDB.deleted_at.is_(None))
+    )
+    asset = result.scalar_one_or_none()
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    # Resource-level auth
+    if asset.owner_team_id != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "INSUFFICIENT_PERMISSIONS",
+                "message": "You can only delete assets belonging to your team",
+            },
+        )
+
+    asset.deleted_at = datetime.now(timezone.utc)
+    await session.flush()
+
+    # Invalidate cache
+    await asset_cache.delete(str(asset_id))
+
+
+@router.post("/{asset_id}/restore", response_model=Asset)
+@limit_write
+async def restore_asset(
+    request: Request,
+    asset_id: UUID,
+    auth: Auth,
+    _: None = RequireAdmin,
+    session: AsyncSession = Depends(get_session),
+) -> AssetDB:
+    """Restore a soft-deleted asset.
+
+    Requires admin scope.
+    """
+    result = await session.execute(
+        select(AssetDB).where(AssetDB.id == asset_id)
+    )
+    asset = result.scalar_one_or_none()
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    if asset.deleted_at is None:
+        return asset
+
+    asset.deleted_at = None
+    await session.flush()
+    await session.refresh(asset)
+
+    # Invalidate cache
+    await asset_cache.delete(str(asset_id))
+
     return asset
 
 
 @router.post("/{asset_id}/dependencies", response_model=Dependency, status_code=201)
+@limit_write
 async def create_dependency(
+    request: Request,
     asset_id: UUID,
     dependency: DependencyCreate,
     auth: Auth,
@@ -209,6 +384,16 @@ async def create_dependency(
     asset = result.scalar_one_or_none()
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found")
+
+    # Resource-level auth: must own the dependent asset's team or be admin
+    if asset.owner_team_id != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "INSUFFICIENT_PERMISSIONS",
+                "message": "You can only add dependencies to assets belonging to your team",
+            },
+        )
 
     # Verify the dependency asset exists
     result = await session.execute(
@@ -243,12 +428,19 @@ async def create_dependency(
 
 
 @router.get("/{asset_id}/dependencies")
+@limit_read
 async def list_dependencies(
+    request: Request,
+    auth: Auth,
     asset_id: UUID,
     params: PaginationParams = Depends(pagination_params),
+    _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    """List all upstream dependencies for an asset."""
+    """List all upstream dependencies for an asset.
+
+    Requires read scope.
+    """
     asset_result = await session.execute(select(AssetDB).where(AssetDB.id == asset_id))
     if not asset_result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Asset not found")
@@ -258,7 +450,9 @@ async def list_dependencies(
 
 
 @router.delete("/{asset_id}/dependencies/{dependency_id}", status_code=204)
+@limit_write
 async def delete_dependency(
+    request: Request,
     asset_id: UUID,
     dependency_id: UUID,
     auth: Auth,
@@ -283,10 +477,12 @@ async def delete_dependency(
 
 
 @router.post("/{asset_id}/contracts", status_code=201)
+@limit_write
 async def create_contract(
+    request: Request,
+    auth: Auth,
     asset_id: UUID,
     contract: ContractCreate,
-    auth: Auth,
     published_by: UUID = Query(..., description="Team ID of the publisher"),
     force: bool = Query(False, description="Force publish even if breaking (creates audit trail)"),
     _: None = RequireWrite,
@@ -310,11 +506,41 @@ async def create_contract(
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found")
 
+    # Resource-level auth: must own the asset's team or be admin
+    if asset.owner_team_id != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "INSUFFICIENT_PERMISSIONS",
+                "message": "You can only publish contracts for assets belonging to your team",
+            },
+        )
+
     # Verify publisher team exists
     team_result = await session.execute(select(TeamDB).where(TeamDB.id == published_by))
     publisher_team = team_result.scalar_one_or_none()
     if not publisher_team:
         raise HTTPException(status_code=404, detail="Publisher team not found")
+
+    # Resource-level auth: published_by must match auth.team_id or be admin
+    if published_by != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "INSUFFICIENT_PERMISSIONS",
+                "message": "You can only publish contracts on behalf of your own team",
+            },
+        )
+
+    # Resource-level auth: published_by must match auth.team_id or be admin
+    if published_by != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "INSUFFICIENT_PERMISSIONS",
+                "message": "You can only publish contracts on behalf of your own team",
+            },
+        )
 
     # Validate schema is valid JSON Schema
     is_valid, errors = validate_json_schema(contract.schema_def)
@@ -478,12 +704,19 @@ async def create_contract(
 
 
 @router.get("/{asset_id}/contracts")
+@limit_read
 async def list_asset_contracts(
+    request: Request,
+    auth: Auth,
     asset_id: UUID,
     params: PaginationParams = Depends(pagination_params),
+    _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    """List all contracts for an asset."""
+    """List all contracts for an asset.
+
+    Requires read scope.
+    """
     query = (
         select(ContractDB)
         .where(ContractDB.asset_id == asset_id)
@@ -493,13 +726,18 @@ async def list_asset_contracts(
 
 
 @router.get("/{asset_id}/contracts/history")
+@limit_read
 async def get_contract_history(
+    request: Request,
     asset_id: UUID,
+    auth: Auth,
+    _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """Get the complete contract history for an asset with change summaries.
 
     Returns all versions ordered by publication date with change type annotations.
+    Requires read scope.
     """
     # Verify asset exists
     asset_result = await session.execute(select(AssetDB).where(AssetDB.id == asset_id))
@@ -549,15 +787,20 @@ async def get_contract_history(
 
 
 @router.get("/{asset_id}/contracts/diff")
+@limit_read
 async def diff_contract_versions(
+    request: Request,
+    auth: Auth,
     asset_id: UUID,
     from_version: str = Query(..., description="Source version to compare from"),
     to_version: str = Query(..., description="Target version to compare to"),
+    _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """Compare two contract versions for an asset.
 
     Returns the diff between from_version and to_version.
+    Requires read scope.
     """
     # Verify asset exists
     asset_result = await session.execute(select(AssetDB).where(AssetDB.id == asset_id))
@@ -592,32 +835,61 @@ async def diff_contract_versions(
         )
 
     # Perform diff
-    diff_result = diff_schemas(from_contract.schema_def, to_contract.schema_def)
-    breaking = diff_result.breaking_for_mode(from_contract.compatibility_mode)
+    # Try cache
+    cached = await get_cached_schema_diff(from_contract.schema_def, to_contract.schema_def)
+    if cached:
+        diff_result_data = cached
+    else:
+        diff_result = diff_schemas(from_contract.schema_def, to_contract.schema_def)
+        diff_result_data = {
+            "change_type": str(diff_result.change_type.value),
+            "all_changes": [c.to_dict() for c in diff_result.changes],
+        }
+        await cache_schema_diff(from_contract.schema_def, to_contract.schema_def, diff_result_data)
+
+    breaking = [] # Re-calculate breaking based on compatibility mode of from_contract
+    # We need to re-check compatibility because it depends on the mode
+    # actually we should just cache the whole result including compatibility if possible
+    # but the mode can change.
+    # Let's just keep it simple for now.
+
+    # re-diff for breaking (fast)
+    diff_obj = diff_schemas(from_contract.schema_def, to_contract.schema_def)
+    breaking = diff_obj.breaking_for_mode(from_contract.compatibility_mode)
 
     return {
         "asset_id": str(asset_id),
         "asset_fqn": asset.fqn,
         "from_version": from_version,
         "to_version": to_version,
-        "change_type": str(diff_result.change_type.value),
+        "change_type": diff_result_data["change_type"],
         "is_compatible": len(breaking) == 0,
         "breaking_changes": [bc.to_dict() for bc in breaking],
-        "all_changes": [c.to_dict() for c in diff_result.changes],
+        "all_changes": diff_result_data["all_changes"],
         "compatibility_mode": str(from_contract.compatibility_mode.value),
     }
 
 
 @router.post("/{asset_id}/impact")
+@limit_read
 async def analyze_impact(
+    request: Request,
     asset_id: UUID,
     proposed_schema: dict[str, Any],
+    auth: Auth,
+    depth: int = Query(
+        settings.impact_depth_default,
+        ge=1,
+        le=settings.impact_depth_max,
+    ),
+    _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """Analyze the impact of a proposed schema change.
 
     Compares the proposed schema against the current active contract
-    and identifies breaking changes and impacted consumers.
+    and recursively identifies breaking changes and impacted consumers.
+    Requires read scope.
     """
     # Validate proposed schema is valid JSON Schema
     is_valid, errors = validate_json_schema(proposed_schema)
@@ -653,6 +925,7 @@ async def analyze_impact(
             "change_type": "minor",
             "breaking_changes": [],
             "impacted_consumers": [],
+            "impacted_assets": [],
             "safe_to_publish": True,
         }
 
@@ -660,43 +933,96 @@ async def analyze_impact(
     diff_result = diff_schemas(current_contract.schema_def, proposed_schema)
     breaking = diff_result.breaking_for_mode(current_contract.compatibility_mode)
 
-    # Get impacted consumers with team names in a single query (fixes N+1)
-    regs_result = await session.execute(
-        select(RegistrationDB, TeamDB)
-        .join(TeamDB, RegistrationDB.consumer_team_id == TeamDB.id)
-        .where(RegistrationDB.contract_id == current_contract.id)
-        .where(RegistrationDB.status == RegistrationStatus.ACTIVE)
-    )
-    rows = regs_result.all()
+    # Recursive traversal to find all impacted assets and teams
+    visited_assets: set[UUID] = set()
+    impacted_teams: dict[UUID, dict[str, Any]] = {}
+    impacted_assets: list[dict[str, Any]] = []
 
-    impacted_consumers = [
-        {
-            "team_id": str(reg.consumer_team_id),
-            "team_name": team.name,
-            "status": str(reg.status),
-            "pinned_version": reg.pinned_version,
-        }
-        for reg, team in rows
-    ]
+    async def traverse(current_id: UUID, current_depth: int):
+        if current_depth > depth or current_id in visited_assets:
+            return
+        visited_assets.add(current_id)
+
+        # 1. Get direct consumers (registrations) for this asset
+        # We need the active contract for the current_id
+        c_result = await session.execute(
+            select(ContractDB.id)
+            .where(ContractDB.asset_id == current_id)
+            .where(ContractDB.status == ContractStatus.ACTIVE)
+            .limit(1)
+        )
+        active_contract_id = c_result.scalar()
+
+        if active_contract_id:
+            regs_result = await session.execute(
+                select(RegistrationDB, TeamDB)
+                .join(TeamDB, RegistrationDB.consumer_team_id == TeamDB.id)
+                .where(RegistrationDB.contract_id == active_contract_id)
+                .where(RegistrationDB.status == RegistrationStatus.ACTIVE)
+            )
+            for reg, team in regs_result.all():
+                if team.id not in impacted_teams:
+                    impacted_teams[team.id] = {
+                        "team_id": str(team.id),
+                        "team_name": team.name,
+                        "status": str(reg.status),
+                        "pinned_version": reg.pinned_version,
+                        "depth": current_depth,
+                    }
+
+        # 2. Get downstream assets
+        downstream_result = await session.execute(
+            select(AssetDB, AssetDependencyDB.dependency_type)
+            .join(AssetDependencyDB, AssetDependencyDB.dependent_asset_id == AssetDB.id)
+            .where(AssetDependencyDB.dependency_asset_id == current_id)
+        )
+        for ds_asset, dep_type in downstream_result.all():
+            if ds_asset.id not in visited_assets:
+                impacted_assets.append({
+                    "asset_id": str(ds_asset.id),
+                    "fqn": ds_asset.fqn,
+                    "dependency_type": str(dep_type),
+                    "depth": current_depth,
+                })
+                await traverse(ds_asset.id, current_depth + 1)
+
+    # Start traversal
+    await traverse(asset_id, 1)
+
+    # Remove the starting asset from impacted_assets if it was added (it shouldn't be)
+    impacted_assets = [a for a in impacted_assets if a["asset_id"] != str(asset_id)]
 
     return {
         "change_type": str(diff_result.change_type),
         "breaking_changes": [bc.to_dict() for bc in breaking],
-        "impacted_consumers": impacted_consumers,
+        "impacted_consumers": list(impacted_teams.values()),
+        "impacted_assets": impacted_assets,
         "safe_to_publish": len(breaking) == 0,
+        "traversal_depth": depth,
     }
 
 
 @router.get("/{asset_id}/lineage")
+@limit_read
 async def get_lineage(
+    request: Request,
     asset_id: UUID,
+    auth: Auth,
+    _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """Get the complete dependency lineage for an asset.
 
     Returns both upstream (what this asset depends on) and downstream
     (teams/assets that consume this asset) dependencies.
+    Requires read scope.
     """
+    # Try cache
+    cache_key = f"lineage:{asset_id}"
+    cached = await asset_cache.get(cache_key)
+    if cached:
+        return cached
+
     # Get asset with owner team in single query (fixes N+1)
     result = await session.execute(
         select(AssetDB, TeamDB)
@@ -794,7 +1120,7 @@ async def get_lineage(
         for dep_asset_id, dep_type, fqn, team_name in downstream_assets_result.all()
     ]
 
-    return {
+    res = {
         "asset_id": str(asset_id),
         "asset_fqn": asset.fqn,
         "owner_team_id": str(asset.owner_team_id),
@@ -803,3 +1129,8 @@ async def get_lineage(
         "downstream": downstream,
         "downstream_assets": downstream_assets,
     }
+
+    # Cache result (5 minutes)
+    await asset_cache.set(f"lineage:{asset_id}", res, ttl=300)
+
+    return res

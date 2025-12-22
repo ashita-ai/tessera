@@ -240,15 +240,15 @@ class TestAuthEndpoints:
         response = await auth_client.get("/health/live")
         assert response.status_code == 200
 
-    async def test_read_endpoints_no_auth(self, auth_client: AsyncClient):
-        """Test that GET endpoints don't require auth."""
+    async def test_read_endpoints_require_auth(self, auth_client: AsyncClient):
+        """Test that GET endpoints now require auth."""
         # List teams (read operation)
         response = await auth_client.get("/api/v1/teams")
-        assert response.status_code == 200
+        assert response.status_code == 401
 
         # List assets (read operation)
         response = await auth_client.get("/api/v1/assets")
-        assert response.status_code == 200
+        assert response.status_code == 401
 
 
 class TestBootstrapKey:

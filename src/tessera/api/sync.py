@@ -9,11 +9,13 @@ from typing import Any
 from uuid import UUID
 
 import yaml
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tessera.api.auth import Auth, RequireAdmin
+from tessera.api.rate_limit import limit_admin
 from tessera.config import settings
 from tessera.db import AssetDB, ContractDB, RegistrationDB, TeamDB, get_session
 from tessera.models.enums import CompatibilityMode, ContractStatus, RegistrationStatus
@@ -129,7 +131,11 @@ class DbtImpactResponse(BaseModel):
 
 
 @router.post("/push")
+@limit_admin
 async def sync_push(
+    request: Request,
+    auth: Auth,
+    _: None = RequireAdmin,
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """Export database state to git-friendly YAML files.
@@ -234,7 +240,11 @@ async def sync_push(
 
 
 @router.post("/pull")
+@limit_admin
 async def sync_pull(
+    request: Request,
+    auth: Auth,
+    _: None = RequireAdmin,
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """Import contracts from git-friendly YAML files into the database.
@@ -364,9 +374,13 @@ async def sync_pull(
 
 
 @router.post("/dbt")
+@limit_admin
 async def sync_from_dbt(
+    request: Request,
+    auth: Auth,
     manifest_path: str = Query(..., description="Path to dbt manifest.json"),
     owner_team_id: UUID = Query(..., description="Team ID to assign as owner"),
+    _: None = RequireAdmin,
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """Import assets from a dbt manifest.json file.
@@ -547,8 +561,12 @@ async def _check_dbt_node_impact(
 
 
 @router.post("/dbt/impact", response_model=DbtImpactResponse)
+@limit_admin
 async def check_dbt_impact(
-    request: DbtManifestRequest,
+    request: Request,
+    compare_req: DbtManifestRequest,
+    auth: Auth,
+    _: None = RequireAdmin,
     session: AsyncSession = Depends(get_session),
 ) -> DbtImpactResponse:
     """Check impact of dbt models against registered contracts.

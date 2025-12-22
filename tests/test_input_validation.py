@@ -3,8 +3,9 @@
 import pytest
 from pydantic import ValidationError
 
+from tessera.config import settings
 from tessera.models.asset import AssetCreate
-from tessera.models.contract import ContractCreate, MAX_SCHEMA_SIZE_BYTES
+from tessera.models.contract import ContractCreate
 from tessera.models.team import TeamCreate
 
 
@@ -249,6 +250,21 @@ class TestSchemaSizeValidation:
                 schema=large_schema,
             )
         assert "too large" in str(exc_info.value).lower()
+
+    def test_invalid_schema_too_many_properties(self) -> None:
+        """Invalid schema with too many properties."""
+        # Create a schema with more than settings.max_schema_properties
+        too_many_props = {
+            f"field_{i}": {"type": "string"}
+            for i in range(settings.max_schema_properties + 1)
+        }
+
+        with pytest.raises(ValidationError) as exc_info:
+            ContractCreate(
+                version="1.0.0",
+                schema={"type": "object", "properties": too_many_props},
+            )
+        assert "too many properties" in str(exc_info.value).lower()
 
 
 class TestTeamNameValidation:
