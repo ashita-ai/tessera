@@ -26,11 +26,11 @@ def get_rate_limit_key(request: Request) -> str:
     return get_remote_address(request)
 
 # Initialize limiter
-# Note: enabled status is checked dynamically via lambda
+# Rate limiting can be disabled via settings.rate_limit_enabled
 limiter = Limiter(
     key_func=get_rate_limit_key,
-    enabled=True, # We'll control via settings in the key_func or similar if needed
-    default_limits=[lambda: settings.rate_limit_global],
+    enabled=lambda: settings.rate_limit_enabled,
+    default_limits=[lambda: settings.rate_limit_global if settings.rate_limit_enabled else ""],
 )
 
 def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded) -> Response:

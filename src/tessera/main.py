@@ -54,7 +54,9 @@ app = FastAPI(
 )
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
-app.add_middleware(SlowAPIMiddleware)
+# Only add rate limiting middleware if enabled
+if settings.rate_limit_enabled:
+    app.add_middleware(SlowAPIMiddleware)
 
 # Request ID middleware (must be added first to wrap all other middleware)
 app.add_middleware(RequestIDMiddleware)

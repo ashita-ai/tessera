@@ -37,9 +37,11 @@ from tessera.models.enums import APIKeyScope, ContractStatus, RegistrationStatus
 from tessera.services.cache import (
     asset_cache,
     cache_asset,
+    cache_asset_contracts_list,
     cache_contract,
     contract_cache,
     get_cached_asset,
+    get_cached_asset_contracts_list,
     get_cached_contract,
     get_cached_schema_diff,
     invalidate_asset,

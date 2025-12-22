@@ -15,7 +15,12 @@ from tessera.api.rate_limit import limit_read
 from tessera.db import ContractDB, RegistrationDB, get_session
 from tessera.models import Contract, Registration
 from tessera.models.enums import CompatibilityMode, ContractStatus
-from tessera.services.cache import get_cached_contract, cache_contract
+from tessera.services.cache import (
+    cache_contract,
+    cache_schema_diff,
+    get_cached_contract,
+    get_cached_schema_diff,
+)
 from tessera.services.schema_diff import diff_schemas
 
 router = APIRouter()
@@ -108,9 +113,30 @@ async def compare_contracts(
     # Use specified compatibility mode or default to first contract's mode
     mode = request.compatibility_mode or contract1.compatibility_mode
 
-    # Perform diff
-    diff_result = diff_schemas(contract1.schema_def, contract2.schema_def)
-    breaking = diff_result.breaking_for_mode(mode)
+    # Try cache first for schema diff
+    cached_diff = await get_cached_schema_diff(contract1.schema_def, contract2.schema_def)
+    if cached_diff:
+        # Use cached diff data
+        change_type_str = cached_diff.get("change_type", "minor")
+        all_changes = cached_diff.get("all_changes", [])
+        # Re-diff to get breaking changes (fast, just checks compatibility)
+        diff_result = diff_schemas(contract1.schema_def, contract2.schema_def)
+        breaking = diff_result.breaking_for_mode(mode)
+    else:
+        # Perform diff
+        diff_result = diff_schemas(contract1.schema_def, contract2.schema_def)
+        breaking = diff_result.breaking_for_mode(mode)
+        # Cache the diff result
+        await cache_schema_diff(
+            contract1.schema_def,
+            contract2.schema_def,
+            {
+                "change_type": str(diff_result.change_type.value),
+                "all_changes": [c.to_dict() for c in diff_result.changes],
+            },
+        )
+        all_changes = [c.to_dict() for c in diff_result.changes]
+        change_type_str = str(diff_result.change_type.value)
 
     return ContractCompareResponse(
         contract_1={
@@ -125,10 +151,10 @@ async def compare_contracts(
             "published_at": contract2.published_at.isoformat(),
             "asset_id": str(contract2.asset_id),
         },
-        change_type=str(diff_result.change_type.value),
+        change_type=change_type_str,
         is_compatible=len(breaking) == 0,
         breaking_changes=[bc.to_dict() for bc in breaking],
-        all_changes=[c.to_dict() for c in diff_result.changes],
+        all_changes=all_changes,
         compatibility_mode=str(mode.value),
     )
 

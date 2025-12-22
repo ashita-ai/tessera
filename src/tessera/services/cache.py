@@ -186,6 +186,19 @@ async def invalidate_asset_contracts(asset_id: str) -> int:
     return await contract_cache.invalidate_pattern(f"asset:{asset_id}:*")
 
 
+async def cache_asset_contracts_list(asset_id: str, contracts_data: dict[str, Any]) -> bool:
+    """Cache the contracts list for an asset."""
+    return await asset_cache.set(f"contracts:{asset_id}", contracts_data)
+
+
+async def get_cached_asset_contracts_list(asset_id: str) -> dict[str, Any] | None:
+    """Get cached contracts list for an asset."""
+    result = await asset_cache.get(f"contracts:{asset_id}")
+    if isinstance(result, dict):
+        return result
+    return None
+
+
 async def cache_schema_diff(
     from_schema: dict[str, Any],
     to_schema: dict[str, Any],
