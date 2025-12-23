@@ -5,7 +5,7 @@ back to Tessera for tracking, visibility, and enforcement.
 """
 
 import json
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -22,6 +22,18 @@ from tessera.models.enums import AuditRunStatus, ContractStatus
 MAX_METADATA_SIZE = 10 * 1024  # 10KB per guarantee metadata
 MAX_DETAILS_SIZE = 100 * 1024  # 100KB for details
 MAX_GUARANTEE_RESULTS = 1000  # Max number of guarantees per audit
+
+
+def _ensure_utc(dt: datetime) -> datetime:
+    """Ensure datetime is timezone-aware UTC.
+
+    SQLite returns naive datetimes while PostgreSQL returns timezone-aware ones.
+    This normalizes both to UTC for consistent comparisons.
+    """
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=UTC)
+    return dt
+
 
 router = APIRouter()
 
@@ -87,8 +99,7 @@ class AuditResultCreate(BaseModel):
         """Limit number of guarantee results to prevent abuse."""
         if len(v) > MAX_GUARANTEE_RESULTS:
             raise ValueError(
-                f"guarantee_results exceeds maximum count of {MAX_GUARANTEE_RESULTS} "
-                f"(got {len(v)})"
+                f"guarantee_results exceeds maximum count of {MAX_GUARANTEE_RESULTS} (got {len(v)})"
             )
         return v
 
@@ -231,7 +242,7 @@ async def report_audit_result(
         triggered_by=result.triggered_by,
         run_id=result.run_id,
         details=details,
-        run_at=result.run_at or datetime.now(),
+        run_at=result.run_at or datetime.now(UTC),
     )
     session.add(audit_run)
     await session.flush()
@@ -395,7 +406,7 @@ async def get_audit_trends(
         raise HTTPException(status_code=404, detail=f"Asset {asset_id} not found")
 
     # Get all runs from the last 30 days
-    cutoff_30d = datetime.now() - timedelta(days=30)
+    cutoff_30d = datetime.now(UTC) - timedelta(days=30)
     runs_result = await session.execute(
         select(AuditRunDB)
         .where(AuditRunDB.asset_id == asset_id)
@@ -405,12 +416,12 @@ async def get_audit_trends(
     all_runs = list(runs_result.scalars().all())
 
     # Partition runs by time period
-    now = datetime.now()
+    now = datetime.now(UTC)
     cutoff_24h = now - timedelta(hours=24)
     cutoff_7d = now - timedelta(days=7)
 
-    runs_24h = [r for r in all_runs if r.run_at >= cutoff_24h]
-    runs_7d = [r for r in all_runs if r.run_at >= cutoff_7d]
+    runs_24h = [r for r in all_runs if _ensure_utc(r.run_at) >= cutoff_24h]
+    runs_7d = [r for r in all_runs if _ensure_utc(r.run_at) >= cutoff_7d]
     runs_30d = all_runs
 
     # Compute trends for each period
