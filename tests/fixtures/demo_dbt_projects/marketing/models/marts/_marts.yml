@@ -1,0 +1,104 @@
+version: 2
+
+models:
+  - name: dim_campaigns
+    description: Campaign dimension with performance metrics
+    meta:
+      tessera:
+        owner_team: marketing-analytics
+        compatibility_mode: backward
+        consumers:
+          - team: finance-analytics
+    columns:
+      - name: campaign_id
+        description: Primary key
+        data_tests:
+          - unique
+          - not_null
+      - name: channel
+        description: Marketing channel
+        data_tests:
+          - not_null
+      - name: roas
+        description: Return on ad spend
+        data_tests:
+          - not_null
+      - name: performance_tier
+        description: Campaign performance classification
+        data_tests:
+          - accepted_values:
+              values: ['high_performer', 'break_even', 'underperformer']
+
+  - name: fct_marketing_daily
+    description: Daily marketing performance by channel
+    meta:
+      tessera:
+        owner_team: marketing-analytics
+        compatibility_mode: backward
+        consumers:
+          - team: finance-analytics
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - date
+            - channel
+    columns:
+      - name: spend
+        description: Daily spend
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+      - name: impressions
+        description: Daily impressions
+        data_tests:
+          - not_null
+
+  - name: fct_conversions
+    description: Conversion fact table
+    meta:
+      tessera:
+        owner_team: marketing-analytics
+        compatibility_mode: backward
+    columns:
+      - name: conversion_id
+        description: Primary key
+        data_tests:
+          - unique
+          - not_null
+      - name: conversion_type
+        description: Type of conversion
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['purchase', 'signup', 'demo_request', 'download']
+      - name: revenue
+        description: Revenue generated
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+
+  - name: fct_web_traffic
+    description: Website session fact table
+    meta:
+      tessera:
+        owner_team: marketing-analytics
+        compatibility_mode: backward
+    columns:
+      - name: session_id
+        description: Primary key
+        data_tests:
+          - unique
+          - not_null
+      - name: pages_viewed
+        description: Pages viewed in session
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 1
+      - name: engagement_level
+        description: Session engagement classification
+        data_tests:
+          - accepted_values:
+              values: ['engaged', 'browsing', 'bounce']

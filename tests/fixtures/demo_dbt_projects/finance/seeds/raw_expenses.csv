@@ -1,0 +1,11 @@
+expense_id,expense_date,category,subcategory,amount,vendor,approved_by
+EXP001,2024-01-15,marketing,advertising,5000.00,Google Ads,Finance Manager
+EXP002,2024-01-20,operations,cloud_hosting,2500.00,AWS,CTO
+EXP003,2024-02-01,marketing,social_media,3000.00,Facebook,Marketing Director
+EXP004,2024-02-15,operations,software,1200.00,Salesforce,CTO
+EXP005,2024-03-01,hr,payroll,45000.00,Internal,CFO
+EXP006,2024-03-05,marketing,events,8000.00,Conference Corp,CEO
+EXP007,2024-03-10,operations,office,1500.00,WeWork,Operations Manager
+EXP008,2024-03-15,marketing,advertising,7500.00,Google Ads,Finance Manager
+EXP009,2024-04-01,hr,payroll,46000.00,Internal,CFO
+EXP010,2024-04-05,operations,cloud_hosting,2700.00,AWS,CTO

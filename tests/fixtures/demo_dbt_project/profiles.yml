@@ -1,0 +1,10 @@
+# Local profiles for demo project
+# Uses DuckDB - no external database needed
+
+tessera_demo:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: target/demo.duckdb
+      threads: 1

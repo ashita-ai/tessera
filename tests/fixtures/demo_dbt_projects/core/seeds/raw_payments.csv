@@ -1,0 +1,16 @@
+payment_id,order_id,payment_method,amount,payment_date,status
+PAY001,1001,credit_card,339.97,2024-01-20,success
+PAY002,1002,paypal,49.99,2024-01-25,success
+PAY003,1003,credit_card,189.96,2024-02-01,success
+PAY004,1004,credit_card,89.98,2024-02-05,success
+PAY005,1005,wire_transfer,299.99,2024-02-10,success
+PAY006,1006,credit_card,149.99,2024-02-15,refunded
+PAY007,1007,paypal,159.97,2024-02-20,success
+PAY008,1008,credit_card,149.95,2024-03-01,success
+PAY009,1009,wire_transfer,299.99,2024-03-05,success
+PAY010,1010,credit_card,399.97,2024-03-10,success
+PAY011,1011,credit_card,49.99,2024-03-15,pending
+PAY012,1012,paypal,59.98,2024-03-20,success
+PAY013,1013,wire_transfer,599.98,2024-04-01,success
+PAY014,1014,credit_card,299.97,2024-04-05,success
+PAY015,1015,credit_card,149.99,2024-04-10,pending

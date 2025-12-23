@@ -1,0 +1,9 @@
+product_id,product_name,category,subcategory,cost,list_price,is_active
+P001,Widget Pro,Hardware,Widgets,45.00,99.99,true
+P002,Basic Gadget,Hardware,Gadgets,20.00,49.99,true
+P003,Premium Tool,Software,Tools,50.00,149.99,true
+P004,Mini Part,Hardware,Parts,10.00,29.99,true
+P005,Enterprise Suite,Software,Suites,100.00,299.99,true
+P006,Legacy Widget,Hardware,Widgets,40.00,89.99,false
+P007,Starter Kit,Hardware,Kits,30.00,79.99,true
+P008,Pro Gadget,Hardware,Gadgets,35.00,99.99,true

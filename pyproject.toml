@@ -45,6 +45,9 @@ bigquery = [
 duckdb = [
     "duckdb>=1.0.0,<2.0.0",
 ]
+demo = [
+    "dbt-duckdb>=1.10.0",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -78,4 +81,5 @@ dev = [
     "watchfiles>=1.0.0,<2.0.0",
     "duckdb>=1.0.0,<2.0.0",
     "pyarrow>=15.0.0",
+    "dbt-duckdb>=1.10.0",
 ]

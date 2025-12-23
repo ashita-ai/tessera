@@ -1,0 +1,16 @@
+conversion_id,campaign_id,customer_id,conversion_date,conversion_type,revenue
+CV001,C001,2,2024-03-05,purchase,49.99
+CV002,C001,5,2024-03-10,purchase,99.99
+CV003,C002,6,2024-02-01,signup,0.00
+CV004,C002,8,2024-02-15,signup,0.00
+CV005,C003,1,2024-02-10,purchase,99.99
+CV006,C003,4,2024-02-12,purchase,299.99
+CV007,C004,3,2024-02-01,purchase,49.99
+CV008,C004,9,2024-02-20,purchase,29.99
+CV009,C007,7,2024-03-01,demo_request,0.00
+CV010,C007,10,2024-03-05,demo_request,0.00
+CV011,C007,4,2024-03-10,purchase,299.99
+CV012,C001,1,2024-03-15,purchase,149.99
+CV013,C003,2,2024-02-20,purchase,149.99
+CV014,C008,5,2024-03-01,purchase,79.99
+CV015,C008,8,2024-03-15,purchase,99.99

@@ -1,0 +1,36 @@
+version: 2
+
+models:
+  - name: int_campaign_performance
+    description: Campaign performance with aggregated metrics
+    columns:
+      - name: campaign_id
+        description: Primary key
+        data_tests:
+          - unique
+          - not_null
+      - name: total_spend
+        description: Total campaign spend
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+      - name: roas
+        description: Return on ad spend
+        data_tests:
+          - not_null
+
+  - name: int_channel_daily
+    description: Daily channel performance
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - date
+            - channel
+    columns:
+      - name: spend
+        description: Daily spend
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0

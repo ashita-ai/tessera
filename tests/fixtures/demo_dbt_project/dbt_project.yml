@@ -1,0 +1,18 @@
+name: 'tessera_demo'
+version: '1.0.0'
+
+profile: 'tessera_demo'
+
+model-paths: ["models"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+target-path: "target"
+
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+# Tessera integration config (read by sync endpoint)
+vars:
+  tessera_team: "data-platform"

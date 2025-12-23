@@ -70,14 +70,26 @@ services:
       timeout: 5s
       retries: 3
 
+  dbt-builder:
+    build: .
+    volumes:
+      - dbt_manifests:/app/tests/fixtures/demo_dbt_projects
+    command: ["python", "/app/scripts/build_dbt_projects.py"]
+    restart: "no"
+
   seeder:
     build: .
     depends_on:
       api:
         condition: service_healthy
+      dbt-builder:
+        condition: service_completed_successfully
+    volumes:
+      - dbt_manifests:/app/tests/fixtures/demo_dbt_projects
     command: ["python", "/app/scripts/seed_demo.py"]
     restart: "no"
 
 volumes:
   postgres_data:
   redis_data:
+  dbt_manifests:

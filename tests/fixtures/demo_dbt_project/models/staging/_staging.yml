@@ -1,0 +1,33 @@
+version: 2
+
+models:
+  - name: stg_orders
+    description: "Cleaned orders from raw source"
+    columns:
+      - name: order_id
+        description: "Primary key"
+        data_tests:
+          - unique
+          - not_null
+      - name: customer_id
+        description: "Foreign key to customers"
+        data_tests:
+          - not_null
+      - name: amount
+        description: "Order amount in USD"
+        data_tests:
+          - not_null
+
+  - name: stg_customers
+    description: "Cleaned customers from raw source"
+    columns:
+      - name: customer_id
+        description: "Primary key"
+        data_tests:
+          - unique
+          - not_null
+      - name: email
+        description: "Customer email"
+        data_tests:
+          - unique
+          - not_null

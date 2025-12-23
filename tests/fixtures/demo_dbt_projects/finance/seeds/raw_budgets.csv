@@ -1,0 +1,11 @@
+budget_id,fiscal_year,fiscal_quarter,department,category,budgeted_amount
+BUD001,2024,Q1,marketing,advertising,15000.00
+BUD002,2024,Q1,marketing,social_media,5000.00
+BUD003,2024,Q1,marketing,events,10000.00
+BUD004,2024,Q1,operations,cloud_hosting,8000.00
+BUD005,2024,Q1,operations,software,5000.00
+BUD006,2024,Q1,hr,payroll,140000.00
+BUD007,2024,Q2,marketing,advertising,20000.00
+BUD008,2024,Q2,marketing,social_media,6000.00
+BUD009,2024,Q2,operations,cloud_hosting,8500.00
+BUD010,2024,Q2,hr,payroll,145000.00

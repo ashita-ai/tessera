@@ -1,0 +1,42 @@
+version: 2
+
+models:
+  - name: fct_orders
+    description: "Order fact table with customer details"
+    meta:
+      tessera:
+        owner_team: data-platform
+        compatibility_mode: backward
+        consumers:
+          - team: analytics
+          - team: finance
+    columns:
+      - name: order_id
+        description: "Primary key"
+        data_tests:
+          - unique
+          - not_null
+      - name: customer_id
+        data_tests:
+          - not_null
+      - name: revenue
+        description: "Revenue from completed orders"
+        data_tests:
+          - not_null
+
+  - name: dim_customers
+    description: "Customer dimension with order aggregates"
+    meta:
+      tessera:
+        owner_team: data-platform
+        compatibility_mode: backward
+    columns:
+      - name: customer_id
+        description: "Primary key"
+        data_tests:
+          - unique
+          - not_null
+      - name: lifetime_revenue
+        description: "Total revenue from this customer"
+        data_tests:
+          - not_null

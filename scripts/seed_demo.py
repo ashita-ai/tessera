@@ -17,7 +17,25 @@ from pathlib import Path
 import httpx
 
 API_URL = "http://api:8000"
+# Default manifest path (synthetic)
 MANIFEST_PATH = Path("/app/examples/data/manifest.json")
+# Multi-project manifests from demo dbt projects
+DBT_PROJECTS = {
+    "core": {
+        "manifest_path": Path("/app/tests/fixtures/demo_dbt_projects/core/target/manifest.json"),
+        "owner_team": "data-platform",
+    },
+    "marketing": {
+        "manifest_path": Path(
+            "/app/tests/fixtures/demo_dbt_projects/marketing/target/manifest.json"
+        ),
+        "owner_team": "marketing-analytics",
+    },
+    "finance": {
+        "manifest_path": Path("/app/tests/fixtures/demo_dbt_projects/finance/target/manifest.json"),
+        "owner_team": "finance-analytics",
+    },
+}
 MAX_RETRIES = 30
 RETRY_DELAY = 2
 
@@ -203,6 +221,69 @@ def import_manifest(default_team_id: str) -> dict | None:
     return None
 
 
+def import_multi_project_manifests(team_ids: dict[str, str]) -> dict:
+    """Import manifests from multiple dbt projects, each to its respective team.
+
+    This demonstrates Tessera's multi-project support where different teams
+    own different dbt projects.
+    """
+    print("\n[4a] Importing multi-project dbt manifests...")
+    results = {
+        "projects_imported": 0,
+        "total_assets": 0,
+        "total_contracts": 0,
+        "total_guarantees": 0,
+    }
+
+    for project_name, config in DBT_PROJECTS.items():
+        manifest_path = config["manifest_path"]
+        owner_team = config["owner_team"]
+        team_id = team_ids.get(owner_team)
+
+        if not team_id:
+            print(f"  Skipping {project_name}: team '{owner_team}' not found")
+            continue
+
+        if not manifest_path.exists():
+            print(f"  Skipping {project_name}: manifest not found at {manifest_path}")
+            continue
+
+        print(f"\n  Importing {project_name} project -> {owner_team} team...")
+
+        try:
+            manifest = json.loads(manifest_path.read_text())
+            resp = httpx.post(
+                f"{API_URL}/api/v1/sync/dbt/upload",
+                json={
+                    "manifest": manifest,
+                    "owner_team_id": team_id,
+                    "conflict_mode": "ignore",
+                    "auto_publish_contracts": True,
+                    "auto_register_consumers": True,
+                    "infer_consumers_from_refs": True,
+                },
+                timeout=180,
+            )
+
+            if resp.status_code == 200:
+                result = resp.json()
+                results["projects_imported"] += 1
+                results["total_assets"] += result["assets"]["created"]
+                results["total_contracts"] += result["contracts"]["published"]
+                results["total_guarantees"] += result.get("guarantees_extracted", 0)
+
+                print(f"    Assets: {result['assets']['created']}")
+                print(f"    Contracts: {result['contracts']['published']}")
+                print(f"    Guarantees: {result.get('guarantees_extracted', 0)}")
+            else:
+                print(f"    Failed: {resp.status_code} - {resp.text[:100]}")
+
+        except httpx.RequestError as e:
+            print(f"    Error: {e}")
+
+    return results
+
+
 def create_proposals(team_ids: dict[str, str]) -> int:
     """Create a few proposals by publishing breaking changes to existing contracts."""
     print("\nCreating sample proposals (breaking changes)...")
@@ -369,13 +450,27 @@ def main() -> int:
 
     print(f"  Total: {users_created} users")
 
-    # Import manifest
-    print("\n[4/5] Importing dbt manifest...")
-    default_team_id = team_ids.get("data-platform") or list(team_ids.values())[0]
-    import_result = import_manifest(default_team_id)
+    # Import multi-project manifests (real dbt projects with team ownership)
+    multi_project_result = import_multi_project_manifests(team_ids)
 
-    if not import_result:
-        print("WARNING: Manifest import failed")
+    # Fall back to synthetic manifest if no real dbt projects found
+    if multi_project_result["projects_imported"] == 0:
+        print("\n[4b] No real dbt projects found, using synthetic manifest...")
+        default_team_id = team_ids.get("data-platform") or list(team_ids.values())[0]
+        import_result = import_manifest(default_team_id)
+        if not import_result:
+            print("WARNING: Manifest import failed")
+    else:
+        import_result = {
+            "assets": {"created": multi_project_result["total_assets"]},
+            "contracts": {"published": multi_project_result["total_contracts"]},
+            "registrations": {"created": 0},  # placeholder
+        }
+        print("\n  Multi-project import complete!")
+        print(f"    Projects: {multi_project_result['projects_imported']}")
+        print(f"    Total Assets: {multi_project_result['total_assets']}")
+        print(f"    Total Contracts: {multi_project_result['total_contracts']}")
+        print(f"    Total Guarantees: {multi_project_result['total_guarantees']}")
 
     # Create proposals
     print("\n[5/5] Creating sample proposals...")

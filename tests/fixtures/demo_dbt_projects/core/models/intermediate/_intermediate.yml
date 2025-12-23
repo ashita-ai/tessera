@@ -1,0 +1,45 @@
+version: 2
+
+models:
+  - name: int_order_items_enriched
+    description: Order items enriched with product details
+    columns:
+      - name: order_item_id
+        description: Primary key
+        data_tests:
+          - unique
+          - not_null
+      - name: line_margin
+        description: Profit margin per line item
+        data_tests:
+          - not_null
+
+  - name: int_orders_enriched
+    description: Orders with aggregated item and payment totals
+    columns:
+      - name: order_id
+        description: Primary key
+        data_tests:
+          - unique
+          - not_null
+      - name: gross_amount
+        description: Total order value before discounts
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+
+  - name: int_customer_orders
+    description: Customer-level order aggregations
+    columns:
+      - name: customer_id
+        description: Primary key
+        data_tests:
+          - unique
+          - not_null
+      - name: total_orders
+        description: Number of orders placed
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 1

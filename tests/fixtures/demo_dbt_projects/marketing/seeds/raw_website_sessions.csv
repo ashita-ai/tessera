@@ -1,0 +1,13 @@
+session_id,visitor_id,session_date,source,medium,campaign_id,pages_viewed,session_duration_sec,converted
+WS001,V001,2024-03-01,google,cpc,C003,5,245,1
+WS002,V002,2024-03-01,facebook,social,C002,3,120,0
+WS003,V003,2024-03-02,email,newsletter,C005,7,380,1
+WS004,V001,2024-03-03,direct,,null,2,60,0
+WS005,V004,2024-03-03,google,organic,null,4,180,0
+WS006,V005,2024-03-04,google,cpc,C003,6,290,1
+WS007,V006,2024-03-04,instagram,social,C002,2,90,0
+WS008,V007,2024-03-05,email,campaign,C001,8,420,1
+WS009,V002,2024-03-05,google,organic,null,3,150,0
+WS010,V008,2024-03-06,bing,cpc,C003,4,200,0
+WS011,V009,2024-03-06,referral,partner,C008,5,260,1
+WS012,V010,2024-03-07,email,newsletter,C005,6,310,1

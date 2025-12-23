@@ -1,0 +1,120 @@
+version: 2
+
+models:
+  - name: dim_accounts
+    description: Chart of accounts dimension
+    meta:
+      tessera:
+        owner_team: finance-analytics
+        compatibility_mode: full
+    columns:
+      - name: account_id
+        description: Primary key
+        data_tests:
+          - unique
+          - not_null
+      - name: account_type
+        description: Account type
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['revenue', 'expense', 'asset', 'liability', 'equity']
+
+  - name: fct_invoices
+    description: Invoice fact table
+    meta:
+      tessera:
+        owner_team: finance-analytics
+        compatibility_mode: backward
+        consumers:
+          - team: data-platform
+    columns:
+      - name: invoice_id
+        description: Primary key
+        data_tests:
+          - unique
+          - not_null
+      - name: amount
+        description: Invoice amount
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+              inclusive: false
+      - name: status
+        description: Invoice status
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['pending', 'paid', 'overdue', 'cancelled']
+
+  - name: fct_expenses
+    description: Expense fact table
+    meta:
+      tessera:
+        owner_team: finance-analytics
+        compatibility_mode: backward
+    columns:
+      - name: expense_id
+        description: Primary key
+        data_tests:
+          - unique
+          - not_null
+      - name: amount
+        description: Expense amount
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+              inclusive: false
+      - name: expense_size
+        description: Expense size classification
+        data_tests:
+          - accepted_values:
+              values: ['large', 'medium', 'small']
+
+  - name: fct_monthly_pl
+    description: Monthly profit and loss statement
+    meta:
+      tessera:
+        owner_team: finance-analytics
+        compatibility_mode: full
+        consumers:
+          - team: data-platform
+    columns:
+      - name: month
+        description: Primary key - month
+        data_tests:
+          - unique
+          - not_null
+      - name: gross_revenue
+        description: Gross revenue
+        data_tests:
+          - not_null
+      - name: net_income
+        description: Net income
+        data_tests:
+          - not_null
+
+  - name: fct_budget_performance
+    description: Budget performance tracking
+    meta:
+      tessera:
+        owner_team: finance-analytics
+        compatibility_mode: backward
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - fiscal_period
+            - department
+            - category
+    columns:
+      - name: budgeted_amount
+        description: Budgeted amount
+        data_tests:
+          - not_null
+      - name: budget_status
+        description: Budget status
+        data_tests:
+          - accepted_values:
+              values: ['over_budget', 'on_track', 'under_utilized', 'significantly_under']

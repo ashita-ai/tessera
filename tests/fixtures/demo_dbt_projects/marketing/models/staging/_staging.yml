@@ -1,0 +1,98 @@
+version: 2
+
+models:
+  - name: stg_campaigns
+    description: Staged marketing campaign data
+    columns:
+      - name: campaign_id
+        description: Primary key
+        data_tests:
+          - unique
+          - not_null
+      - name: channel
+        description: Marketing channel
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['email', 'social', 'paid_search', 'display', 'affiliate']
+      - name: status
+        description: Campaign status
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['planned', 'active', 'completed', 'paused']
+      - name: budget
+        description: Campaign budget
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+
+  - name: stg_ad_spend
+    description: Staged daily ad spend data
+    columns:
+      - name: spend_id
+        description: Primary key
+        data_tests:
+          - unique
+          - not_null
+      - name: campaign_id
+        description: Foreign key to campaigns
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('stg_campaigns')
+              field: campaign_id
+      - name: spend
+        description: Daily spend amount
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+      - name: ctr
+        description: Click-through rate
+        data_tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 1
+
+  - name: stg_conversions
+    description: Staged conversion events
+    columns:
+      - name: conversion_id
+        description: Primary key
+        data_tests:
+          - unique
+          - not_null
+      - name: campaign_id
+        description: Foreign key to campaigns
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('stg_campaigns')
+              field: campaign_id
+      - name: conversion_type
+        description: Type of conversion
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['purchase', 'signup', 'demo_request', 'download']
+
+  - name: stg_website_sessions
+    description: Staged website session data
+    columns:
+      - name: session_id
+        description: Primary key
+        data_tests:
+          - unique
+          - not_null
+      - name: source
+        description: Traffic source
+        data_tests:
+          - not_null
+      - name: pages_viewed
+        description: Number of pages viewed
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 1

@@ -1,0 +1,172 @@
+version: 2
+
+models:
+  - name: dim_customers
+    description: Customer dimension with lifetime metrics
+    meta:
+      tessera:
+        owner_team: data-platform
+        compatibility_mode: backward
+        consumers:
+          - team: marketing-analytics
+          - team: finance-analytics
+    columns:
+      - name: customer_id
+        description: Primary key
+        data_tests:
+          - unique
+          - not_null
+      - name: email
+        description: Customer email
+        data_tests:
+          - unique
+          - not_null
+      - name: lifetime_revenue
+        description: Total revenue from customer
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+      - name: segment
+        description: Customer segment
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['enterprise', 'smb', 'startup']
+      - name: value_tier
+        description: Customer value classification
+        data_tests:
+          - accepted_values:
+              values: ['high_value', 'medium_value', 'low_value']
+
+  - name: dim_products
+    description: Product dimension with sales metrics
+    meta:
+      tessera:
+        owner_team: data-platform
+        compatibility_mode: backward
+        consumers:
+          - team: marketing-analytics
+    columns:
+      - name: product_id
+        description: Primary key
+        data_tests:
+          - unique
+          - not_null
+      - name: product_name
+        description: Product name
+        data_tests:
+          - not_null
+      - name: category
+        description: Product category
+        data_tests:
+          - not_null
+      - name: list_price
+        description: Current list price
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+              inclusive: false
+
+  - name: fct_orders
+    description: Order fact table with customer context
+    meta:
+      tessera:
+        owner_team: data-platform
+        compatibility_mode: backward
+        consumers:
+          - team: finance-analytics
+          - team: marketing-analytics
+    columns:
+      - name: order_id
+        description: Primary key
+        data_tests:
+          - unique
+          - not_null
+      - name: customer_id
+        description: Foreign key to customers
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_customers')
+              field: customer_id
+      - name: gross_amount
+        description: Total order amount
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+      - name: net_revenue
+        description: Revenue after refunds
+        data_tests:
+          - not_null
+      - name: status
+        description: Order status
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['pending', 'shipped', 'completed', 'refunded']
+
+  - name: fct_daily_revenue
+    description: Daily revenue aggregations
+    meta:
+      tessera:
+        owner_team: data-platform
+        compatibility_mode: full
+        consumers:
+          - team: finance-analytics
+    columns:
+      - name: order_date
+        description: Primary key - date
+        data_tests:
+          - unique
+          - not_null
+      - name: gross_revenue
+        description: Total gross revenue
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+      - name: net_revenue
+        description: Net revenue
+        data_tests:
+          - not_null
+      - name: order_count
+        description: Number of orders
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 1
+
+  - name: fct_payments
+    description: Payment fact table
+    meta:
+      tessera:
+        owner_team: data-platform
+        compatibility_mode: backward
+        consumers:
+          - team: finance-analytics
+    columns:
+      - name: payment_id
+        description: Primary key
+        data_tests:
+          - unique
+          - not_null
+      - name: order_id
+        description: Foreign key to orders
+        data_tests:
+          - not_null
+      - name: amount
+        description: Payment amount
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+              inclusive: false
+      - name: payment_method
+        description: Method of payment
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['credit_card', 'paypal', 'wire_transfer']

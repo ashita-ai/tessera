@@ -1,0 +1,117 @@
+version: 2
+
+models:
+  - name: stg_customers
+    description: Staged customer data with standardized names
+    columns:
+      - name: customer_id
+        description: Primary key
+        data_tests:
+          - unique
+          - not_null
+      - name: email
+        description: Customer email address
+        data_tests:
+          - unique
+          - not_null
+      - name: segment
+        description: Customer segment
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['enterprise', 'smb', 'startup']
+
+  - name: stg_orders
+    description: Staged order data
+    columns:
+      - name: order_id
+        description: Primary key
+        data_tests:
+          - unique
+          - not_null
+      - name: customer_id
+        description: Foreign key to customers
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('stg_customers')
+              field: customer_id
+      - name: status
+        description: Order status
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['pending', 'shipped', 'completed', 'refunded']
+
+  - name: stg_order_items
+    description: Staged order line items
+    columns:
+      - name: order_item_id
+        description: Primary key
+        data_tests:
+          - unique
+          - not_null
+      - name: order_id
+        description: Foreign key to orders
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('stg_orders')
+              field: order_id
+      - name: quantity
+        description: Quantity ordered
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 1
+              max_value: 100
+
+  - name: stg_products
+    description: Staged product catalog
+    columns:
+      - name: product_id
+        description: Primary key
+        data_tests:
+          - unique
+          - not_null
+      - name: category
+        description: Product category
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['Hardware', 'Software']
+      - name: list_price
+        description: Product list price
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+              inclusive: false
+
+  - name: stg_payments
+    description: Staged payment transactions
+    columns:
+      - name: payment_id
+        description: Primary key
+        data_tests:
+          - unique
+          - not_null
+      - name: order_id
+        description: Foreign key to orders
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('stg_orders')
+              field: order_id
+      - name: payment_method
+        description: Payment method used
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['credit_card', 'paypal', 'wire_transfer']
+      - name: status
+        description: Payment status
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['success', 'pending', 'refunded', 'failed']

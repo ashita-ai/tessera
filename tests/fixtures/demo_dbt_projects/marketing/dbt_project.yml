@@ -1,0 +1,21 @@
+name: tessera_marketing
+version: '1.0.0'
+config-version: 2
+
+profile: tessera_marketing
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+target-path: "target"
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+vars:
+  tessera:
+    project_name: tessera_marketing
+    owner_team: marketing-analytics

@@ -1,0 +1,11 @@
+customer_id,email,first_name,last_name,created_at,country,segment
+1,alice@example.com,Alice,Smith,2024-01-15,US,enterprise
+2,bob@corp.com,Bob,Johnson,2024-01-20,US,smb
+3,charlie@startup.io,Charlie,Williams,2024-02-01,UK,startup
+4,diana@bigco.com,Diana,Brown,2024-02-10,US,enterprise
+5,eve@small.biz,Eve,Jones,2024-02-15,CA,smb
+6,frank@tech.co,Frank,Garcia,2024-03-01,US,startup
+7,grace@mega.corp,Grace,Miller,2024-03-10,UK,enterprise
+8,henry@biz.org,Henry,Davis,2024-03-15,US,smb
+9,ivy@newco.io,Ivy,Martinez,2024-03-20,DE,startup
+10,jack@enterprise.com,Jack,Anderson,2024-04-01,US,enterprise

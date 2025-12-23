@@ -1,0 +1,9 @@
+campaign_id,campaign_name,channel,start_date,end_date,budget,status
+C001,Spring Sale 2024,email,2024-03-01,2024-03-31,5000.00,completed
+C002,Q1 Brand Awareness,social,2024-01-15,2024-03-15,10000.00,completed
+C003,Product Launch Widget Pro,paid_search,2024-02-01,2024-02-28,7500.00,completed
+C004,Retargeting Q1,display,2024-01-01,2024-03-31,3000.00,completed
+C005,Newsletter Weekly,email,2024-01-01,2024-12-31,1200.00,active
+C006,Summer Promo,social,2024-06-01,2024-08-31,8000.00,planned
+C007,Enterprise Outreach,email,2024-02-15,2024-04-15,4500.00,completed
+C008,Affiliate Program,affiliate,2024-01-01,2024-12-31,6000.00,active

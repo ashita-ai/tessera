@@ -1,0 +1,46 @@
+version: 2
+
+models:
+  - name: int_monthly_revenue
+    description: Monthly revenue aggregations
+    columns:
+      - name: month
+        description: Primary key - month
+        data_tests:
+          - unique
+          - not_null
+      - name: gross_revenue
+        description: Total gross revenue
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+
+  - name: int_expense_by_category
+    description: Monthly expenses by category
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - month
+            - category
+            - subcategory
+    columns:
+      - name: total_expenses
+        description: Total expenses
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+
+  - name: int_budget_vs_actual
+    description: Budget vs actual comparison
+    columns:
+      - name: budgeted_amount
+        description: Budgeted amount
+        data_tests:
+          - not_null
+      - name: utilization_rate
+        description: Budget utilization rate
+        data_tests:
+          - dbt_utils.accepted_range:
+              min_value: 0

@@ -1,0 +1,13 @@
+account_id,account_name,account_type,parent_account_id,is_active
+ACC001,Revenue,revenue,,true
+ACC002,Product Revenue,revenue,ACC001,true
+ACC003,Service Revenue,revenue,ACC001,true
+ACC004,Expenses,expense,,true
+ACC005,Marketing Expenses,expense,ACC004,true
+ACC006,Operations Expenses,expense,ACC004,true
+ACC007,HR Expenses,expense,ACC004,true
+ACC008,Assets,asset,,true
+ACC009,Cash,asset,ACC008,true
+ACC010,Accounts Receivable,asset,ACC008,true
+ACC011,Liabilities,liability,,true
+ACC012,Accounts Payable,liability,ACC011,true

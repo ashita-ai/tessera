@@ -1,0 +1,88 @@
+version: 2
+
+models:
+  - name: stg_invoices
+    description: Staged invoice data
+    columns:
+      - name: invoice_id
+        description: Primary key
+        data_tests:
+          - unique
+          - not_null
+      - name: amount
+        description: Invoice amount
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+              inclusive: false
+      - name: status
+        description: Invoice status
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['pending', 'paid', 'overdue', 'cancelled']
+      - name: currency
+        description: Invoice currency
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['USD', 'EUR', 'GBP']
+
+  - name: stg_expenses
+    description: Staged expense data
+    columns:
+      - name: expense_id
+        description: Primary key
+        data_tests:
+          - unique
+          - not_null
+      - name: amount
+        description: Expense amount
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+              inclusive: false
+      - name: category
+        description: Expense category
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['marketing', 'operations', 'hr', 'sales', 'admin']
+
+  - name: stg_budgets
+    description: Staged budget data
+    columns:
+      - name: budget_id
+        description: Primary key
+        data_tests:
+          - unique
+          - not_null
+      - name: budgeted_amount
+        description: Budgeted amount
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+      - name: fiscal_quarter
+        description: Fiscal quarter
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['Q1', 'Q2', 'Q3', 'Q4']
+
+  - name: stg_accounts
+    description: Staged chart of accounts
+    columns:
+      - name: account_id
+        description: Primary key
+        data_tests:
+          - unique
+          - not_null
+      - name: account_type
+        description: Account type
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['revenue', 'expense', 'asset', 'liability', 'equity']
