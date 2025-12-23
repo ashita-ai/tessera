@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+
+{% block title %}Asset - Tessera{% endblock %}
+
+{% block content %}
+<section>
+  <div id="asset-detail">
+    <div class="loading">Loading...</div>
+  </div>
+</section>
+
+<section>
+  <h2>Contracts</h2>
+  <div id="asset-contracts">
+    <div class="loading">Loading...</div>
+  </div>
+</section>
+
+<section>
+  <h2>Dependencies</h2>
+  <div id="asset-dependencies">
+    <div class="loading">Loading...</div>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const assetId = '{{ asset_id }}';
+
+async function loadAssetDetail() {
+  try {
+    const asset = await api.getAsset(assetId);
+
+    document.getElementById('asset-detail').innerHTML = `
+      <h2>${escapeHtml(asset.fqn)}</h2>
+      <div class="card">
+        <p><strong>ID:</strong> ${asset.id}</p>
+        <p><strong>Owner:</strong> <a href="/teams/${asset.owner_team_id}">${escapeHtml(asset.owner_team_name || asset.owner_team_id)}</a></p>
+        <p><strong>Active Contract:</strong> ${asset.active_contract_version || 'None'}</p>
+        ${asset.description ? `<p><strong>Description:</strong> ${escapeHtml(asset.description)}</p>` : ''}
+        <p><strong>Created:</strong> ${formatDate(asset.created_at)}</p>
+      </div>
+      <div style="margin-top: 1rem;">
+        <a href="/assets">&larr; Back to Assets</a>
+      </div>
+    `;
+
+    // Load contracts
+    const contracts = await api.getAssetContracts(assetId);
+    const contractsContainer = document.getElementById('asset-contracts');
+
+    if (!contracts.results || contracts.results.length === 0) {
+      contractsContainer.innerHTML = '<div class="empty">No contracts published for this asset.</div>';
+    } else {
+      contractsContainer.innerHTML = `
+        <table>
+          <thead>
+            <tr>
+              <th>Version</th>
+              <th>Status</th>
+              <th>Compatibility</th>
+              <th>Published</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${contracts.results.map(c => `
+              <tr>
+                <td>${escapeHtml(c.version)}</td>
+                <td><span class="status status-${c.status}">${c.status}</span></td>
+                <td>${escapeHtml(c.compatibility_mode)}</td>
+                <td>${formatDate(c.published_at)}</td>
+                <td><a href="/contracts/${c.id}">View</a></td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
+    }
+
+    // Load dependencies
+    const deps = await api.getAssetDependencies(assetId);
+    const depsContainer = document.getElementById('asset-dependencies');
+
+    if (!deps || deps.length === 0) {
+      depsContainer.innerHTML = '<div class="empty">No dependencies defined.</div>';
+    } else {
+      depsContainer.innerHTML = `
+        <table>
+          <thead>
+            <tr>
+              <th>Depends On</th>
+              <th>Type</th>
+              <th>Created</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${deps.map(d => `
+              <tr>
+                <td><a href="/assets/${d.depends_on_asset_id}">${escapeHtml(d.depends_on_fqn || d.depends_on_asset_id)}</a></td>
+                <td>${escapeHtml(d.dependency_type)}</td>
+                <td>${formatDate(d.created_at)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
+    }
+  } catch (error) {
+    showError(error.message);
+    document.getElementById('asset-detail').innerHTML = '<div class="error">Asset not found</div>';
+  }
+}
+
+loadAssetDetail();
+</script>
+{% endblock %}

@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+
+{% block title %}Proposals - Tessera{% endblock %}
+
+{% block content %}
+<section>
+  <h2>Proposals</h2>
+
+  <div style="margin-bottom: 1rem;">
+    <select id="filter-status" style="width: auto; display: inline-block;">
+      <option value="">All statuses</option>
+      <option value="pending" selected>Pending</option>
+      <option value="approved">Approved</option>
+      <option value="force_approved">Force Approved</option>
+      <option value="withdrawn">Withdrawn</option>
+    </select>
+    <button class="secondary" onclick="loadProposals()">Filter</button>
+  </div>
+
+  <div id="proposals-list">
+    <div class="loading">Loading...</div>
+  </div>
+
+  <div id="pagination" style="margin-top: 1rem;"></div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let currentOffset = 0;
+const limit = 20;
+
+async function withdrawProposal(id) {
+  if (!confirm('Withdraw this proposal?')) return;
+
+  try {
+    await api.withdrawProposal(id);
+    loadProposals();
+  } catch (error) {
+    showError(error.message);
+  }
+}
+
+async function loadProposals() {
+  const container = document.getElementById('proposals-list');
+  container.innerHTML = '<div class="loading">Loading...</div>';
+
+  const status = document.getElementById('filter-status').value;
+
+  try {
+    const params = { offset: currentOffset, limit };
+    if (status) params.status = status;
+
+    const data = await api.listProposals(params);
+
+    if (!data.results || data.results.length === 0) {
+      container.innerHTML = '<div class="empty">No proposals found.</div>';
+      return;
+    }
+
+    container.innerHTML = `
+      <table>
+        <thead>
+          <tr>
+            <th>Asset</th>
+            <th>Version</th>
+            <th>Status</th>
+            <th>Breaking Changes</th>
+            <th>Created</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${data.results.map(p => `
+            <tr>
+              <td><a href="/assets/${p.asset_id}">${escapeHtml(p.asset_fqn || p.asset_id)}</a></td>
+              <td>${escapeHtml(p.proposed_version)}</td>
+              <td><span class="status status-${p.status}">${p.status}</span></td>
+              <td>${p.breaking_changes ? p.breaking_changes.length : 0}</td>
+              <td>${formatDate(p.created_at)}</td>
+              <td>
+                <a href="/proposals/${p.id}">View</a>
+                ${p.status === 'pending' ? `<button class="secondary" style="margin-left: 0.5rem;" onclick="withdrawProposal('${p.id}')">Withdraw</button>` : ''}
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+
+    // Pagination
+    const paginationContainer = document.getElementById('pagination');
+    const totalPages = Math.ceil(data.total / limit);
+    const currentPage = Math.floor(currentOffset / limit) + 1;
+
+    if (totalPages > 1) {
+      paginationContainer.innerHTML = `
+        <button class="secondary" ${currentOffset === 0 ? 'disabled' : ''} onclick="goToPage(${currentPage - 1})">Prev</button>
+        <span style="margin: 0 1rem;">Page ${currentPage} of ${totalPages}</span>
+        <button class="secondary" ${currentPage >= totalPages ? 'disabled' : ''} onclick="goToPage(${currentPage + 1})">Next</button>
+      `;
+    } else {
+      paginationContainer.innerHTML = '';
+    }
+  } catch (error) {
+    showError(error.message);
+    container.innerHTML = '<div class="error">Failed to load proposals</div>';
+  }
+}
+
+function goToPage(page) {
+  currentOffset = (page - 1) * limit;
+  loadProposals();
+}
+
+loadProposals();
+</script>
+{% endblock %}

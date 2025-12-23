@@ -1,0 +1,180 @@
+{% extends "base.html" %}
+
+{% block title %}Assets - Tessera{% endblock %}
+
+{% block content %}
+<section>
+  <h2>Assets</h2>
+
+  <div style="margin-bottom: 1rem;">
+    <button onclick="showCreateForm()">+ New Asset</button>
+  </div>
+
+  <div id="create-form" style="display: none; margin-bottom: 2rem;">
+    <div class="card">
+      <h3>Create Asset</h3>
+      <form onsubmit="createAsset(event)">
+        <label for="asset-fqn">Fully Qualified Name</label>
+        <input type="text" id="asset-fqn" name="fqn" required placeholder="e.g., warehouse.schema.table">
+
+        <label for="asset-owner">Owner Team</label>
+        <select id="asset-owner" name="owner_team_id" required>
+          <option value="">Select team...</option>
+        </select>
+
+        <label for="asset-description">Description (optional)</label>
+        <textarea id="asset-description" name="description" rows="3" placeholder="Describe this asset..."></textarea>
+
+        <button type="submit">Create</button>
+        <button type="button" class="secondary" onclick="hideCreateForm()">Cancel</button>
+      </form>
+    </div>
+  </div>
+
+  <div style="margin-bottom: 1rem;">
+    <input type="text" id="search-fqn" placeholder="Search by FQN..." style="width: auto; display: inline-block;">
+    <button class="secondary" onclick="loadAssets()">Search</button>
+  </div>
+
+  <div id="assets-list">
+    <div class="loading">Loading...</div>
+  </div>
+
+  <div id="pagination" style="margin-top: 1rem;"></div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let currentOffset = 0;
+const limit = 20;
+
+function showCreateForm() {
+  document.getElementById('create-form').style.display = 'block';
+  loadTeamsForSelect();
+}
+
+function hideCreateForm() {
+  document.getElementById('create-form').style.display = 'none';
+  document.getElementById('asset-fqn').value = '';
+  document.getElementById('asset-description').value = '';
+}
+
+async function loadTeamsForSelect() {
+  try {
+    const data = await api.listTeams({ limit: 100 });
+    const select = document.getElementById('asset-owner');
+    select.innerHTML = '<option value="">Select team...</option>' +
+      data.results.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
+  } catch (error) {
+    showError('Failed to load teams');
+  }
+}
+
+async function createAsset(event) {
+  event.preventDefault();
+  const fqn = document.getElementById('asset-fqn').value.trim();
+  const owner_team_id = document.getElementById('asset-owner').value;
+  const description = document.getElementById('asset-description').value.trim();
+
+  if (!fqn || !owner_team_id) return;
+
+  try {
+    await api.createAsset({
+      fqn,
+      owner_team_id,
+      description: description || undefined,
+    });
+    hideCreateForm();
+    loadAssets();
+  } catch (error) {
+    showError(error.message);
+  }
+}
+
+async function deleteAsset(id, fqn) {
+  if (!confirm(`Delete asset "${fqn}"?`)) return;
+
+  try {
+    await api.deleteAsset(id);
+    loadAssets();
+  } catch (error) {
+    showError(error.message);
+  }
+}
+
+async function loadAssets() {
+  const container = document.getElementById('assets-list');
+  container.innerHTML = '<div class="loading">Loading...</div>';
+
+  const searchFqn = document.getElementById('search-fqn').value.trim();
+
+  try {
+    const params = { offset: currentOffset, limit };
+    if (searchFqn) params.fqn = searchFqn;
+
+    const data = await api.listAssets(params);
+
+    if (!data.results || data.results.length === 0) {
+      container.innerHTML = '<div class="empty">No assets found. Create one to get started.</div>';
+      return;
+    }
+
+    container.innerHTML = `
+      <table>
+        <thead>
+          <tr>
+            <th>FQN</th>
+            <th>Owner</th>
+            <th>Active Contract</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${data.results.map(asset => `
+            <tr>
+              <td><a href="/assets/${asset.id}">${escapeHtml(asset.fqn)}</a></td>
+              <td>${escapeHtml(asset.owner_team_name || asset.owner_team_id)}</td>
+              <td>${asset.active_contract_version || '<span style="color: var(--gray);">None</span>'}</td>
+              <td>
+                <button class="secondary" onclick="deleteAsset('${asset.id}', '${escapeHtml(asset.fqn)}')">Delete</button>
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+
+    // Pagination
+    const paginationContainer = document.getElementById('pagination');
+    const totalPages = Math.ceil(data.total / limit);
+    const currentPage = Math.floor(currentOffset / limit) + 1;
+
+    if (totalPages > 1) {
+      paginationContainer.innerHTML = `
+        <button class="secondary" ${currentOffset === 0 ? 'disabled' : ''} onclick="goToPage(${currentPage - 1})">Prev</button>
+        <span style="margin: 0 1rem;">Page ${currentPage} of ${totalPages}</span>
+        <button class="secondary" ${currentPage >= totalPages ? 'disabled' : ''} onclick="goToPage(${currentPage + 1})">Next</button>
+      `;
+    } else {
+      paginationContainer.innerHTML = '';
+    }
+  } catch (error) {
+    showError(error.message);
+    container.innerHTML = '<div class="error">Failed to load assets</div>';
+  }
+}
+
+function goToPage(page) {
+  currentOffset = (page - 1) * limit;
+  loadAssets();
+}
+
+// Allow searching on Enter
+document.getElementById('search-fqn').addEventListener('keypress', (e) => {
+  if (e.key === 'Enter') loadAssets();
+});
+
+loadAssets();
+</script>
+{% endblock %}

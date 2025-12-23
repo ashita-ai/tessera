@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+
+{% block title %}Teams - Tessera{% endblock %}
+
+{% block content %}
+<section>
+  <h2>Teams</h2>
+
+  <div style="margin-bottom: 1rem;">
+    <button onclick="showCreateForm()">+ New Team</button>
+  </div>
+
+  <div id="create-form" style="display: none; margin-bottom: 2rem;">
+    <div class="card">
+      <h3>Create Team</h3>
+      <form onsubmit="createTeam(event)">
+        <label for="team-name">Name</label>
+        <input type="text" id="team-name" name="name" required placeholder="e.g., data-platform">
+        <button type="submit">Create</button>
+        <button type="button" class="secondary" onclick="hideCreateForm()">Cancel</button>
+      </form>
+    </div>
+  </div>
+
+  <div id="teams-list">
+    <div class="loading">Loading...</div>
+  </div>
+
+  <div id="pagination" style="margin-top: 1rem;"></div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let currentOffset = 0;
+const limit = 20;
+
+function showCreateForm() {
+  document.getElementById('create-form').style.display = 'block';
+  document.getElementById('team-name').focus();
+}
+
+function hideCreateForm() {
+  document.getElementById('create-form').style.display = 'none';
+  document.getElementById('team-name').value = '';
+}
+
+async function createTeam(event) {
+  event.preventDefault();
+  const name = document.getElementById('team-name').value.trim();
+
+  if (!name) return;
+
+  try {
+    await api.createTeam({ name });
+    hideCreateForm();
+    loadTeams();
+  } catch (error) {
+    showError(error.message);
+  }
+}
+
+async function deleteTeam(id, name) {
+  if (!confirm(`Delete team "${name}"?`)) return;
+
+  try {
+    await api.deleteTeam(id);
+    loadTeams();
+  } catch (error) {
+    showError(error.message);
+  }
+}
+
+async function loadTeams() {
+  const container = document.getElementById('teams-list');
+  container.innerHTML = '<div class="loading">Loading...</div>';
+
+  try {
+    const data = await api.listTeams({ offset: currentOffset, limit });
+
+    if (!data.results || data.results.length === 0) {
+      container.innerHTML = '<div class="empty">No teams found. Create one to get started.</div>';
+      return;
+    }
+
+    container.innerHTML = `
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Created</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${data.results.map(team => `
+            <tr>
+              <td><a href="/teams/${team.id}">${escapeHtml(team.name)}</a></td>
+              <td>${formatDate(team.created_at)}</td>
+              <td>
+                <button class="secondary" onclick="deleteTeam('${team.id}', '${escapeHtml(team.name)}')">Delete</button>
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+
+    // Pagination
+    const paginationContainer = document.getElementById('pagination');
+    const totalPages = Math.ceil(data.total / limit);
+    const currentPage = Math.floor(currentOffset / limit) + 1;
+
+    if (totalPages > 1) {
+      paginationContainer.innerHTML = `
+        <button class="secondary" ${currentOffset === 0 ? 'disabled' : ''} onclick="goToPage(${currentPage - 1})">Prev</button>
+        <span style="margin: 0 1rem;">Page ${currentPage} of ${totalPages}</span>
+        <button class="secondary" ${currentPage >= totalPages ? 'disabled' : ''} onclick="goToPage(${currentPage + 1})">Next</button>
+      `;
+    } else {
+      paginationContainer.innerHTML = '';
+    }
+  } catch (error) {
+    showError(error.message);
+    container.innerHTML = '<div class="error">Failed to load teams</div>';
+  }
+}
+
+function goToPage(page) {
+  currentOffset = (page - 1) * limit;
+  loadTeams();
+}
+
+loadTeams();
+</script>
+{% endblock %}

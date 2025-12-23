@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Tessera{% endblock %}
+
+{% block content %}
+<section>
+  <h2>Overview</h2>
+  <div class="stats">
+    <div class="stat">
+      <div class="stat-value" id="stat-teams">-</div>
+      <div class="stat-label">Teams</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value" id="stat-assets">-</div>
+      <div class="stat-label">Assets</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value" id="stat-contracts">-</div>
+      <div class="stat-label">Contracts</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value" id="stat-proposals">-</div>
+      <div class="stat-label">Pending Proposals</div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>Pending Proposals</h2>
+  <div id="pending-proposals">
+    <div class="loading">Loading...</div>
+  </div>
+</section>
+
+<section>
+  <h2>Recent Assets</h2>
+  <div id="recent-assets">
+    <div class="loading">Loading...</div>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadDashboard() {
+  try {
+    // Load stats in parallel
+    const [teams, assets, contracts, proposals] = await Promise.all([
+      api.listTeams({ limit: 1 }),
+      api.listAssets({ limit: 1 }),
+      api.listContracts({ limit: 1 }),
+      api.listProposals({ status: 'pending', limit: 1 }),
+    ]);
+
+    document.getElementById('stat-teams').textContent = teams.total || 0;
+    document.getElementById('stat-assets').textContent = assets.total || 0;
+    document.getElementById('stat-contracts').textContent = contracts.total || 0;
+    document.getElementById('stat-proposals').textContent = proposals.total || 0;
+
+    // Load pending proposals
+    const pendingProposals = await api.listProposals({ status: 'pending', limit: 5 });
+    const proposalsContainer = document.getElementById('pending-proposals');
+
+    if (!pendingProposals.results || pendingProposals.results.length === 0) {
+      proposalsContainer.innerHTML = '<div class="empty">No pending proposals</div>';
+    } else {
+      proposalsContainer.innerHTML = `
+        <table>
+          <thead>
+            <tr>
+              <th>Asset</th>
+              <th>Version</th>
+              <th>Created</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${pendingProposals.results.map(p => `
+              <tr>
+                <td>${escapeHtml(p.asset_fqn || p.asset_id)}</td>
+                <td>${escapeHtml(p.proposed_version)}</td>
+                <td>${formatDate(p.created_at)}</td>
+                <td><a href="/proposals/${p.id}">View</a></td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
+    }
+
+    // Load recent assets
+    const recentAssets = await api.listAssets({ limit: 5 });
+    const assetsContainer = document.getElementById('recent-assets');
+
+    if (!recentAssets.results || recentAssets.results.length === 0) {
+      assetsContainer.innerHTML = '<div class="empty">No assets found</div>';
+    } else {
+      assetsContainer.innerHTML = `
+        <table>
+          <thead>
+            <tr>
+              <th>FQN</th>
+              <th>Owner</th>
+              <th>Status</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${recentAssets.results.map(a => `
+              <tr>
+                <td>${escapeHtml(a.fqn)}</td>
+                <td>${escapeHtml(a.owner_team_name || a.owner_team_id)}</td>
+                <td><span class="status status-${a.status || 'active'}">${a.status || 'active'}</span></td>
+                <td><a href="/assets/${a.id}">View</a></td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
+    }
+  } catch (error) {
+    showError(error.message);
+  }
+}
+
+loadDashboard();
+</script>
+{% endblock %}

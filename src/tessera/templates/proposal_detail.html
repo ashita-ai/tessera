@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+
+{% block title %}Proposal - Tessera{% endblock %}
+
+{% block content %}
+<section>
+  <div id="proposal-detail">
+    <div class="loading">Loading...</div>
+  </div>
+</section>
+
+<section>
+  <h2>Breaking Changes</h2>
+  <div id="breaking-changes">
+    <div class="loading">Loading...</div>
+  </div>
+</section>
+
+<section>
+  <h2>Acknowledgments</h2>
+  <div id="acknowledgments">
+    <div class="loading">Loading...</div>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const proposalId = '{{ proposal_id }}';
+
+async function withdrawProposal() {
+  if (!confirm('Withdraw this proposal?')) return;
+
+  try {
+    await api.withdrawProposal(proposalId);
+    loadProposalDetail();
+  } catch (error) {
+    showError(error.message);
+  }
+}
+
+async function loadProposalDetail() {
+  try {
+    const proposal = await api.getProposal(proposalId);
+    const status = await api.getProposalStatus(proposalId);
+
+    document.getElementById('proposal-detail').innerHTML = `
+      <h2>Proposal: v${escapeHtml(proposal.proposed_version)}</h2>
+      <div class="card">
+        <p><strong>ID:</strong> ${proposal.id}</p>
+        <p><strong>Asset:</strong> <a href="/assets/${proposal.asset_id}">${escapeHtml(proposal.asset_fqn || proposal.asset_id)}</a></p>
+        <p><strong>Status:</strong> <span class="status status-${proposal.status}">${proposal.status}</span></p>
+        <p><strong>Proposed Version:</strong> ${escapeHtml(proposal.proposed_version)}</p>
+        <p><strong>Supersedes:</strong> ${proposal.supersedes_version || 'N/A'}</p>
+        <p><strong>Created:</strong> ${formatDate(proposal.created_at)}</p>
+        ${proposal.resolved_at ? `<p><strong>Resolved:</strong> ${formatDate(proposal.resolved_at)}</p>` : ''}
+      </div>
+      ${proposal.status === 'pending' ? `
+        <div style="margin-top: 1rem;">
+          <button onclick="withdrawProposal()">Withdraw Proposal</button>
+        </div>
+      ` : ''}
+      <div style="margin-top: 1rem;">
+        <a href="/proposals">&larr; Back to Proposals</a>
+      </div>
+    `;
+
+    // Breaking changes
+    const changesContainer = document.getElementById('breaking-changes');
+    if (proposal.breaking_changes && proposal.breaking_changes.length > 0) {
+      changesContainer.innerHTML = `
+        <table>
+          <thead>
+            <tr>
+              <th>Type</th>
+              <th>Path</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${proposal.breaking_changes.map(c => `
+              <tr>
+                <td><strong>${escapeHtml(c.change_type || c.type)}</strong></td>
+                <td><code>${escapeHtml(c.path)}</code></td>
+                <td>${escapeHtml(c.description || c.message || '')}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
+    } else {
+      changesContainer.innerHTML = '<div class="empty">No breaking changes listed.</div>';
+    }
+
+    // Acknowledgments
+    const acksContainer = document.getElementById('acknowledgments');
+    if (status && status.acknowledgments) {
+      const pending = status.acknowledgments.filter(a => !a.acknowledged_at);
+      const completed = status.acknowledgments.filter(a => a.acknowledged_at);
+
+      let html = '';
+
+      if (pending.length > 0) {
+        html += `
+          <h3 style="font-size: 1rem; margin-bottom: 0.5rem;">Pending (${pending.length})</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Team</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${pending.map(a => `
+                <tr>
+                  <td><a href="/teams/${a.team_id}">${escapeHtml(a.team_name || a.team_id)}</a></td>
+                  <td><span class="status status-pending">Pending</span></td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        `;
+      }
+
+      if (completed.length > 0) {
+        html += `
+          <h3 style="font-size: 1rem; margin: 1rem 0 0.5rem 0;">Completed (${completed.length})</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Team</th>
+                <th>Acknowledged</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${completed.map(a => `
+                <tr>
+                  <td><a href="/teams/${a.team_id}">${escapeHtml(a.team_name || a.team_id)}</a></td>
+                  <td>${formatDate(a.acknowledged_at)}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        `;
+      }
+
+      if (!html) {
+        html = '<div class="empty">No acknowledgments required.</div>';
+      }
+
+      acksContainer.innerHTML = html;
+    } else {
+      acksContainer.innerHTML = '<div class="empty">No acknowledgments required.</div>';
+    }
+  } catch (error) {
+    showError(error.message);
+    document.getElementById('proposal-detail').innerHTML = '<div class="error">Proposal not found</div>';
+  }
+}
+
+loadProposalDetail();
+</script>
+{% endblock %}

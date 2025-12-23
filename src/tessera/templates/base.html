@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Tessera{% endblock %}</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1><a href="/">TESSERA</a></h1>
+      <nav>
+        <a href="/" {% if active_page == 'dashboard' %}class="active"{% endif %}>Dashboard</a>
+        <a href="/teams" {% if active_page == 'teams' %}class="active"{% endif %}>Teams</a>
+        <a href="/assets" {% if active_page == 'assets' %}class="active"{% endif %}>Assets</a>
+        <a href="/contracts" {% if active_page == 'contracts' %}class="active"{% endif %}>Contracts</a>
+        <a href="/proposals" {% if active_page == 'proposals' %}class="active"{% endif %}>Proposals</a>
+      </nav>
+    </header>
+
+    <div id="error-container" style="display: none;"></div>
+
+    <main>
+      {% block content %}{% endblock %}
+    </main>
+
+    <footer>
+      Tessera &mdash; Data Contract Coordination
+    </footer>
+  </div>
+
+  <script src="/static/js/api.js"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

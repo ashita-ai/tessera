@@ -2,10 +2,11 @@
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
@@ -38,6 +39,7 @@ from tessera.api.rate_limit import limiter, rate_limit_exceeded_handler
 from tessera.config import settings
 from tessera.db import init_db
 from tessera.db.database import dispose_engine, get_async_session_maker
+from tessera.web import router as web_router
 
 
 @asynccontextmanager
@@ -100,11 +102,13 @@ api_v1.include_router(audit.router)
 
 app.include_router(api_v1)
 
+# Static files and Web UI
+static_dir = Path(__file__).parent / "static"
+if static_dir.exists():
+    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
-@app.get("/", include_in_schema=False)
-async def root() -> RedirectResponse:
-    """Redirect root to API documentation."""
-    return RedirectResponse(url="/docs")
+# Web UI routes (must be added after API routes to avoid conflicts)
+app.include_router(web_router)
 
 
 @app.get("/health")

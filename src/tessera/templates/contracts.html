@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+
+{% block title %}Contracts - Tessera{% endblock %}
+
+{% block content %}
+<section>
+  <h2>Contracts</h2>
+
+  <div style="margin-bottom: 1rem;">
+    <select id="filter-status" style="width: auto; display: inline-block;">
+      <option value="">All statuses</option>
+      <option value="active">Active</option>
+      <option value="deprecated">Deprecated</option>
+    </select>
+    <input type="text" id="search-asset" placeholder="Filter by asset FQN..." style="width: auto; display: inline-block;">
+    <button class="secondary" onclick="loadContracts()">Filter</button>
+  </div>
+
+  <div id="contracts-list">
+    <div class="loading">Loading...</div>
+  </div>
+
+  <div id="pagination" style="margin-top: 1rem;"></div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let currentOffset = 0;
+const limit = 20;
+
+async function loadContracts() {
+  const container = document.getElementById('contracts-list');
+  container.innerHTML = '<div class="loading">Loading...</div>';
+
+  const status = document.getElementById('filter-status').value;
+  const assetFqn = document.getElementById('search-asset').value.trim();
+
+  try {
+    const params = { offset: currentOffset, limit };
+    if (status) params.status = status;
+    if (assetFqn) params.asset_fqn = assetFqn;
+
+    const data = await api.listContracts(params);
+
+    if (!data.results || data.results.length === 0) {
+      container.innerHTML = '<div class="empty">No contracts found.</div>';
+      return;
+    }
+
+    container.innerHTML = `
+      <table>
+        <thead>
+          <tr>
+            <th>Asset</th>
+            <th>Version</th>
+            <th>Status</th>
+            <th>Compatibility</th>
+            <th>Published</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${data.results.map(c => `
+            <tr>
+              <td><a href="/assets/${c.asset_id}">${escapeHtml(c.asset_fqn || c.asset_id)}</a></td>
+              <td>${escapeHtml(c.version)}</td>
+              <td><span class="status status-${c.status}">${c.status}</span></td>
+              <td>${escapeHtml(c.compatibility_mode)}</td>
+              <td>${formatDate(c.published_at)}</td>
+              <td><a href="/contracts/${c.id}">View</a></td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+
+    // Pagination
+    const paginationContainer = document.getElementById('pagination');
+    const totalPages = Math.ceil(data.total / limit);
+    const currentPage = Math.floor(currentOffset / limit) + 1;
+
+    if (totalPages > 1) {
+      paginationContainer.innerHTML = `
+        <button class="secondary" ${currentOffset === 0 ? 'disabled' : ''} onclick="goToPage(${currentPage - 1})">Prev</button>
+        <span style="margin: 0 1rem;">Page ${currentPage} of ${totalPages}</span>
+        <button class="secondary" ${currentPage >= totalPages ? 'disabled' : ''} onclick="goToPage(${currentPage + 1})">Next</button>
+      `;
+    } else {
+      paginationContainer.innerHTML = '';
+    }
+  } catch (error) {
+    showError(error.message);
+    container.innerHTML = '<div class="error">Failed to load contracts</div>';
+  }
+}
+
+function goToPage(page) {
+  currentOffset = (page - 1) * limit;
+  loadContracts();
+}
+
+loadContracts();
+</script>
+{% endblock %}

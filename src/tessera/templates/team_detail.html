@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+
+{% block title %}Team - Tessera{% endblock %}
+
+{% block content %}
+<section>
+  <div id="team-detail">
+    <div class="loading">Loading...</div>
+  </div>
+</section>
+
+<section>
+  <h2>Owned Assets</h2>
+  <div id="team-assets">
+    <div class="loading">Loading...</div>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const teamId = '{{ team_id }}';
+
+async function loadTeamDetail() {
+  try {
+    const team = await api.getTeam(teamId);
+
+    document.getElementById('team-detail').innerHTML = `
+      <h2>${escapeHtml(team.name)}</h2>
+      <div class="card">
+        <p><strong>ID:</strong> ${team.id}</p>
+        <p><strong>Created:</strong> ${formatDate(team.created_at)}</p>
+        ${team.metadata ? `<p><strong>Metadata:</strong> <pre>${JSON.stringify(team.metadata, null, 2)}</pre></p>` : ''}
+      </div>
+      <div style="margin-top: 1rem;">
+        <a href="/teams">&larr; Back to Teams</a>
+      </div>
+    `;
+
+    // Load assets owned by this team
+    const assets = await api.listAssets({ owner_team_id: teamId, limit: 50 });
+    const assetsContainer = document.getElementById('team-assets');
+
+    if (!assets.results || assets.results.length === 0) {
+      assetsContainer.innerHTML = '<div class="empty">No assets owned by this team.</div>';
+    } else {
+      assetsContainer.innerHTML = `
+        <table>
+          <thead>
+            <tr>
+              <th>FQN</th>
+              <th>Active Contract</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${assets.results.map(a => `
+              <tr>
+                <td><a href="/assets/${a.id}">${escapeHtml(a.fqn)}</a></td>
+                <td>${a.active_contract_version || '<span style="color: var(--gray);">None</span>'}</td>
+                <td><a href="/assets/${a.id}">View</a></td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
+    }
+  } catch (error) {
+    showError(error.message);
+    document.getElementById('team-detail').innerHTML = '<div class="error">Team not found</div>';
+  }
+}
+
+loadTeamDetail();
+</script>
+{% endblock %}

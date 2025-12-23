@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+
+{% block title %}Contract - Tessera{% endblock %}
+
+{% block content %}
+<section>
+  <div id="contract-detail">
+    <div class="loading">Loading...</div>
+  </div>
+</section>
+
+<section>
+  <h2>Schema</h2>
+  <div id="contract-schema">
+    <div class="loading">Loading...</div>
+  </div>
+</section>
+
+<section>
+  <h2>Guarantees</h2>
+  <div id="contract-guarantees">
+    <div class="loading">Loading...</div>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const contractId = '{{ contract_id }}';
+
+async function loadContractDetail() {
+  try {
+    const contract = await api.getContract(contractId);
+
+    document.getElementById('contract-detail').innerHTML = `
+      <h2>Contract v${escapeHtml(contract.version)}</h2>
+      <div class="card">
+        <p><strong>ID:</strong> ${contract.id}</p>
+        <p><strong>Asset:</strong> <a href="/assets/${contract.asset_id}">${escapeHtml(contract.asset_fqn || contract.asset_id)}</a></p>
+        <p><strong>Status:</strong> <span class="status status-${contract.status}">${contract.status}</span></p>
+        <p><strong>Compatibility Mode:</strong> ${escapeHtml(contract.compatibility_mode)}</p>
+        <p><strong>Published By:</strong> <a href="/teams/${contract.published_by}">${escapeHtml(contract.publisher_name || contract.published_by)}</a></p>
+        <p><strong>Published:</strong> ${formatDate(contract.published_at)}</p>
+        ${contract.deprecated_at ? `<p><strong>Deprecated:</strong> ${formatDate(contract.deprecated_at)}</p>` : ''}
+      </div>
+      <div style="margin-top: 1rem;">
+        <a href="/contracts">&larr; Back to Contracts</a>
+      </div>
+    `;
+
+    // Schema
+    const schemaContainer = document.getElementById('contract-schema');
+    if (contract.schema) {
+      schemaContainer.innerHTML = `
+        <div class="card" style="background: var(--white);">
+          <pre style="overflow-x: auto; font-size: 0.875rem;">${escapeHtml(JSON.stringify(contract.schema, null, 2))}</pre>
+        </div>
+      `;
+    } else {
+      schemaContainer.innerHTML = '<div class="empty">No schema defined.</div>';
+    }
+
+    // Guarantees
+    const guaranteesContainer = document.getElementById('contract-guarantees');
+    if (contract.guarantees && Object.keys(contract.guarantees).length > 0) {
+      guaranteesContainer.innerHTML = `
+        <div class="card" style="background: var(--white);">
+          <pre style="overflow-x: auto; font-size: 0.875rem;">${escapeHtml(JSON.stringify(contract.guarantees, null, 2))}</pre>
+        </div>
+      `;
+    } else {
+      guaranteesContainer.innerHTML = '<div class="empty">No guarantees defined.</div>';
+    }
+  } catch (error) {
+    showError(error.message);
+    document.getElementById('contract-detail').innerHTML = '<div class="error">Contract not found</div>';
+  }
+}
+
+loadContractDetail();
+</script>
+{% endblock %}

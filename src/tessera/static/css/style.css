@@ -1,0 +1,245 @@
+/* Tessera UI - Brutalist/Minimalist Design */
+
+:root {
+  --black: #000;
+  --white: #fff;
+  --gray: #888;
+  --light-gray: #f5f5f5;
+  --link: #0066cc;
+  --border: 2px solid var(--black);
+  --border-thick: 4px solid var(--black);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--black);
+  background: var(--white);
+}
+
+/* Layout */
+.container {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+/* Header */
+header {
+  border-bottom: var(--border-thick);
+  padding-bottom: 1rem;
+  margin-bottom: 2rem;
+}
+
+header h1 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+}
+
+header h1 a {
+  color: var(--black);
+  text-decoration: none;
+}
+
+/* Navigation */
+nav {
+  margin-top: 1rem;
+  display: flex;
+  gap: 1.5rem;
+}
+
+nav a {
+  color: var(--black);
+  text-decoration: none;
+  padding: 0.25rem 0;
+  border-bottom: 2px solid transparent;
+}
+
+nav a:hover,
+nav a.active {
+  border-bottom-color: var(--black);
+}
+
+/* Links */
+a {
+  color: var(--link);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+/* Sections */
+section {
+  margin-bottom: 3rem;
+}
+
+section h2 {
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin-bottom: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: var(--border);
+}
+
+/* Cards with left border accent */
+.card {
+  border-left: var(--border-thick);
+  padding: 1rem 1rem 1rem 1.5rem;
+  margin-bottom: 1rem;
+  background: var(--light-gray);
+}
+
+.card h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
+.card p {
+  color: var(--gray);
+  font-size: 0.875rem;
+}
+
+/* Tables */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 1rem;
+}
+
+th, td {
+  text-align: left;
+  padding: 0.75rem;
+  border-bottom: 1px solid var(--black);
+}
+
+th {
+  font-weight: 700;
+  background: var(--light-gray);
+}
+
+tr:hover {
+  background: var(--light-gray);
+}
+
+/* Status badges */
+.status {
+  display: inline-block;
+  padding: 0.125rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.status-active { border: 1px solid var(--black); }
+.status-pending { border: 1px dashed var(--black); }
+.status-deprecated { color: var(--gray); border: 1px solid var(--gray); }
+
+/* Stats */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.stat {
+  border: var(--border);
+  padding: 1rem;
+  text-align: center;
+}
+
+.stat-value {
+  font-size: 2rem;
+  font-weight: 700;
+}
+
+.stat-label {
+  font-size: 0.75rem;
+  color: var(--gray);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Forms */
+input, select, textarea {
+  font-family: inherit;
+  font-size: inherit;
+  padding: 0.5rem;
+  border: var(--border);
+  background: var(--white);
+  width: 100%;
+  margin-bottom: 1rem;
+}
+
+input:focus, select:focus, textarea:focus {
+  outline: 2px solid var(--black);
+  outline-offset: 2px;
+}
+
+button {
+  font-family: inherit;
+  font-size: inherit;
+  padding: 0.5rem 1rem;
+  border: var(--border);
+  background: var(--black);
+  color: var(--white);
+  cursor: pointer;
+}
+
+button:hover {
+  background: var(--white);
+  color: var(--black);
+}
+
+button.secondary {
+  background: var(--white);
+  color: var(--black);
+}
+
+button.secondary:hover {
+  background: var(--black);
+  color: var(--white);
+}
+
+/* Loading */
+.loading {
+  color: var(--gray);
+  font-style: italic;
+}
+
+/* Empty state */
+.empty {
+  text-align: center;
+  padding: 3rem;
+  color: var(--gray);
+  border: 1px dashed var(--gray);
+}
+
+/* Error */
+.error {
+  color: #c00;
+  padding: 1rem;
+  border: 1px solid #c00;
+  margin-bottom: 1rem;
+}
+
+/* Footer */
+footer {
+  margin-top: 3rem;
+  padding-top: 1rem;
+  border-top: var(--border);
+  color: var(--gray);
+  font-size: 0.75rem;
+}
