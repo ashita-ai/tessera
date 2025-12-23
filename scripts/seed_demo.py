@@ -10,6 +10,7 @@ Creates:
 """
 
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -17,6 +18,18 @@ from pathlib import Path
 import httpx
 
 API_URL = "http://api:8000"
+BOOTSTRAP_API_KEY = os.environ.get("BOOTSTRAP_API_KEY", "")
+
+
+# Build headers with API key if available
+def get_headers() -> dict[str, str]:
+    """Get headers for API requests, including auth if configured."""
+    headers = {"Content-Type": "application/json"}
+    if BOOTSTRAP_API_KEY:
+        headers["Authorization"] = f"Bearer {BOOTSTRAP_API_KEY}"
+    return headers
+
+
 # Default manifest path (synthetic)
 MANIFEST_PATH = Path("/app/examples/data/manifest.json")
 # Multi-project manifests from demo dbt projects
@@ -126,6 +139,7 @@ def create_team(name: str, metadata: dict | None = None) -> str | None:
         resp = httpx.post(
             f"{API_URL}/api/v1/teams",
             json={"name": name, "metadata": metadata or {}},
+            headers=get_headers(),
             timeout=10,
         )
         if resp.status_code == 201:
@@ -134,7 +148,9 @@ def create_team(name: str, metadata: dict | None = None) -> str | None:
             return team_id
         elif resp.status_code == 409:
             # Team exists, fetch it
-            list_resp = httpx.get(f"{API_URL}/api/v1/teams?name={name}", timeout=10)
+            list_resp = httpx.get(
+                f"{API_URL}/api/v1/teams?name={name}", headers=get_headers(), timeout=10
+            )
             if list_resp.status_code == 200:
                 results = list_resp.json().get("results", [])
                 if results:
@@ -163,6 +179,7 @@ def create_user(
         resp = httpx.post(
             f"{API_URL}/api/v1/users",
             json=payload,
+            headers=get_headers(),
             timeout=10,
         )
         if resp.status_code == 201:
@@ -201,6 +218,7 @@ def import_manifest(default_team_id: str) -> dict | None:
                 "auto_register_consumers": True,
                 "infer_consumers_from_refs": True,
             },
+            headers=get_headers(),
             timeout=180,
         )
         if resp.status_code == 200:
@@ -262,6 +280,7 @@ def import_multi_project_manifests(team_ids: dict[str, str]) -> dict:
                     "auto_register_consumers": True,
                     "infer_consumers_from_refs": True,
                 },
+                headers=get_headers(),
                 timeout=180,
             )
 
@@ -291,7 +310,9 @@ def create_proposals(team_ids: dict[str, str]) -> int:
 
     # Get registrations to find contracts with consumers
     try:
-        reg_resp = httpx.get(f"{API_URL}/api/v1/registrations?limit=50", timeout=10)
+        reg_resp = httpx.get(
+            f"{API_URL}/api/v1/registrations?limit=50", headers=get_headers(), timeout=10
+        )
         if reg_resp.status_code != 200:
             print("  Could not fetch registrations")
             return 0
@@ -309,6 +330,7 @@ def create_proposals(team_ids: dict[str, str]) -> int:
         for contract_id in contract_ids:
             contract_resp = httpx.get(
                 f"{API_URL}/api/v1/contracts/{contract_id}",
+                headers=get_headers(),
                 timeout=10,
             )
             if contract_resp.status_code != 200:
@@ -334,7 +356,9 @@ def create_proposals(team_ids: dict[str, str]) -> int:
             current_schema = contract.get("schema", {})
 
             # Get asset for owner_team_id and fqn
-            asset_resp = httpx.get(f"{API_URL}/api/v1/assets/{asset_id}", timeout=10)
+            asset_resp = httpx.get(
+                f"{API_URL}/api/v1/assets/{asset_id}", headers=get_headers(), timeout=10
+            )
             if asset_resp.status_code != 200:
                 continue
 
@@ -375,6 +399,7 @@ def create_proposals(team_ids: dict[str, str]) -> int:
                         "schema": new_schema,
                         "compatibility_mode": "backward",
                     },
+                    headers=get_headers(),
                     timeout=30,
                 )
                 if pub_resp.status_code == 201:

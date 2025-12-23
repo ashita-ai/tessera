@@ -84,6 +84,8 @@ services:
         condition: service_healthy
       dbt-builder:
         condition: service_completed_successfully
+    environment:
+      BOOTSTRAP_API_KEY: tessera-dev-key
     volumes:
       - dbt_manifests:/app/tests/fixtures/demo_dbt_projects
     command: ["python", "/app/scripts/seed_demo.py"]
