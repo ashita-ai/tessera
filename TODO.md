@@ -119,4 +119,22 @@ This is the actionable backlog derived from `MISSING_FEATURES.md`. It is written
 
 - **All items in this implementation-ready backlog have been completed.** This includes core security (auth, rate limiting, CORS, validation), performance (caching), and key product features (recursive impact, environment support, registrations list, audit API, and soft deletes).
 
+## Recent Improvements (not in original backlog)
 
+- [x] **WAP (Write-Audit-Publish) integration**
+  - Audit run reporting endpoint (`POST /assets/{id}/audit`)
+  - Audit history with filtering (`GET /assets/{id}/audit-history`)
+  - Audit trends and alerts (`GET /assets/{id}/audit-trends`)
+  - Per-guarantee result tracking with metadata
+  - JSON field size limits (10KB metadata, 100KB details, 1000 guarantees)
+
+- [x] **Python SDK** (`sdk/python/tessera_sdk/`)
+  - Async client with full API coverage
+  - Type-safe models with Pydantic
+  - Convenience methods for common workflows
+
+- [x] **Code quality improvements**
+  - Fixed mypy strict mode type errors
+  - Added exception type logging in error handlers
+  - Pinned all dependency major versions
+  - Explicit transaction boundaries documented

@@ -1,5 +1,6 @@
 """Web UI routes for Tessera."""
 
+import logging
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -7,13 +8,15 @@ from uuid import UUID
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
 from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.config import settings
 from tessera.db import UserDB, get_session
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["web"])
 
@@ -46,8 +49,8 @@ async def get_current_user(
                 "role": user.role.value,
                 "team_id": str(user.team_id) if user.team_id else None,
             }
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Failed to get current user from session: %s: %s", type(e).__name__, e)
     return None
 
 
@@ -66,11 +69,11 @@ def make_context(
     }
 
 
-@router.get("/login", response_class=HTMLResponse)
+@router.get("/login", response_class=HTMLResponse, response_model=None)
 async def login_page(
     request: Request,
     session: AsyncSession = Depends(get_session),
-) -> HTMLResponse:
+) -> Response:
     """Login page."""
     current_user = await get_current_user(request, session)
     if current_user:
@@ -278,11 +281,11 @@ async def import_page(
     )
 
 
-@router.get("/settings", response_class=HTMLResponse)
+@router.get("/settings", response_class=HTMLResponse, response_model=None)
 async def settings_page(
     request: Request,
     session: AsyncSession = Depends(get_session),
-) -> HTMLResponse:
+) -> Response:
     """User settings page for notification preferences."""
     current_user = await get_current_user(request, session)
     if not current_user:

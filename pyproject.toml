@@ -5,27 +5,27 @@ description = "Data contract coordination for warehouses"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "fastapi>=0.115.0",
-    "uvicorn>=0.32.0",
-    "pydantic>=2.10.0",
-    "pydantic-settings>=2.6.0",
-    "python-dotenv>=1.0.0",
-    "httpx>=0.28.0",
-    "sqlalchemy>=2.0.0",
-    "asyncpg>=0.30.0",
-    "alembic>=1.14.0",
-    "pyyaml>=6.0.0",
-    "greenlet>=3.3.0",
-    "jsonschema>=4.20.0",
-    "typer>=0.15.0",
-    "rich>=13.0.0",
-    "redis>=5.0.0",
-    "argon2-cffi>=23.0.0",
-    "slowapi>=0.1.9",
-    "jinja2>=3.1.0",
-    "email-validator>=2.3.0",
-    "itsdangerous>=2.0.0",
-    "python-multipart>=0.0.12",
+    "fastapi>=0.115.0,<1.0.0",
+    "uvicorn>=0.32.0,<1.0.0",
+    "pydantic>=2.10.0,<3.0.0",
+    "pydantic-settings>=2.6.0,<3.0.0",
+    "python-dotenv>=1.0.0,<2.0.0",
+    "httpx>=0.28.0,<1.0.0",
+    "sqlalchemy>=2.0.0,<3.0.0",
+    "asyncpg>=0.30.0,<1.0.0",
+    "alembic>=1.14.0,<2.0.0",
+    "pyyaml>=6.0.0,<7.0.0",
+    "greenlet>=3.3.0,<4.0.0",
+    "jsonschema>=4.20.0,<5.0.0",
+    "typer>=0.15.0,<1.0.0",
+    "rich>=13.0.0,<14.0.0",
+    "redis>=5.0.0,<6.0.0",
+    "argon2-cffi>=23.0.0,<24.0.0",
+    "slowapi>=0.1.9,<1.0.0",
+    "jinja2>=3.1.0,<4.0.0",
+    "email-validator>=2.3.0,<3.0.0",
+    "itsdangerous>=2.0.0,<3.0.0",
+    "python-multipart>=0.0.12,<1.0.0",
 ]
 
 [project.scripts]
@@ -33,17 +33,17 @@ tessera = "tessera.cli:app"
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.0.0",
-    "pytest-asyncio>=0.24.0",
-    "pytest-cov>=6.0.0",
-    "ruff>=0.8.0",
-    "mypy>=1.13.0",
+    "pytest>=8.0.0,<9.0.0",
+    "pytest-asyncio>=0.24.0,<1.0.0",
+    "pytest-cov>=6.0.0,<7.0.0",
+    "ruff>=0.8.0,<1.0.0",
+    "mypy>=1.13.0,<2.0.0",
 ]
 bigquery = [
-    "google-cloud-bigquery>=3.25.0",
+    "google-cloud-bigquery>=3.25.0,<4.0.0",
 ]
 duckdb = [
-    "duckdb>=1.0.0",
+    "duckdb>=1.0.0,<2.0.0",
 ]
 
 [build-system]
@@ -68,14 +68,14 @@ testpaths = ["tests"]
 
 [dependency-groups]
 dev = [
-    "aiosqlite>=0.22.0",
-    "pre-commit>=4.5.1",
+    "aiosqlite>=0.22.0,<1.0.0",
+    "pre-commit>=4.5.1,<5.0.0",
     "types-jsonschema>=4.25.1.20251009",
     "types-pyyaml>=6.0.12.20250915",
-    "types-redis>=4.6.0",
-    "uvloop>=0.22.0",
-    "httptools>=0.7.0",
-    "watchfiles>=1.0.0",
-    "duckdb>=1.0.0",
+    "types-redis>=4.6.0,<5.0.0",
+    "uvloop>=0.22.0,<1.0.0",
+    "httptools>=0.7.0,<1.0.0",
+    "watchfiles>=1.0.0,<2.0.0",
+    "duckdb>=1.0.0,<2.0.0",
     "pyarrow>=15.0.0",
 ]

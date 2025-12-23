@@ -22,6 +22,7 @@ from tessera.api.rate_limit import limit_read, limit_write
 from tessera.config import settings
 from tessera.db import (
     AssetDB,
+    AuditRunDB,
     ContractDB,
     ProposalDB,
     RegistrationDB,
@@ -38,7 +39,7 @@ from tessera.models import (
     ContractCreate,
     Proposal,
 )
-from tessera.models.enums import APIKeyScope, ContractStatus, RegistrationStatus
+from tessera.models.enums import APIKeyScope, AuditRunStatus, ContractStatus, RegistrationStatus
 from tessera.services import (
     check_compatibility,
     diff_schemas,
@@ -215,7 +216,7 @@ async def list_assets(
         count_base = count_base.where(AssetDB.environment == environment)
 
     # Apply sorting
-    sort_column = AssetDB.fqn  # default
+    sort_column: Any = AssetDB.fqn  # default
     if sort_by == "owner":
         sort_column = TeamDB.name
     elif sort_by == "owner_user":
@@ -544,6 +545,27 @@ async def restore_asset(
     return asset
 
 
+async def _get_last_audit_status(
+    session: AsyncSession, asset_id: UUID
+) -> tuple[AuditRunStatus | None, int, datetime | None]:
+    """Get the most recent audit run status for an asset.
+
+    Returns (status, failed_count, run_at) or (None, 0, None) if no audits exist.
+    """
+    from sqlalchemy import desc
+
+    result = await session.execute(
+        select(AuditRunDB)
+        .where(AuditRunDB.asset_id == asset_id)
+        .order_by(desc(AuditRunDB.run_at))
+        .limit(1)
+    )
+    audit_run = result.scalar_one_or_none()
+    if not audit_run:
+        return None, 0, None
+    return audit_run.status, audit_run.guarantees_failed, audit_run.run_at
+
+
 @router.post("/{asset_id}/contracts", status_code=201)
 @limit_write
 async def create_contract(
@@ -554,6 +576,9 @@ async def create_contract(
     published_by: UUID = Query(..., description="Team ID of the publisher"),
     published_by_user_id: UUID | None = Query(None, description="User ID who published"),
     force: bool = Query(False, description="Force publish even if breaking (creates audit trail)"),
+    require_audit_pass: bool = Query(
+        False, description="Require most recent audit to pass before publishing"
+    ),
     _: None = RequireWrite,
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
@@ -566,6 +591,12 @@ async def create_contract(
     - If change is compatible: auto-publish, deprecate old contract
     - If change is breaking: create a Proposal for consumer acknowledgment
     - If force=True: publish anyway but log the override
+    - If require_audit_pass=True: reject if most recent audit failed
+
+    WAP (Write-Audit-Publish) enforcement:
+    - Set require_audit_pass=True to gate publishing on passing audits
+    - Returns 412 Precondition Failed if no audits exist or last audit failed
+    - Without this flag, audit failures add a warning to the response
 
     Returns either a Contract (if published) or a Proposal (if breaking).
     """
@@ -574,6 +605,43 @@ async def create_contract(
     asset = asset_result.scalar_one_or_none()
     if not asset:
         raise NotFoundError(ErrorCode.ASSET_NOT_FOUND, "Asset not found")
+
+    # Check audit status for WAP enforcement
+    audit_status, audit_failed, audit_run_at = await _get_last_audit_status(session, asset_id)
+    audit_warning: str | None = None
+
+    if require_audit_pass:
+        if audit_status is None:
+            raise HTTPException(
+                status_code=412,
+                detail={
+                    "code": "AUDIT_REQUIRED",
+                    "message": (
+                        "No audit runs found. Run audits before publishing "
+                        "with require_audit_pass=True."
+                    ),
+                },
+            )
+        if audit_status != AuditRunStatus.PASSED:
+            raise HTTPException(
+                status_code=412,
+                detail={
+                    "code": "AUDIT_FAILED",
+                    "message": (
+                        f"Most recent audit {audit_status.value}. "
+                        "Cannot publish with require_audit_pass=True."
+                    ),
+                    "audit_status": audit_status.value,
+                    "guarantees_failed": audit_failed,
+                    "audit_run_at": audit_run_at.isoformat() if audit_run_at else None,
+                },
+            )
+    elif audit_status and audit_status != AuditRunStatus.PASSED:
+        # Not enforcing, but add a warning to the response
+        audit_warning = (
+            f"Warning: Most recent audit {audit_status.value} "
+            f"with {audit_failed} guarantee(s) failing"
+        )
 
     # Resource-level auth: must own the asset's team or be admin
     if asset.owner_team_id != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):
@@ -623,7 +691,7 @@ async def create_contract(
             version = "1.0.0"
         else:
             # Determine bump type based on compatibility
-            is_compatible, _ = check_compatibility(
+            is_compatible, _unused = check_compatibility(
                 current_contract.schema_def,
                 contract.schema_def,
                 current_contract.compatibility_mode,
@@ -692,6 +760,8 @@ async def create_contract(
         }
         if version_auto_generated:
             response["version_auto_generated"] = True
+        if audit_warning:
+            response["audit_warning"] = audit_warning
         return response
 
     # Diff schemas and check compatibility
@@ -723,6 +793,8 @@ async def create_contract(
         }
         if version_auto_generated:
             response["version_auto_generated"] = True
+        if audit_warning:
+            response["audit_warning"] = audit_warning
         return response
 
     # Breaking change with force flag = publish anyway (logged)
@@ -749,6 +821,8 @@ async def create_contract(
         }
         if version_auto_generated:
             response["version_auto_generated"] = True
+        if audit_warning:
+            response["audit_warning"] = audit_warning
         return response
 
     # Breaking change without force = create proposal

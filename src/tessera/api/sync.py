@@ -1203,7 +1203,9 @@ async def upload_dbt_manifest(
                 contracts_published += 1
 
             except Exception as e:
-                contract_warnings.append(f"{asset.fqn}: Failed to publish contract: {str(e)}")
+                contract_warnings.append(
+                    f"{asset.fqn}: Failed to publish contract ({type(e).__name__}): {str(e)}"
+                )
 
     # Auto-register consumers from refs and meta.tessera.consumers
     if upload_req.auto_register_consumers and asset_consumer_map:

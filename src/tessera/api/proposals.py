@@ -21,6 +21,7 @@ from tessera.api.rate_limit import limit_read, limit_write
 from tessera.db import (
     AcknowledgmentDB,
     AssetDB,
+    AuditRunDB,
     ContractDB,
     ProposalDB,
     RegistrationDB,
@@ -32,6 +33,7 @@ from tessera.models import Acknowledgment, AcknowledgmentCreate, Contract, Propo
 from tessera.models.enums import (
     AcknowledgmentResponseType,
     APIKeyScope,
+    AuditRunStatus,
     CompatibilityMode,
     ContractStatus,
     ProposalStatus,
@@ -54,6 +56,31 @@ from tessera.services.webhooks import (
 )
 
 router = APIRouter()
+
+
+async def _get_asset_audit_info(session: AsyncSession, asset_id: UUID) -> dict[str, Any] | None:
+    """Get the most recent audit run info for an asset.
+
+    Returns a dict with audit status info, or None if no audits exist.
+    """
+    from sqlalchemy import desc
+
+    result = await session.execute(
+        select(AuditRunDB)
+        .where(AuditRunDB.asset_id == asset_id)
+        .order_by(desc(AuditRunDB.run_at))
+        .limit(1)
+    )
+    audit_run = result.scalar_one_or_none()
+    if not audit_run:
+        return None
+    return {
+        "status": audit_run.status.value,
+        "guarantees_failed": audit_run.guarantees_failed,
+        "run_at": audit_run.run_at.isoformat(),
+        "triggered_by": audit_run.triggered_by,
+        "is_passing": audit_run.status == AuditRunStatus.PASSED,
+    }
 
 
 class PublishRequest(BaseModel):
@@ -365,6 +392,18 @@ async def get_proposal_status(
     )
     total_consumers = len(registrations)
 
+    # Get audit status for the asset
+    audit_info = await _get_asset_audit_info(session, asset.id)
+
+    # Build warnings list
+    warnings: list[str] = []
+    if audit_info and not audit_info["is_passing"]:
+        warnings.append(
+            f"Data quality audit {audit_info['status']} with "
+            f"{audit_info['guarantees_failed']} failing guarantee(s). "
+            "Consider fixing audits before publishing."
+        )
+
     return {
         "proposal_id": str(proposal.id),
         "status": str(proposal.status),
@@ -387,6 +426,8 @@ async def get_proposal_status(
         },
         "acknowledgments": ack_list,
         "pending_consumers": pending_consumers,
+        "audit_status": audit_info,
+        "warnings": warnings,
     }
 
 
@@ -779,9 +820,18 @@ async def publish_from_proposal(
         from_proposal_id=proposal_id,
     )
 
-    return {
+    # Check audit status and add warning if failing
+    audit_info = await _get_asset_audit_info(session, proposal.asset_id)
+    response: dict[str, Any] = {
         "action": "published",
         "proposal_id": str(proposal_id),
         "contract": Contract.model_validate(new_contract).model_dump(),
         "deprecated_contract_id": str(current_contract.id) if current_contract else None,
     }
+    if audit_info and not audit_info["is_passing"]:
+        response["audit_warning"] = (
+            f"Warning: Most recent audit {audit_info['status']} "
+            f"with {audit_info['guarantees_failed']} guarantee(s) failing"
+        )
+
+    return response

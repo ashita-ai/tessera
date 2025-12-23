@@ -18,6 +18,7 @@ Strategic context for Tessera development.
 ## Resolved
 
 - **Auth model**: API keys per team with read/write/admin scopes. Bootstrap key for initial setup. Development mode for local testing.
+- **WAP (Write-Audit-Publish)**: Runtime enforcement visibility via audit run reporting. Report quality check results, track trends over time, alert on failure rate spikes. Per-guarantee tracking enables fine-grained analysis of which data quality rules fail most.
 
 ## Risks
 

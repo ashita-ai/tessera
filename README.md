@@ -141,9 +141,13 @@ export TESSERA_API_KEY=your-api-key
 python scripts/report_to_tessera.py
 ```
 
-Query audit history via API:
+Query audit history and trends via API:
 ```bash
+# Get audit history (paginated)
 curl $TESSERA_URL/api/v1/assets/{asset_id}/audit-history
+
+# Get trends and alerts (failure rates, patterns, alerts)
+curl $TESSERA_URL/api/v1/assets/{asset_id}/audit-trends?days=30
 ```
 
 ## Deployment

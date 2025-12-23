@@ -110,6 +110,7 @@ tessera/
 │   ├── api/               # FastAPI endpoints
 │   │   ├── api_keys.py    # API key management (admin)
 │   │   ├── assets.py      # Asset + contract publishing
+│   │   ├── audits.py      # WAP audit reporting + trends
 │   │   ├── auth.py        # Authentication dependencies
 │   │   ├── contracts.py   # Contract lookup
 │   │   ├── errors.py      # Error handling + middleware
@@ -128,7 +129,7 @@ tessera/
 │   │   └── schema_validator.py # Schema validation
 │   ├── config.py          # Settings from env
 │   └── main.py            # FastAPI app
-├── tests/                 # Test suite (126 tests)
+├── tests/                 # Test suite (368 tests)
 │   ├── conftest.py        # Fixtures
 │   ├── test_schema_diff.py # Schema diff tests
 │   └── test_*.py          # Endpoint tests
@@ -379,6 +380,9 @@ All under `/api/v1`:
 - `POST /assets` - Create asset
 - `POST /assets/{id}/contracts` - Publish contract
 - `POST /assets/{id}/impact` - Impact analysis
+- `POST /assets/{id}/audit` - Report WAP audit run
+- `GET /assets/{id}/audit-history` - Get audit history
+- `GET /assets/{id}/audit-trends` - Get audit trends and alerts
 - `POST /registrations` - Register as consumer
 - `POST /proposals/{id}/acknowledge` - Acknowledge breaking change
 - `POST /sync/dbt` - Sync from dbt manifest

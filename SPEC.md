@@ -105,6 +105,25 @@ APIKey
 └── revoked_at (nullable timestamp)
 ```
 
+### AuditRun (WAP)
+
+```
+AuditRun
+├── id (uuid)
+├── asset_id (uuid -> Asset)
+├── run_id (string)            # External run identifier (dbt run_id, etc.)
+├── status (passed | failed | partial)
+├── triggered_by (string)      # "dbt_test", "great_expectations", "soda", etc.
+├── total_checks (int)
+├── passed_checks (int)
+├── failed_checks (int)
+├── guarantee_results (json)   # Per-guarantee pass/fail details
+├── details (json)             # Additional context (errors, warnings)
+├── started_at (timestamp)
+├── completed_at (timestamp)
+└── reported_at (timestamp)
+```
+
 ## Compatibility Modes
 
 | Mode | Add column | Drop column | Rename column | Widen type | Narrow type |
@@ -166,6 +185,9 @@ GET    /assets                      # List assets (paginated)
 GET    /assets/{id}                 # Get asset
 POST   /assets/{id}/contracts       # Publish contract
 POST   /assets/{id}/impact          # Impact analysis
+POST   /assets/{id}/audit           # Report WAP audit run
+GET    /assets/{id}/audit-history   # Get audit history (paginated)
+GET    /assets/{id}/audit-trends    # Get audit trends and alerts
 ```
 
 ### Contracts
@@ -305,6 +327,7 @@ Response:
 - registrations
 - api_keys
 - dependencies
+- audit_runs (WAP data quality runs)
 
 ### workflow
 - proposals
