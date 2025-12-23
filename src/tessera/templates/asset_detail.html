@@ -151,8 +151,8 @@
       <select id="owner-user-select" required>
         <option value="">Loading users...</option>
       </select>
-      <p style="color: var(--gray); font-size: 0.9em; margin-top: 0.5rem;">
-        Select the person who should own this asset.
+      <p id="owner-help-text" style="color: var(--gray); font-size: 0.9em; margin-top: 0.5rem;">
+        Only showing users from this asset's team.
         Choose "(Unassign)" to remove the current owner.
       </p>
       <div style="margin-top: 1rem; display: flex; gap: 0.5rem;">
@@ -211,6 +211,7 @@
 const assetId = '{{ asset_id }}';
 let teamsCache = [];
 let activeContractCache = null;
+let assetCache = null;
 
 function closeModal() {
   document.getElementById('modal-overlay').style.display = 'none';
@@ -507,6 +508,7 @@ async function submitInitialContract(event) {
 async function loadAssetDetail() {
   try {
     const asset = await api.getAsset(assetId);
+    assetCache = asset;  // Store for later use (e.g., Change Owner modal)
     const contracts = await api.getAssetContracts(assetId);
     const activeContract = contracts.results?.find(c => c.status === 'active');
 
@@ -915,21 +917,24 @@ async function loadAssetDetail() {
   }
 }
 
-let usersCache = [];
-
-async function loadUsers() {
-  if (usersCache.length === 0) {
-    const data = await api.listUsers({ limit: 100 });
-    usersCache = data.results || [];
-  }
-  return usersCache;
-}
-
 async function showChangeOwnerModal() {
-  await loadUsers();
+  if (!assetCache) {
+    showError('Asset not loaded. Please refresh the page.');
+    return;
+  }
+  // Fetch users filtered by the asset's team
+  const data = await api.listUsers({ team_id: assetCache.owner_team_id, limit: 100 });
+  const teamUsers = data.results || [];
+  const teamName = assetCache.owner_team_name || 'this team';
+
   const select = document.getElementById('owner-user-select');
   select.innerHTML = '<option value="">(Unassign - no owner)</option>' +
-    usersCache.map(u => `<option value="${u.id}">${escapeHtml(u.name)}</option>`).join('');
+    teamUsers.map(u => `<option value="${u.id}">${escapeHtml(u.name)}</option>`).join('');
+
+  // Update help text with team name
+  document.getElementById('owner-help-text').innerHTML =
+    `Only showing users from <strong>${escapeHtml(teamName)}</strong>. Choose "(Unassign)" to remove the current owner.`;
+
   showModal('owner-change-modal');
 }
 
