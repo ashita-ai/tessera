@@ -20,6 +20,25 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["web"])
 
+
+class LoginRequiredError(Exception):
+    """Exception raised when login is required."""
+
+    pass
+
+
+# Exception handler for login required - will be registered with the app
+def register_login_required_handler(app: Any) -> None:
+    """Register exception handler for LoginRequiredError."""
+    from starlette.requests import Request as StarletteRequest
+
+    @app.exception_handler(LoginRequiredError)
+    async def login_required_handler(
+        request: StarletteRequest, exc: LoginRequiredError
+    ) -> RedirectResponse:
+        return RedirectResponse(url="/login", status_code=302)
+
+
 # Template directory
 TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
@@ -52,6 +71,17 @@ async def get_current_user(
     except Exception as e:
         logger.warning("Failed to get current user from session: %s: %s", type(e).__name__, e)
     return None
+
+
+async def require_current_user(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Require a logged-in user, redirect to login if not authenticated."""
+    user = await get_current_user(request, session)
+    if not user:
+        raise LoginRequiredError()
+    return user
 
 
 def make_context(
@@ -123,10 +153,9 @@ async def logout(request: Request) -> RedirectResponse:
 @router.get("/", response_class=HTMLResponse)
 async def dashboard(
     request: Request,
-    session: AsyncSession = Depends(get_session),
+    current_user: dict[str, Any] = Depends(require_current_user),
 ) -> HTMLResponse:
     """Dashboard page."""
-    current_user = await get_current_user(request, session)
     return templates.TemplateResponse(
         "dashboard.html",
         make_context(request, "dashboard", current_user),
@@ -136,10 +165,9 @@ async def dashboard(
 @router.get("/users", response_class=HTMLResponse)
 async def users_list(
     request: Request,
-    session: AsyncSession = Depends(get_session),
+    current_user: dict[str, Any] = Depends(require_current_user),
 ) -> HTMLResponse:
     """Users list page."""
-    current_user = await get_current_user(request, session)
     return templates.TemplateResponse(
         "users.html",
         make_context(request, "users", current_user),
@@ -150,10 +178,9 @@ async def users_list(
 async def user_detail(
     request: Request,
     user_id: str,
-    session: AsyncSession = Depends(get_session),
+    current_user: dict[str, Any] = Depends(require_current_user),
 ) -> HTMLResponse:
     """User detail page."""
-    current_user = await get_current_user(request, session)
     return templates.TemplateResponse(
         "user_detail.html",
         make_context(request, "users", current_user, user_id=user_id),
@@ -163,10 +190,9 @@ async def user_detail(
 @router.get("/teams", response_class=HTMLResponse)
 async def teams_list(
     request: Request,
-    session: AsyncSession = Depends(get_session),
+    current_user: dict[str, Any] = Depends(require_current_user),
 ) -> HTMLResponse:
     """Teams list page."""
-    current_user = await get_current_user(request, session)
     return templates.TemplateResponse(
         "teams.html",
         make_context(request, "teams", current_user),
@@ -177,10 +203,9 @@ async def teams_list(
 async def team_detail(
     request: Request,
     team_id: str,
-    session: AsyncSession = Depends(get_session),
+    current_user: dict[str, Any] = Depends(require_current_user),
 ) -> HTMLResponse:
     """Team detail page."""
-    current_user = await get_current_user(request, session)
     return templates.TemplateResponse(
         "team_detail.html",
         make_context(request, "teams", current_user, team_id=team_id),
@@ -190,10 +215,9 @@ async def team_detail(
 @router.get("/assets", response_class=HTMLResponse)
 async def assets_list(
     request: Request,
-    session: AsyncSession = Depends(get_session),
+    current_user: dict[str, Any] = Depends(require_current_user),
 ) -> HTMLResponse:
     """Assets list page."""
-    current_user = await get_current_user(request, session)
     return templates.TemplateResponse(
         "assets.html",
         make_context(request, "assets", current_user),
@@ -204,10 +228,9 @@ async def assets_list(
 async def asset_detail(
     request: Request,
     asset_id: str,
-    session: AsyncSession = Depends(get_session),
+    current_user: dict[str, Any] = Depends(require_current_user),
 ) -> HTMLResponse:
     """Asset detail page."""
-    current_user = await get_current_user(request, session)
     return templates.TemplateResponse(
         "asset_detail.html",
         make_context(request, "assets", current_user, asset_id=asset_id),
@@ -217,10 +240,9 @@ async def asset_detail(
 @router.get("/contracts", response_class=HTMLResponse)
 async def contracts_list(
     request: Request,
-    session: AsyncSession = Depends(get_session),
+    current_user: dict[str, Any] = Depends(require_current_user),
 ) -> HTMLResponse:
     """Contracts list page."""
-    current_user = await get_current_user(request, session)
     return templates.TemplateResponse(
         "contracts.html",
         make_context(request, "contracts", current_user),
@@ -231,10 +253,9 @@ async def contracts_list(
 async def contract_detail(
     request: Request,
     contract_id: str,
-    session: AsyncSession = Depends(get_session),
+    current_user: dict[str, Any] = Depends(require_current_user),
 ) -> HTMLResponse:
     """Contract detail page."""
-    current_user = await get_current_user(request, session)
     return templates.TemplateResponse(
         "contract_detail.html",
         make_context(request, "contracts", current_user, contract_id=contract_id),
@@ -244,10 +265,9 @@ async def contract_detail(
 @router.get("/proposals", response_class=HTMLResponse)
 async def proposals_list(
     request: Request,
-    session: AsyncSession = Depends(get_session),
+    current_user: dict[str, Any] = Depends(require_current_user),
 ) -> HTMLResponse:
     """Proposals list page."""
-    current_user = await get_current_user(request, session)
     return templates.TemplateResponse(
         "proposals.html",
         make_context(request, "proposals", current_user),
@@ -258,10 +278,9 @@ async def proposals_list(
 async def proposal_detail(
     request: Request,
     proposal_id: str,
-    session: AsyncSession = Depends(get_session),
+    current_user: dict[str, Any] = Depends(require_current_user),
 ) -> HTMLResponse:
     """Proposal detail page."""
-    current_user = await get_current_user(request, session)
     return templates.TemplateResponse(
         "proposal_detail.html",
         make_context(request, "proposals", current_user, proposal_id=proposal_id),
@@ -271,25 +290,21 @@ async def proposal_detail(
 @router.get("/import", response_class=HTMLResponse)
 async def import_page(
     request: Request,
-    session: AsyncSession = Depends(get_session),
+    current_user: dict[str, Any] = Depends(require_current_user),
 ) -> HTMLResponse:
     """Import manifest page."""
-    current_user = await get_current_user(request, session)
     return templates.TemplateResponse(
         "import.html",
         make_context(request, "import", current_user),
     )
 
 
-@router.get("/settings", response_class=HTMLResponse, response_model=None)
+@router.get("/settings", response_class=HTMLResponse)
 async def settings_page(
     request: Request,
-    session: AsyncSession = Depends(get_session),
-) -> Response:
+    current_user: dict[str, Any] = Depends(require_current_user),
+) -> HTMLResponse:
     """User settings page for notification preferences."""
-    current_user = await get_current_user(request, session)
-    if not current_user:
-        return RedirectResponse(url="/login", status_code=302)
     return templates.TemplateResponse(
         "settings.html",
         make_context(
@@ -304,12 +319,9 @@ async def settings_page(
 @router.get("/admin/audit", response_class=HTMLResponse, response_model=None)
 async def audit_log_page(
     request: Request,
-    session: AsyncSession = Depends(get_session),
+    current_user: dict[str, Any] = Depends(require_current_user),
 ) -> Response:
     """Admin audit log page."""
-    current_user = await get_current_user(request, session)
-    if not current_user:
-        return RedirectResponse(url="/login", status_code=302)
     if current_user.get("role") != "admin":
         return RedirectResponse(url="/", status_code=302)
     return templates.TemplateResponse(

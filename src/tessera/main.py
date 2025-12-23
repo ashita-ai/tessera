@@ -44,6 +44,7 @@ from tessera.config import DEFAULT_SESSION_SECRET, settings
 from tessera.db import init_db
 from tessera.db.database import dispose_engine, get_async_session_maker
 from tessera.web import router as web_router
+from tessera.web.routes import register_login_required_handler
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +109,9 @@ app.add_exception_handler(APIError, api_error_handler)  # type: ignore[arg-type]
 app.add_exception_handler(HTTPException, http_exception_handler)  # type: ignore[arg-type]
 app.add_exception_handler(ValidationError, validation_exception_handler)  # type: ignore[arg-type]
 app.add_exception_handler(Exception, generic_exception_handler)
+
+# Register login required handler for web UI routes
+register_login_required_handler(app)
 
 # API v1 router
 api_v1 = APIRouter(prefix="/api/v1")
