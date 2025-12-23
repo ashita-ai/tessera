@@ -17,8 +17,15 @@
 </section>
 
 <section>
-  <h2>Guarantees (SLAs)</h2>
+  <h2>Contract Guarantees</h2>
   <div id="guarantees">
+    <div class="loading">Loading...</div>
+  </div>
+</section>
+
+<section>
+  <h2>Audit History (Data Quality)</h2>
+  <div id="audit-history">
     <div class="loading">Loading...</div>
   </div>
 </section>
@@ -208,6 +215,98 @@ let activeContractCache = null;
 function closeModal() {
   document.getElementById('modal-overlay').style.display = 'none';
   document.querySelectorAll('.modal').forEach(m => m.style.display = 'none');
+}
+
+function toggleSql(id) {
+  const el = document.getElementById(id);
+  if (el) {
+    el.style.display = el.style.display === 'none' ? 'block' : 'none';
+  }
+}
+
+async function loadAuditHistory() {
+  const container = document.getElementById('audit-history');
+  try {
+    const response = await fetch(`/api/v1/assets/${assetId}/audit-history?limit=10`);
+    if (!response.ok) {
+      container.innerHTML = '<div class="empty">No audit history available.</div>';
+      return;
+    }
+    const data = await response.json();
+    const runs = data.runs || [];
+
+    if (runs.length === 0) {
+      container.innerHTML = `
+        <div class="empty">
+          No audit runs recorded yet.
+          <p style="margin-top: 0.5rem; color: var(--gray); font-size: 0.9em;">
+            Configure dbt to report test results using <code>scripts/report_to_tessera.py</code>
+          </p>
+        </div>
+      `;
+      return;
+    }
+
+    // Calculate stats
+    const passCount = runs.filter(r => r.status === 'passed').length;
+    const failCount = runs.filter(r => r.status === 'failed').length;
+    const passRate = runs.length > 0 ? Math.round((passCount / runs.length) * 100) : 0;
+
+    container.innerHTML = `
+      <div class="card" style="margin-bottom: 1rem;">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 1rem; text-align: center;">
+          <div>
+            <div style="font-size: 2rem; font-weight: bold; color: var(--success);">${passCount}</div>
+            <div style="color: var(--gray);">Passed</div>
+          </div>
+          <div>
+            <div style="font-size: 2rem; font-weight: bold; color: var(--error);">${failCount}</div>
+            <div style="color: var(--gray);">Failed</div>
+          </div>
+          <div>
+            <div style="font-size: 2rem; font-weight: bold;">${passRate}%</div>
+            <div style="color: var(--gray);">Pass Rate</div>
+          </div>
+          <div>
+            <div style="font-size: 2rem; font-weight: bold;">${data.total_runs}</div>
+            <div style="color: var(--gray);">Total Runs</div>
+          </div>
+        </div>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Status</th>
+            <th>Checked</th>
+            <th>Passed</th>
+            <th>Failed</th>
+            <th>Source</th>
+            <th>Run ID</th>
+            <th>When</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${runs.map(r => `
+            <tr>
+              <td>
+                <span class="status ${r.status === 'passed' ? 'status-active' : 'status-deprecated'}" style="font-weight: bold;">
+                  ${r.status === 'passed' ? '✓' : '✗'} ${r.status}
+                </span>
+              </td>
+              <td>${r.guarantees_checked}</td>
+              <td style="color: var(--success);">${r.guarantees_passed}</td>
+              <td style="color: ${r.guarantees_failed > 0 ? 'var(--error)' : 'inherit'};">${r.guarantees_failed}</td>
+              <td><code>${escapeHtml(r.triggered_by)}</code></td>
+              <td><code style="font-size: 0.8em;">${r.run_id ? escapeHtml(r.run_id.substring(0, 12)) : '-'}</code></td>
+              <td>${formatDate(r.run_at)}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+  } catch (e) {
+    container.innerHTML = '<div class="empty">Failed to load audit history.</div>';
+  }
 }
 
 function showModal(id) {
@@ -520,63 +619,106 @@ async function loadAssetDetail() {
       schemaContainer.innerHTML = '<div class="empty">No active contract. <button class="secondary" onclick="publishInitialContract()">Publish First Contract</button></div>';
     }
 
-    // Guarantees
+    // Guarantees - split into dbt-extracted (read-only) and SLAs (editable)
     const guaranteesContainer = document.getElementById('guarantees');
     if (activeContract && activeContract.guarantees) {
       const g = activeContract.guarantees;
-      let html = '<div style="margin-bottom: 0.5rem;"><button class="secondary" onclick="editGuarantees()">Edit Guarantees</button></div>';
-      html += '<div class="card"><div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">';
+      let html = '';
 
-      if (g.freshness) {
-        html += `
-          <div>
-            <strong>Freshness SLA</strong><br>
-            Max staleness: ${g.freshness.max_staleness_minutes || '?'} minutes<br>
-            ${g.freshness.sla ? `SLA: ${g.freshness.sla}` : ''}
+      // SLAs section (editable)
+      const hasSLAs = g.freshness || g.volume;
+      html += `
+        <div class="card" style="margin-bottom: 1rem;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+            <strong>SLA Configuration</strong>
+            <button class="secondary" onclick="editGuarantees()" style="padding: 0.25rem 0.5rem; font-size: 0.85em;">Edit SLAs</button>
           </div>
-        `;
-      }
-      if (g.volume) {
-        html += `
-          <div>
-            <strong>Volume Requirements</strong><br>
-            Min rows: ${g.volume.min_rows || '?'}<br>
-            Max delta: ${g.volume.max_row_delta_pct || '?'}%
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
+            ${g.freshness ? `
+              <div>
+                <strong>Freshness</strong><br>
+                Max staleness: ${g.freshness.max_staleness_minutes || '?'} minutes
+              </div>
+            ` : '<div><span style="color: var(--gray);">No freshness SLA</span></div>'}
+            ${g.volume ? `
+              <div>
+                <strong>Volume</strong><br>
+                Min rows: ${g.volume.min_rows || '?'}<br>
+                Max delta: ${g.volume.max_row_delta_pct || '?'}%
+              </div>
+            ` : '<div><span style="color: var(--gray);">No volume requirements</span></div>'}
           </div>
-        `;
-      }
-      if (g.nullability) {
+        </div>
+      `;
+
+      // dbt-extracted guarantees (read-only)
+      const hasDbtGuarantees = g.nullability || g.accepted_values || (g.custom && g.custom.length > 0);
+      if (hasDbtGuarantees) {
         html += `
-          <div>
-            <strong>Nullability</strong><br>
-            ${Object.entries(g.nullability).map(([col, val]) => `${col}: ${val}`).join('<br>')}
-          </div>
+          <div class="card">
+            <div style="margin-bottom: 0.75rem;">
+              <strong>From dbt Tests</strong>
+              <span style="color: var(--gray); font-size: 0.85em; margin-left: 0.5rem;">(read-only - managed in dbt)</span>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem;">
         `;
-      }
-      if (g.accepted_values) {
-        html += `
-          <div>
-            <strong>Accepted Values</strong><br>
-            ${Object.entries(g.accepted_values).map(([col, vals]) => `${col}: ${vals.join(', ')}`).join('<br>')}
-          </div>
-        `;
-      }
-      if (g.custom && g.custom.length > 0) {
-        html += `
-          <div>
-            <strong>Custom Tests</strong><br>
-            ${g.custom.map(t => `${t.type}${t.column ? ` (${t.column})` : ''}`).join('<br>')}
-          </div>
-        `;
+
+        if (g.nullability) {
+          html += `
+            <div>
+              <strong style="color: var(--primary);">not_null</strong><br>
+              ${Object.entries(g.nullability).map(([col, val]) => `<code>${escapeHtml(col)}</code>: ${val}`).join('<br>')}
+            </div>
+          `;
+        }
+        if (g.accepted_values) {
+          html += `
+            <div>
+              <strong style="color: var(--primary);">accepted_values</strong><br>
+              ${Object.entries(g.accepted_values).map(([col, vals]) => `<code>${escapeHtml(col)}</code>: [${vals.map(v => escapeHtml(v)).join(', ')}]`).join('<br>')}
+            </div>
+          `;
+        }
+        if (g.custom && g.custom.length > 0) {
+          html += `<div style="grid-column: 1 / -1;"><strong style="color: var(--primary);">Custom Tests</strong>`;
+          for (const t of g.custom) {
+            if (t.type === 'singular' && t.sql) {
+              // Singular test with expandable SQL
+              const testId = 'sql-' + (t.name || 'test').replace(/[^a-z0-9]/gi, '_');
+              html += `
+                <div style="margin-top: 0.5rem; padding: 0.5rem; background: var(--bg-secondary); border-radius: 4px;">
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span><strong>${escapeHtml(t.name || 'Singular Test')}</strong></span>
+                    <button class="secondary" onclick="toggleSql('${testId}')" style="padding: 0.2rem 0.5rem; font-size: 0.8em;">Show SQL</button>
+                  </div>
+                  ${t.description ? `<div style="color: var(--gray); font-size: 0.9em;">${escapeHtml(t.description)}</div>` : ''}
+                  <pre id="${testId}" style="display: none; margin-top: 0.5rem; padding: 0.5rem; background: #1e1e1e; color: #d4d4d4; border-radius: 4px; overflow-x: auto; font-size: 0.85em;"><code>${escapeHtml(t.sql)}</code></pre>
+                </div>
+              `;
+            } else {
+              // Regular custom test
+              html += `
+                <div style="margin-top: 0.5rem;">
+                  <code>${escapeHtml(t.type)}</code>${t.column ? ` on <code>${escapeHtml(t.column)}</code>` : ''}
+                  ${t.config && t.config.expression ? `<br><span style="color: var(--gray); font-size: 0.9em;">Expression: ${escapeHtml(t.config.expression)}</span>` : ''}
+                </div>
+              `;
+            }
+          }
+          html += `</div>`;
+        }
+        html += '</div></div>';
       }
 
-      html += '</div></div>';
       guaranteesContainer.innerHTML = html;
     } else if (activeContract) {
-      guaranteesContainer.innerHTML = '<div class="empty">No guarantees defined for this contract. <button class="secondary" onclick="editGuarantees()">Add Guarantees</button></div>';
+      guaranteesContainer.innerHTML = '<div class="empty">No guarantees defined for this contract. <button class="secondary" onclick="editGuarantees()">Add SLAs</button></div>';
     } else {
       guaranteesContainer.innerHTML = '<div class="empty">No active contract. Publish a contract first to add guarantees.</div>';
     }
+
+    // Audit History
+    await loadAuditHistory();
 
     // Active Proposals
     const proposalsContainer = document.getElementById('active-proposals');

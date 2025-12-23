@@ -47,3 +47,4 @@ htmlcov/
 
 # ruff
 .ruff_cache/
+cookies.txt

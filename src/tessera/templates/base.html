@@ -9,7 +9,19 @@
 <body>
   <div class="container">
     <header>
-      <h1><a href="/"><img src="/static/images/logo.png" alt="Tessera" class="logo"></a></h1>
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <h1><a href="/"><img src="/static/images/logo.png" alt="Tessera" class="logo"></a></h1>
+        <div class="user-menu" style="font-size: 0.875rem;">
+          {% if current_user %}
+          <span style="color: var(--gray);">{{ current_user.name }}</span>
+          <span class="status status-active" style="margin-left: 0.5rem;">{{ current_user.role }}</span>
+          <a href="/settings" style="margin-left: 1rem;">Settings</a>
+          <a href="/logout" style="margin-left: 0.5rem;">Logout</a>
+          {% else %}
+          <a href="/login">Login</a>
+          {% endif %}
+        </div>
+      </div>
       <nav>
         <a href="/" {% if active_page == 'dashboard' %}class="active"{% endif %}>Dashboard</a>
         <a href="/users" {% if active_page == 'users' %}class="active"{% endif %}>Users</a>

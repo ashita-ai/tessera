@@ -70,6 +70,14 @@ services:
       timeout: 5s
       retries: 3
 
+  seeder:
+    build: .
+    depends_on:
+      api:
+        condition: service_healthy
+    command: ["python", "/app/scripts/seed_demo.py"]
+    restart: "no"
+
 volumes:
   postgres_data:
   redis_data:

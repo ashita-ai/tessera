@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+
+{% block title %}Settings - Tessera{% endblock %}
+
+{% block content %}
+<section>
+  <h2>Settings</h2>
+
+  <div class="card">
+    <h3>Account Information</h3>
+    <p><strong>Name:</strong> {{ current_user.name }}</p>
+    <p><strong>Email:</strong> {{ current_user.email }}</p>
+    <p><strong>Role:</strong> <span class="status status-active">{{ current_user.role }}</span></p>
+  </div>
+
+  <div class="card" style="margin-top: 2rem;">
+    <h3>Notification Preferences</h3>
+    <form id="notification-form">
+      <div class="checkbox-group">
+        <label class="checkbox-option">
+          <input type="checkbox" id="notify-breaking-changes" checked>
+          Breaking change proposals
+        </label>
+        <label class="checkbox-option">
+          <input type="checkbox" id="notify-new-contracts" checked>
+          New contract versions
+        </label>
+        <label class="checkbox-option">
+          <input type="checkbox" id="notify-acknowledgments">
+          Acknowledgment requests
+        </label>
+        <label class="checkbox-option">
+          <input type="checkbox" id="notify-asset-changes">
+          Changes to owned assets
+        </label>
+      </div>
+
+      <label for="notification-method" style="margin-top: 1rem;">Notification Method</label>
+      <select id="notification-method">
+        <option value="email">Email</option>
+        {% if slack_configured %}
+        <option value="slack">Slack</option>
+        <option value="both">Both</option>
+        {% endif %}
+        <option value="none">None (UI only)</option>
+      </select>
+
+      {% if not slack_configured %}
+      <div style="margin-top: 0.75rem; padding: 0.75rem; background: var(--light-gray); border-left: var(--border-thick); font-size: 0.9rem;">
+        <strong>Slack not configured.</strong>
+        {% if current_user.role == 'admin' %}
+        Set <code>SLACK_WEBHOOK_URL</code> in your <code>.env</code> file to enable Slack notifications.
+        {% else %}
+        Contact your administrator to enable Slack notifications.
+        {% endif %}
+      </div>
+      {% else %}
+      <div style="margin-top: 0.75rem; padding: 0.75rem; background: #d4edda; border-left: 3px solid #28a745; font-size: 0.9rem;">
+        <strong>Slack is configured.</strong> Select "Slack" or "Both" above to receive Slack notifications.
+      </div>
+      {% endif %}
+
+      <button type="button" onclick="saveNotificationPreferences()" style="margin-top: 1rem;">Save Preferences</button>
+    </form>
+  </div>
+
+  {% if current_user.role == 'admin' or current_user.role == 'team_admin' %}
+  <div class="card" style="margin-top: 2rem;">
+    <h3>Admin Actions</h3>
+    <p style="color: var(--gray); margin-bottom: 1rem;">
+      {% if current_user.role == 'admin' %}
+      As a Tessera admin, you have full access to all teams, users, and settings.
+      {% else %}
+      As a team admin, you can manage users and assets within your team.
+      {% endif %}
+    </p>
+    <a href="/users">Manage Users</a> |
+    <a href="/teams">Manage Teams</a>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function saveNotificationPreferences() {
+  const preferences = {
+    breaking_changes: document.getElementById('notify-breaking-changes').checked,
+    new_contracts: document.getElementById('notify-new-contracts').checked,
+    acknowledgments: document.getElementById('notify-acknowledgments').checked,
+    asset_changes: document.getElementById('notify-asset-changes').checked,
+    method: document.getElementById('notification-method').value,
+  };
+
+  try {
+    await api.updateUser('{{ current_user.id }}', {
+      notification_preferences: preferences
+    });
+    showSuccess('Notification preferences saved');
+  } catch (error) {
+    showError(error.message);
+  }
+}
+
+// Load current preferences on page load
+async function loadPreferences() {
+  try {
+    const user = await api.getUser('{{ current_user.id }}');
+    const prefs = user.notification_preferences || {};
+
+    if (prefs.breaking_changes !== undefined) {
+      document.getElementById('notify-breaking-changes').checked = prefs.breaking_changes;
+    }
+    if (prefs.new_contracts !== undefined) {
+      document.getElementById('notify-new-contracts').checked = prefs.new_contracts;
+    }
+    if (prefs.acknowledgments !== undefined) {
+      document.getElementById('notify-acknowledgments').checked = prefs.acknowledgments;
+    }
+    if (prefs.asset_changes !== undefined) {
+      document.getElementById('notify-asset-changes').checked = prefs.asset_changes;
+    }
+    if (prefs.method) {
+      document.getElementById('notification-method').value = prefs.method;
+    }
+  } catch (error) {
+    console.error('Failed to load preferences:', error);
+  }
+}
+
+loadPreferences();
+</script>
+{% endblock %}

@@ -85,7 +85,7 @@
     </div>
     <div style="display: flex; align-items: center; gap: 0.5rem;">
       <label for="filter-team" style="margin: 0; white-space: nowrap;">Team:</label>
-      <select id="filter-team" style="width: 150px;">
+      <select id="filter-team" style="width: 150px;" onchange="onTeamFilterChange()">
         <option value="">All teams</option>
       </select>
     </div>
@@ -134,6 +134,7 @@ const limit = 20;
 let currentSortBy = 'fqn';
 let currentSortOrder = 'asc';
 let selectedAssets = new Set();
+let allUsers = [];  // Store all users with team_id for intelligent filtering
 
 const schemaTemplates = {
   'basic-table': [
@@ -608,18 +609,49 @@ async function loadFilterOptions() {
     bulkTeamSelect.innerHTML = '<option value="">Select team...</option>' +
       teamsData.results.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
 
-    // Load users
+    // Load users and store for intelligent filtering
     const usersData = await api.listUsers({ limit: 100 });
+    allUsers = usersData.results;  // Store for team filtering
+
     const ownerSelect = document.getElementById('filter-owner');
     ownerSelect.innerHTML = '<option value="">All owners</option><option value="unassigned">Unassigned</option>' +
-      usersData.results.map(u => `<option value="${u.id}">${escapeHtml(u.name)}</option>`).join('');
+      allUsers.map(u => `<option value="${u.id}">${escapeHtml(u.name)}</option>`).join('');
 
     // Also populate bulk user assign select
     const bulkSelect = document.getElementById('bulk-owner-select');
     bulkSelect.innerHTML = '<option value="">Select user...</option>' +
-      usersData.results.map(u => `<option value="${u.id}">${escapeHtml(u.name)}</option>`).join('');
+      allUsers.map(u => `<option value="${u.id}">${escapeHtml(u.name)}</option>`).join('');
   } catch (error) {
     console.error('Failed to load filter options:', error);
+  }
+}
+
+// Handle team filter change - filter owner dropdown to show only users from selected team
+function onTeamFilterChange() {
+  const selectedTeamId = document.getElementById('filter-team').value;
+  const ownerSelect = document.getElementById('filter-owner');
+  const bulkOwnerSelect = document.getElementById('bulk-owner-select');
+  const currentOwnerValue = ownerSelect.value;
+
+  if (!selectedTeamId) {
+    // No team filter - show all users
+    ownerSelect.innerHTML = '<option value="">All owners</option><option value="unassigned">Unassigned</option>' +
+      allUsers.map(u => `<option value="${u.id}">${escapeHtml(u.name)}</option>`).join('');
+    bulkOwnerSelect.innerHTML = '<option value="">Select user...</option>' +
+      allUsers.map(u => `<option value="${u.id}">${escapeHtml(u.name)}</option>`).join('');
+  } else {
+    // Filter to users from the selected team
+    const teamUsers = allUsers.filter(u => u.team_id === selectedTeamId);
+    ownerSelect.innerHTML = '<option value="">All owners</option><option value="unassigned">Unassigned</option>' +
+      teamUsers.map(u => `<option value="${u.id}">${escapeHtml(u.name)}</option>`).join('');
+    bulkOwnerSelect.innerHTML = '<option value="">Select user...</option>' +
+      teamUsers.map(u => `<option value="${u.id}">${escapeHtml(u.name)}</option>`).join('');
+  }
+
+  // Reset owner selection if the previously selected owner isn't in the new list
+  const ownerOptions = Array.from(ownerSelect.options).map(o => o.value);
+  if (currentOwnerValue && !ownerOptions.includes(currentOwnerValue)) {
+    ownerSelect.value = '';
   }
 }
 

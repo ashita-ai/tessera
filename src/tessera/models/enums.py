@@ -75,3 +75,35 @@ class WebhookDeliveryStatus(StrEnum):
     PENDING = "pending"  # Queued for delivery
     DELIVERED = "delivered"  # Successfully delivered (2xx response)
     FAILED = "failed"  # Failed after all retries
+
+
+class GuaranteeMode(StrEnum):
+    """How to treat guarantee changes on an asset."""
+
+    NOTIFY = "notify"  # Log changes, notify subscribers (default)
+    STRICT = "strict"  # Treat guarantee removal like schema breaking
+    IGNORE = "ignore"  # Don't track guarantee changes
+
+
+class GuaranteeChangeSeverity(StrEnum):
+    """Severity of a guarantee change."""
+
+    INFO = "info"  # Adding guarantees - never blocking
+    WARNING = "warning"  # Relaxing/removing - notify
+    BREAKING = "breaking"  # In strict mode, blocks like schema changes
+
+
+class UserRole(StrEnum):
+    """User role for access control."""
+
+    ADMIN = "admin"  # Tessera admin - full access to everything
+    TEAM_ADMIN = "team_admin"  # Team admin - can manage their team
+    USER = "user"  # Regular user - can view and set notifications
+
+
+class AuditRunStatus(StrEnum):
+    """Status of a data quality audit run."""
+
+    PASSED = "passed"  # All guarantees passed
+    FAILED = "failed"  # One or more guarantees failed
+    PARTIAL = "partial"  # Some guarantees skipped or errored

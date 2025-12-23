@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
+from argon2 import PasswordHasher
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -14,6 +15,8 @@ from tessera.api.pagination import PaginationParams, pagination_params
 from tessera.api.rate_limit import limit_read, limit_write
 from tessera.db import AssetDB, TeamDB, UserDB, get_session
 from tessera.models import User, UserCreate, UserUpdate, UserWithTeam
+
+_hasher = PasswordHasher()
 
 router = APIRouter()
 
@@ -39,10 +42,17 @@ async def create_user(
         if not team_result.scalar_one_or_none():
             raise HTTPException(status_code=404, detail="Team not found")
 
+    # Hash password if provided
+    password_hash = None
+    if user.password:
+        password_hash = _hasher.hash(user.password)
+
     db_user = UserDB(
         email=user.email,
         name=user.name,
         team_id=user.team_id,
+        password_hash=password_hash,
+        role=user.role,
         metadata_=user.metadata,
     )
     session.add(db_user)
@@ -198,6 +208,12 @@ async def update_user(
         user.name = update.name
     if update.team_id is not None:
         user.team_id = update.team_id
+    if update.password is not None:
+        user.password_hash = _hasher.hash(update.password)
+    if update.role is not None:
+        user.role = update.role
+    if update.notification_preferences is not None:
+        user.notification_preferences = update.notification_preferences
     if update.metadata is not None:
         user.metadata_ = update.metadata
 

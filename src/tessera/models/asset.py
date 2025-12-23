@@ -8,6 +8,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from tessera.config import settings
+from tessera.models.enums import GuaranteeMode
 
 # FQN pattern: alphanumeric/underscores separated by dots, at least 2 segments
 # Examples: db.schema.table, schema.table, my_db.my_schema.my_table
@@ -49,6 +50,7 @@ class AssetCreate(AssetBase):
 
     owner_team_id: UUID
     owner_user_id: UUID | None = None
+    guarantee_mode: GuaranteeMode = GuaranteeMode.NOTIFY
 
 
 class AssetUpdate(BaseModel):
@@ -58,6 +60,7 @@ class AssetUpdate(BaseModel):
     owner_team_id: UUID | None = None
     owner_user_id: UUID | None = None
     environment: str | None = Field(None, min_length=1, max_length=50)
+    guarantee_mode: GuaranteeMode | None = None
     metadata: dict[str, Any] | None = None
 
 
@@ -71,6 +74,7 @@ class Asset(BaseModel):
     owner_team_id: UUID
     owner_user_id: UUID | None = None
     environment: str
+    guarantee_mode: GuaranteeMode = GuaranteeMode.NOTIFY
     metadata: dict[str, Any] = Field(default_factory=dict, validation_alias="metadata_")
     created_at: datetime
 

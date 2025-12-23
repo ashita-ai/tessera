@@ -86,8 +86,8 @@ async function loadProposals() {
               </td>
               <td>${formatDate(p.proposed_at || p.created_at)}</td>
               <td>
-                <a href="/proposals/${p.id}">View</a>
-                ${p.status === 'pending' ? `<button class="secondary" style="margin-left: 0.5rem;" onclick="withdrawProposal('${p.id}')">Withdraw</button>` : ''}
+                <a href="/proposals/${p.id}" class="btn-secondary" style="padding: 0.25rem 0.5rem;">View</a>
+                ${p.status === 'pending' ? `<button class="secondary" style="margin-left: 0.5rem; padding: 0.25rem 0.5rem;" onclick="withdrawProposal('${p.id}')">Withdraw</button>` : ''}
               </td>
             </tr>
           `).join('')}

@@ -19,12 +19,15 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from tessera.models.enums import (
     AcknowledgmentResponseType,
+    AuditRunStatus,
     ChangeType,
     CompatibilityMode,
     ContractStatus,
     DependencyType,
+    GuaranteeMode,
     ProposalStatus,
     RegistrationStatus,
+    UserRole,
     WebhookDeliveryStatus,
 )
 
@@ -48,10 +51,15 @@ class UserDB(Base):
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
     email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    role: Mapped[UserRole] = mapped_column(Enum(UserRole), default=UserRole.USER, nullable=False)
     team_id: Mapped[UUID | None] = mapped_column(
         Uuid, ForeignKey("teams.id"), nullable=True, index=True
     )
     metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
+    notification_preferences: Mapped[dict[str, Any]] = mapped_column(
+        JSON, default=dict, nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     deactivated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True
@@ -93,6 +101,9 @@ class AssetDB(Base):
     )
     environment: Mapped[str] = mapped_column(
         String(50), nullable=False, default="production", index=True
+    )
+    guarantee_mode: Mapped[GuaranteeMode] = mapped_column(
+        Enum(GuaranteeMode), default=GuaranteeMode.NOTIFY
     )
     metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
@@ -176,8 +187,10 @@ class ProposalDB(Base):
         Uuid, ForeignKey("assets.id"), nullable=False, index=True
     )
     proposed_schema: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    proposed_guarantees: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     change_type: Mapped[ChangeType] = mapped_column(Enum(ChangeType), nullable=False)
     breaking_changes: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    guarantee_changes: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
     status: Mapped[ProposalStatus] = mapped_column(
         Enum(ProposalStatus), default=ProposalStatus.PENDING, index=True
     )
@@ -301,3 +314,39 @@ class WebhookDeliveryDB(Base):
         DateTime(timezone=True), default=_utcnow, index=True
     )
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class AuditRunDB(Base):
+    """Audit run tracking for WAP (Write-Audit-Publish) integration.
+
+    Records the results of data quality checks (dbt tests, Great Expectations, etc.)
+    against contract guarantees. Enables runtime enforcement tracking.
+    """
+
+    __tablename__ = "audit_runs"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    asset_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("assets.id"), nullable=False, index=True
+    )
+    contract_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("contracts.id"), nullable=True, index=True
+    )
+    status: Mapped[AuditRunStatus] = mapped_column(Enum(AuditRunStatus), nullable=False, index=True)
+    guarantees_checked: Mapped[int] = mapped_column(Integer, default=0)
+    guarantees_passed: Mapped[int] = mapped_column(Integer, default=0)
+    guarantees_failed: Mapped[int] = mapped_column(Integer, default=0)
+    triggered_by: Mapped[str] = mapped_column(
+        String(50), nullable=False, index=True
+    )  # "dbt_test", "great_expectations", "soda", "manual"
+    run_id: Mapped[str | None] = mapped_column(
+        String(255), nullable=True, index=True
+    )  # External run ID for correlation (e.g., dbt invocation_id)
+    details: Mapped[dict[str, Any]] = mapped_column(
+        JSON, default=dict
+    )  # Failed test details, error messages
+    run_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True)
+
+    # Relationships
+    asset: Mapped["AssetDB"] = relationship()
+    contract: Mapped["ContractDB | None"] = relationship()

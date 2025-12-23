@@ -98,6 +98,54 @@ All endpoints under `/api/v1`. Interactive docs at `/docs`.
 
 Full reference: [docs/api.md](docs/api.md)
 
+## dbt Integration
+
+Tessera extracts contract guarantees directly from dbt tests:
+
+| dbt Test | Tessera Guarantee |
+|----------|-------------------|
+| `not_null` | `nullability: {column: "never"}` |
+| `accepted_values` | `accepted_values: {column: [...]}` |
+| `unique` | `custom: {type: "unique", ...}` |
+| `relationships` | `custom: {type: "relationships", ...}` |
+| `dbt_expectations.*` | `custom: {type: "test_name", ...}` |
+| Singular tests (SQL) | `custom: {type: "singular", sql: "..."}` |
+
+**Singular tests** are SQL files in your `tests/` directory that express business logic assertions. Tessera captures these as contract guarantees — removing them is a breaking change.
+
+```sql
+-- tests/assert_revenue_positive.sql
+SELECT revenue_id, amount
+FROM {{ ref('fct_revenue') }}
+WHERE status = 'completed' AND amount <= 0
+```
+
+### WAP (Write-Audit-Publish) Integration
+
+Tessera tracks data quality audit results for visibility into runtime enforcement:
+
+```yaml
+# dbt_project.yml
+on-run-end:
+  - "python scripts/report_to_tessera.py"
+```
+
+The script parses `target/run_results.json` and reports to Tessera:
+
+```bash
+# Environment setup
+export TESSERA_URL=http://localhost:8000
+export TESSERA_API_KEY=your-api-key
+
+# After dbt test
+python scripts/report_to_tessera.py
+```
+
+Query audit history via API:
+```bash
+curl $TESSERA_URL/api/v1/assets/{asset_id}/audit-history
+```
+
 ## Deployment
 
 Docker Compose, Kubernetes, and Helm deployment options: [docs/deployment.md](docs/deployment.md)

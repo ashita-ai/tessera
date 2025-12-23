@@ -126,9 +126,14 @@ def extract_guarantees_from_tests(
     Parses dbt test nodes and converts them to Tessera guarantees format:
     - not_null tests -> nullability: {column: "never"}
     - accepted_values tests -> accepted_values: {column: [values]}
-    - unique tests -> (stored in metadata, not a direct guarantee)
-    - relationships tests -> (stored in metadata for dependency tracking)
-    - dbt_expectations/dbt_utils tests -> custom: {test_name: config}
+    - unique tests -> custom: {type: "unique", column, config}
+    - relationships tests -> custom: {type: "relationships", column, config}
+    - dbt_expectations/dbt_utils tests -> custom: {type: test_name, column, config}
+    - singular tests (SQL files) -> custom: {type: "singular", name, description, sql}
+
+    Singular tests are SQL files in the tests/ directory that express custom
+    business logic assertions (e.g., "market_value must equal shares * price").
+    These become contract guarantees - removing them is a breaking change.
 
     Args:
         node_id: The dbt node ID (e.g., "model.project.users")
@@ -194,6 +199,20 @@ def extract_guarantees_from_tests(
                     "type": f"{test_metadata['namespace']}.{test_name}",
                     "column": column_name,
                     "config": kwargs,
+                }
+            )
+        elif not test_metadata:
+            # Singular test (SQL file in tests/ directory) - no test_metadata
+            # These express custom business logic assertions
+            # e.g., "assert_market_value_consistency" checks market_value = shares * price
+            test_name_from_id = test_id.split(".")[-1] if "." in test_id else test_id
+            custom_tests.append(
+                {
+                    "type": "singular",
+                    "name": test_name_from_id,
+                    "description": test_node.get("description", ""),
+                    # Store compiled SQL so consumers can see the assertion logic
+                    "sql": test_node.get("compiled_code") or test_node.get("raw_code"),
                 }
             )
 

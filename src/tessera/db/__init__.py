@@ -6,6 +6,7 @@ from tessera.db.models import (
     AssetDB,
     AssetDependencyDB,
     AuditEventDB,
+    AuditRunDB,
     Base,
     ContractDB,
     ProposalDB,
@@ -27,4 +28,5 @@ __all__ = [
     "ProposalDB",
     "AcknowledgmentDB",
     "AuditEventDB",
+    "AuditRunDB",
 ]

@@ -8,7 +8,12 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
-from tessera.models.enums import ChangeType, CompatibilityMode
+from tessera.models.enums import (
+    ChangeType,
+    CompatibilityMode,
+    GuaranteeChangeSeverity,
+    GuaranteeMode,
+)
 
 
 class ChangeKind(StrEnum):
@@ -524,3 +529,533 @@ def check_compatibility(
     result = diff_schemas(old_schema, new_schema)
     breaking = result.breaking_for_mode(mode)
     return len(breaking) == 0, breaking
+
+
+# =============================================================================
+# Guarantee Diffing
+# =============================================================================
+
+
+class GuaranteeChangeKind(StrEnum):
+    """Types of guarantee changes."""
+
+    # Nullability guarantees
+    NOT_NULL_ADDED = "not_null_added"
+    NOT_NULL_REMOVED = "not_null_removed"
+
+    # Uniqueness guarantees
+    UNIQUE_ADDED = "unique_added"
+    UNIQUE_REMOVED = "unique_removed"
+
+    # Accepted values guarantees
+    ACCEPTED_VALUES_ADDED = "accepted_values_added"
+    ACCEPTED_VALUES_REMOVED = "accepted_values_removed"
+    ACCEPTED_VALUES_EXPANDED = "accepted_values_expanded"  # More values allowed
+    ACCEPTED_VALUES_CONTRACTED = "accepted_values_contracted"  # Fewer values
+
+    # Relationship guarantees
+    RELATIONSHIP_ADDED = "relationship_added"
+    RELATIONSHIP_REMOVED = "relationship_removed"
+
+    # Expression guarantees (dbt_utils.expression_is_true)
+    EXPRESSION_ADDED = "expression_added"
+    EXPRESSION_REMOVED = "expression_removed"
+    EXPRESSION_CHANGED = "expression_changed"
+
+    # Freshness guarantees
+    FRESHNESS_ADDED = "freshness_added"
+    FRESHNESS_REMOVED = "freshness_removed"
+    FRESHNESS_RELAXED = "freshness_relaxed"  # Longer allowed delay
+    FRESHNESS_TIGHTENED = "freshness_tightened"  # Shorter allowed delay
+
+    # Volume guarantees
+    VOLUME_ADDED = "volume_added"
+    VOLUME_REMOVED = "volume_removed"
+    VOLUME_RELAXED = "volume_relaxed"
+    VOLUME_TIGHTENED = "volume_tightened"
+
+    # Custom/other guarantees
+    CUSTOM_GUARANTEE_ADDED = "custom_guarantee_added"
+    CUSTOM_GUARANTEE_REMOVED = "custom_guarantee_removed"
+    CUSTOM_GUARANTEE_CHANGED = "custom_guarantee_changed"
+
+
+# Map guarantee change kinds to their default severity
+GUARANTEE_SEVERITY: dict[GuaranteeChangeKind, GuaranteeChangeSeverity] = {
+    # Adding guarantees = INFO (stricter is safe)
+    GuaranteeChangeKind.NOT_NULL_ADDED: GuaranteeChangeSeverity.INFO,
+    GuaranteeChangeKind.UNIQUE_ADDED: GuaranteeChangeSeverity.INFO,
+    GuaranteeChangeKind.ACCEPTED_VALUES_ADDED: GuaranteeChangeSeverity.INFO,
+    GuaranteeChangeKind.ACCEPTED_VALUES_CONTRACTED: GuaranteeChangeSeverity.INFO,
+    GuaranteeChangeKind.RELATIONSHIP_ADDED: GuaranteeChangeSeverity.INFO,
+    GuaranteeChangeKind.EXPRESSION_ADDED: GuaranteeChangeSeverity.INFO,
+    GuaranteeChangeKind.FRESHNESS_ADDED: GuaranteeChangeSeverity.INFO,
+    GuaranteeChangeKind.FRESHNESS_TIGHTENED: GuaranteeChangeSeverity.INFO,
+    GuaranteeChangeKind.VOLUME_ADDED: GuaranteeChangeSeverity.INFO,
+    GuaranteeChangeKind.VOLUME_TIGHTENED: GuaranteeChangeSeverity.INFO,
+    GuaranteeChangeKind.CUSTOM_GUARANTEE_ADDED: GuaranteeChangeSeverity.INFO,
+    # Removing/relaxing guarantees = WARNING
+    GuaranteeChangeKind.NOT_NULL_REMOVED: GuaranteeChangeSeverity.WARNING,
+    GuaranteeChangeKind.UNIQUE_REMOVED: GuaranteeChangeSeverity.WARNING,
+    GuaranteeChangeKind.ACCEPTED_VALUES_REMOVED: GuaranteeChangeSeverity.WARNING,
+    GuaranteeChangeKind.ACCEPTED_VALUES_EXPANDED: GuaranteeChangeSeverity.WARNING,
+    GuaranteeChangeKind.RELATIONSHIP_REMOVED: GuaranteeChangeSeverity.WARNING,
+    GuaranteeChangeKind.EXPRESSION_REMOVED: GuaranteeChangeSeverity.WARNING,
+    GuaranteeChangeKind.EXPRESSION_CHANGED: GuaranteeChangeSeverity.WARNING,
+    GuaranteeChangeKind.FRESHNESS_REMOVED: GuaranteeChangeSeverity.WARNING,
+    GuaranteeChangeKind.FRESHNESS_RELAXED: GuaranteeChangeSeverity.WARNING,
+    GuaranteeChangeKind.VOLUME_REMOVED: GuaranteeChangeSeverity.WARNING,
+    GuaranteeChangeKind.VOLUME_RELAXED: GuaranteeChangeSeverity.WARNING,
+    GuaranteeChangeKind.CUSTOM_GUARANTEE_REMOVED: GuaranteeChangeSeverity.WARNING,
+    GuaranteeChangeKind.CUSTOM_GUARANTEE_CHANGED: GuaranteeChangeSeverity.WARNING,
+}
+
+
+@dataclass
+class GuaranteeChange:
+    """A single guarantee change detected in a diff."""
+
+    kind: GuaranteeChangeKind
+    path: str  # e.g., "nullability.user_id" or "accepted_values.status"
+    message: str
+    severity: GuaranteeChangeSeverity
+    old_value: Any = None
+    new_value: Any = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            "type": str(self.kind),
+            "path": self.path,
+            "message": self.message,
+            "severity": str(self.severity),
+            "old_value": self.old_value,
+            "new_value": self.new_value,
+        }
+
+
+@dataclass
+class GuaranteeDiffResult:
+    """Result of comparing two guarantee sets."""
+
+    changes: list[GuaranteeChange] = field(default_factory=list)
+
+    @property
+    def has_changes(self) -> bool:
+        return len(self.changes) > 0
+
+    def by_severity(self, severity: GuaranteeChangeSeverity) -> list[GuaranteeChange]:
+        """Return changes matching the given severity."""
+        return [c for c in self.changes if c.severity == severity]
+
+    @property
+    def info_changes(self) -> list[GuaranteeChange]:
+        """Return INFO severity changes (additions)."""
+        return self.by_severity(GuaranteeChangeSeverity.INFO)
+
+    @property
+    def warning_changes(self) -> list[GuaranteeChange]:
+        """Return WARNING severity changes (removals/relaxations)."""
+        return self.by_severity(GuaranteeChangeSeverity.WARNING)
+
+    def is_breaking(self, mode: GuaranteeMode) -> bool:
+        """Check if changes are breaking under the given mode."""
+        if mode == GuaranteeMode.IGNORE:
+            return False
+        if mode == GuaranteeMode.NOTIFY:
+            return False  # Notify only, never blocking
+        if mode == GuaranteeMode.STRICT:
+            # In strict mode, any WARNING is breaking
+            return len(self.warning_changes) > 0
+        return False
+
+    def breaking_changes(self, mode: GuaranteeMode) -> list[GuaranteeChange]:
+        """Return changes that are breaking under the given mode."""
+        if mode != GuaranteeMode.STRICT:
+            return []
+        return self.warning_changes
+
+
+class GuaranteeDiff:
+    """Compares two guarantee sets and identifies changes."""
+
+    def __init__(
+        self,
+        old_guarantees: dict[str, Any] | None,
+        new_guarantees: dict[str, Any] | None,
+    ):
+        self.old = old_guarantees or {}
+        self.new = new_guarantees or {}
+        self.changes: list[GuaranteeChange] = []
+
+    def diff(self) -> GuaranteeDiffResult:
+        """Perform the diff and return results."""
+        self.changes = []
+
+        # Compare nullability (not_null tests)
+        self._diff_nullability()
+
+        # Compare uniqueness (unique tests)
+        self._diff_uniqueness()
+
+        # Compare accepted_values
+        self._diff_accepted_values()
+
+        # Compare relationships
+        self._diff_relationships()
+
+        # Compare expressions
+        self._diff_expressions()
+
+        # Compare freshness
+        self._diff_freshness()
+
+        # Compare volume
+        self._diff_volume()
+
+        # Compare custom guarantees
+        self._diff_custom()
+
+        return GuaranteeDiffResult(changes=self.changes)
+
+    def _add_change(
+        self,
+        kind: GuaranteeChangeKind,
+        path: str,
+        message: str,
+        old_value: Any = None,
+        new_value: Any = None,
+    ) -> None:
+        """Add a change with its default severity."""
+        self.changes.append(
+            GuaranteeChange(
+                kind=kind,
+                path=path,
+                message=message,
+                severity=GUARANTEE_SEVERITY[kind],
+                old_value=old_value,
+                new_value=new_value,
+            )
+        )
+
+    def _diff_nullability(self) -> None:
+        """Compare not_null guarantees."""
+        old_cols = set(self.old.get("nullability", {}).keys())
+        new_cols = set(self.new.get("nullability", {}).keys())
+
+        for col in new_cols - old_cols:
+            self._add_change(
+                GuaranteeChangeKind.NOT_NULL_ADDED,
+                f"nullability.{col}",
+                f"not_null guarantee added for column '{col}'",
+                new_value=col,
+            )
+
+        for col in old_cols - new_cols:
+            self._add_change(
+                GuaranteeChangeKind.NOT_NULL_REMOVED,
+                f"nullability.{col}",
+                f"not_null guarantee removed for column '{col}'",
+                old_value=col,
+            )
+
+    def _diff_uniqueness(self) -> None:
+        """Compare unique guarantees."""
+        old_cols = set(self.old.get("uniqueness", {}).keys())
+        new_cols = set(self.new.get("uniqueness", {}).keys())
+
+        for col in new_cols - old_cols:
+            self._add_change(
+                GuaranteeChangeKind.UNIQUE_ADDED,
+                f"uniqueness.{col}",
+                f"unique guarantee added for column '{col}'",
+                new_value=col,
+            )
+
+        for col in old_cols - new_cols:
+            self._add_change(
+                GuaranteeChangeKind.UNIQUE_REMOVED,
+                f"uniqueness.{col}",
+                f"unique guarantee removed for column '{col}'",
+                old_value=col,
+            )
+
+    def _diff_accepted_values(self) -> None:
+        """Compare accepted_values guarantees."""
+        old_av = self.old.get("accepted_values", {})
+        new_av = self.new.get("accepted_values", {})
+        old_cols = set(old_av.keys())
+        new_cols = set(new_av.keys())
+
+        # Completely new accepted_values constraints
+        for col in new_cols - old_cols:
+            self._add_change(
+                GuaranteeChangeKind.ACCEPTED_VALUES_ADDED,
+                f"accepted_values.{col}",
+                f"accepted_values guarantee added for column '{col}'",
+                new_value=new_av[col],
+            )
+
+        # Completely removed accepted_values constraints
+        for col in old_cols - new_cols:
+            self._add_change(
+                GuaranteeChangeKind.ACCEPTED_VALUES_REMOVED,
+                f"accepted_values.{col}",
+                f"accepted_values guarantee removed for column '{col}'",
+                old_value=old_av[col],
+            )
+
+        # Modified accepted_values - compare value sets
+        for col in old_cols & new_cols:
+            old_vals = set(old_av[col]) if isinstance(old_av[col], list) else set()
+            new_vals = set(new_av[col]) if isinstance(new_av[col], list) else set()
+
+            if old_vals != new_vals:
+                added = new_vals - old_vals
+                removed = old_vals - new_vals
+
+                if added and not removed:
+                    # Values added = expanded (more permissive)
+                    self._add_change(
+                        GuaranteeChangeKind.ACCEPTED_VALUES_EXPANDED,
+                        f"accepted_values.{col}",
+                        f"accepted_values for '{col}' expanded: added {added}",
+                        old_value=list(old_vals),
+                        new_value=list(new_vals),
+                    )
+                elif removed and not added:
+                    # Values removed = contracted (more restrictive)
+                    self._add_change(
+                        GuaranteeChangeKind.ACCEPTED_VALUES_CONTRACTED,
+                        f"accepted_values.{col}",
+                        f"accepted_values for '{col}' contracted: removed {removed}",
+                        old_value=list(old_vals),
+                        new_value=list(new_vals),
+                    )
+                else:
+                    # Both added and removed - expanded (net more permissive)
+                    self._add_change(
+                        GuaranteeChangeKind.ACCEPTED_VALUES_EXPANDED,
+                        f"accepted_values.{col}",
+                        f"accepted_values for '{col}' changed: added {added}, removed {removed}",
+                        old_value=list(old_vals),
+                        new_value=list(new_vals),
+                    )
+
+    def _diff_relationships(self) -> None:
+        """Compare relationship guarantees."""
+        old_rels = self.old.get("relationships", {})
+        new_rels = self.new.get("relationships", {})
+        old_keys = set(old_rels.keys())
+        new_keys = set(new_rels.keys())
+
+        for key in new_keys - old_keys:
+            self._add_change(
+                GuaranteeChangeKind.RELATIONSHIP_ADDED,
+                f"relationships.{key}",
+                f"relationship guarantee added: {key}",
+                new_value=new_rels[key],
+            )
+
+        for key in old_keys - new_keys:
+            self._add_change(
+                GuaranteeChangeKind.RELATIONSHIP_REMOVED,
+                f"relationships.{key}",
+                f"relationship guarantee removed: {key}",
+                old_value=old_rels[key],
+            )
+
+    def _diff_expressions(self) -> None:
+        """Compare expression guarantees (dbt_utils.expression_is_true)."""
+        old_exprs = self.old.get("expressions", {})
+        new_exprs = self.new.get("expressions", {})
+        old_keys = set(old_exprs.keys())
+        new_keys = set(new_exprs.keys())
+
+        for key in new_keys - old_keys:
+            self._add_change(
+                GuaranteeChangeKind.EXPRESSION_ADDED,
+                f"expressions.{key}",
+                f"expression guarantee added: {key}",
+                new_value=new_exprs[key],
+            )
+
+        for key in old_keys - new_keys:
+            self._add_change(
+                GuaranteeChangeKind.EXPRESSION_REMOVED,
+                f"expressions.{key}",
+                f"expression guarantee removed: {key}",
+                old_value=old_exprs[key],
+            )
+
+        for key in old_keys & new_keys:
+            if old_exprs[key] != new_exprs[key]:
+                self._add_change(
+                    GuaranteeChangeKind.EXPRESSION_CHANGED,
+                    f"expressions.{key}",
+                    f"expression guarantee changed: {key}",
+                    old_value=old_exprs[key],
+                    new_value=new_exprs[key],
+                )
+
+    def _diff_freshness(self) -> None:
+        """Compare freshness guarantees."""
+        old_fresh = self.old.get("freshness")
+        new_fresh = self.new.get("freshness")
+
+        if old_fresh is None and new_fresh is not None:
+            self._add_change(
+                GuaranteeChangeKind.FRESHNESS_ADDED,
+                "freshness",
+                f"freshness guarantee added: {new_fresh}",
+                new_value=new_fresh,
+            )
+        elif old_fresh is not None and new_fresh is None:
+            self._add_change(
+                GuaranteeChangeKind.FRESHNESS_REMOVED,
+                "freshness",
+                f"freshness guarantee removed (was {old_fresh})",
+                old_value=old_fresh,
+            )
+        elif old_fresh is not None and new_fresh is not None and old_fresh != new_fresh:
+            # Compare as intervals (assume format like "1 hour", "30 minutes")
+            # For simplicity, treat any change as relaxed (conservative)
+            self._add_change(
+                GuaranteeChangeKind.FRESHNESS_RELAXED,
+                "freshness",
+                f"freshness guarantee changed from {old_fresh} to {new_fresh}",
+                old_value=old_fresh,
+                new_value=new_fresh,
+            )
+
+    def _diff_volume(self) -> None:
+        """Compare volume guarantees."""
+        old_vol = self.old.get("volume")
+        new_vol = self.new.get("volume")
+
+        if old_vol is None and new_vol is not None:
+            self._add_change(
+                GuaranteeChangeKind.VOLUME_ADDED,
+                "volume",
+                f"volume guarantee added: {new_vol}",
+                new_value=new_vol,
+            )
+        elif old_vol is not None and new_vol is None:
+            self._add_change(
+                GuaranteeChangeKind.VOLUME_REMOVED,
+                "volume",
+                f"volume guarantee removed (was {old_vol})",
+                old_value=old_vol,
+            )
+        elif old_vol is not None and new_vol is not None and old_vol != new_vol:
+            self._add_change(
+                GuaranteeChangeKind.VOLUME_RELAXED,
+                "volume",
+                f"volume guarantee changed from {old_vol} to {new_vol}",
+                old_value=old_vol,
+                new_value=new_vol,
+            )
+
+    def _diff_custom(self) -> None:
+        """Compare custom guarantees."""
+        old_custom = self.old.get("custom", {})
+        new_custom = self.new.get("custom", {})
+        old_keys = set(old_custom.keys())
+        new_keys = set(new_custom.keys())
+
+        for key in new_keys - old_keys:
+            self._add_change(
+                GuaranteeChangeKind.CUSTOM_GUARANTEE_ADDED,
+                f"custom.{key}",
+                f"custom guarantee added: {key}",
+                new_value=new_custom[key],
+            )
+
+        for key in old_keys - new_keys:
+            self._add_change(
+                GuaranteeChangeKind.CUSTOM_GUARANTEE_REMOVED,
+                f"custom.{key}",
+                f"custom guarantee removed: {key}",
+                old_value=old_custom[key],
+            )
+
+        for key in old_keys & new_keys:
+            if old_custom[key] != new_custom[key]:
+                self._add_change(
+                    GuaranteeChangeKind.CUSTOM_GUARANTEE_CHANGED,
+                    f"custom.{key}",
+                    f"custom guarantee changed: {key}",
+                    old_value=old_custom[key],
+                    new_value=new_custom[key],
+                )
+
+
+def diff_guarantees(
+    old_guarantees: dict[str, Any] | None,
+    new_guarantees: dict[str, Any] | None,
+) -> GuaranteeDiffResult:
+    """Convenience function to diff two guarantee sets."""
+    differ = GuaranteeDiff(old_guarantees, new_guarantees)
+    return differ.diff()
+
+
+def check_guarantee_compatibility(
+    old_guarantees: dict[str, Any] | None,
+    new_guarantees: dict[str, Any] | None,
+    mode: GuaranteeMode,
+) -> tuple[bool, list[GuaranteeChange]]:
+    """Check if guarantee changes are compatible under the given mode.
+
+    Returns:
+        Tuple of (is_compatible, list of breaking changes)
+    """
+    result = diff_guarantees(old_guarantees, new_guarantees)
+    if mode == GuaranteeMode.IGNORE:
+        return True, []
+    breaking = result.breaking_changes(mode)
+    return len(breaking) == 0, breaking
+
+
+@dataclass
+class ContractDiffResult:
+    """Combined result of schema and guarantee diffs."""
+
+    schema_diff: SchemaDiffResult
+    guarantee_diff: GuaranteeDiffResult
+
+    @property
+    def has_changes(self) -> bool:
+        return self.schema_diff.has_changes or self.guarantee_diff.has_changes
+
+    def is_compatible(
+        self,
+        schema_mode: CompatibilityMode,
+        guarantee_mode: GuaranteeMode = GuaranteeMode.NOTIFY,
+    ) -> bool:
+        """Check if the contract change is compatible."""
+        schema_ok = self.schema_diff.is_compatible(schema_mode)
+        guarantee_ok = not self.guarantee_diff.is_breaking(guarantee_mode)
+        return schema_ok and guarantee_ok
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            "schema_changes": [c.to_dict() for c in self.schema_diff.changes],
+            "schema_change_type": str(self.schema_diff.change_type),
+            "guarantee_changes": [c.to_dict() for c in self.guarantee_diff.changes],
+            "guarantee_warnings": len(self.guarantee_diff.warning_changes),
+            "guarantee_info": len(self.guarantee_diff.info_changes),
+        }
+
+
+def diff_contracts(
+    old_schema: dict[str, Any],
+    new_schema: dict[str, Any],
+    old_guarantees: dict[str, Any] | None = None,
+    new_guarantees: dict[str, Any] | None = None,
+) -> ContractDiffResult:
+    """Diff both schema and guarantees for a contract change."""
+    return ContractDiffResult(
+        schema_diff=diff_schemas(old_schema, new_schema),
+        guarantee_diff=diff_guarantees(old_guarantees, new_guarantees),
+    )

@@ -68,7 +68,7 @@ async function loadContracts() {
               <td><span class="status status-${c.status}">${c.status}</span></td>
               <td>${escapeHtml(c.compatibility_mode)}</td>
               <td>${formatDate(c.published_at)}</td>
-              <td><a href="/contracts/${c.id}">View</a></td>
+              <td><a href="/contracts/${c.id}" class="btn-secondary" style="padding: 0.25rem 0.5rem;">View</a></td>
             </tr>
           `).join('')}
         </tbody>

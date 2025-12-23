@@ -110,15 +110,21 @@ async def create_asset(
     if not result.scalar_one_or_none():
         raise NotFoundError(ErrorCode.TEAM_NOT_FOUND, "Owner team not found")
 
-    # Validate owner user exists if provided
+    # Validate owner user exists and belongs to owner team if provided
     if asset.owner_user_id:
         user_result = await session.execute(
             select(UserDB)
             .where(UserDB.id == asset.owner_user_id)
             .where(UserDB.deactivated_at.is_(None))
         )
-        if not user_result.scalar_one_or_none():
+        user = user_result.scalar_one_or_none()
+        if not user:
             raise HTTPException(status_code=404, detail="Owner user not found")
+        if user.team_id != asset.owner_team_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Owner user must belong to the owner team",
+            )
 
     # Check for duplicate FQN
     existing = await session.execute(
@@ -436,22 +442,33 @@ async def update_asset(
 
     if update.fqn is not None:
         asset.fqn = update.fqn
-    if update.owner_team_id is not None:
-        asset.owner_team_id = update.owner_team_id
-    if update.owner_user_id is not None:
-        # Validate user exists
-        user_result = await session.execute(
-            select(UserDB)
-            .where(UserDB.id == update.owner_user_id)
-            .where(UserDB.deactivated_at.is_(None))
-        )
-        if not user_result.scalar_one_or_none():
-            raise HTTPException(status_code=404, detail="Owner user not found")
-        asset.owner_user_id = update.owner_user_id
     if update.environment is not None:
         asset.environment = update.environment
     if update.metadata is not None:
         asset.metadata_ = update.metadata
+
+    # Handle owner_team_id and owner_user_id together for validation
+    new_team_id = update.owner_team_id if update.owner_team_id is not None else asset.owner_team_id
+    new_user_id = update.owner_user_id if update.owner_user_id is not None else asset.owner_user_id
+
+    # If user is being set/changed, validate they belong to the (new) team
+    if new_user_id is not None:
+        user_result = await session.execute(
+            select(UserDB).where(UserDB.id == new_user_id).where(UserDB.deactivated_at.is_(None))
+        )
+        user = user_result.scalar_one_or_none()
+        if not user:
+            raise HTTPException(status_code=404, detail="Owner user not found")
+        if user.team_id != new_team_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Owner user must belong to the owner team",
+            )
+
+    if update.owner_team_id is not None:
+        asset.owner_team_id = update.owner_team_id
+    if update.owner_user_id is not None:
+        asset.owner_user_id = update.owner_user_id
 
     await session.flush()
     await session.refresh(asset)

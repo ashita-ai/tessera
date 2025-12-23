@@ -887,3 +887,70 @@ class TestDbtGuaranteesExtraction:
         metadata = asset_detail.json().get("metadata", {})
 
         assert "guarantees" not in metadata
+
+    async def test_dbt_sync_extracts_singular_tests(self, client: AsyncClient, tmp_path: Path):
+        """Sync should extract singular tests (SQL files) as custom guarantees.
+
+        Singular tests express custom business logic assertions like
+        'market_value must equal shares * price * multiplier'.
+        """
+        team_resp = await client.post("/api/v1/teams", json={"name": "guarantees-team-5"})
+        team_id = team_resp.json()["id"]
+
+        manifest = {
+            "nodes": {
+                "model.project.positions": {
+                    "resource_type": "model",
+                    "database": "analytics",
+                    "schema": "public",
+                    "name": "positions_singular",
+                    "description": "Positions model",
+                    "tags": [],
+                    "columns": {
+                        "id": {"data_type": "integer"},
+                        "shares": {"data_type": "numeric"},
+                        "price": {"data_type": "numeric"},
+                        "market_value": {"data_type": "numeric"},
+                    },
+                },
+                # Singular test - SQL file in tests/ directory, no test_metadata
+                "test.project.assert_market_value_consistency": {
+                    "resource_type": "test",
+                    "depends_on": {"nodes": ["model.project.positions"]},
+                    "description": "Validates market_value = shares * price",
+                    "raw_code": (
+                        "SELECT * FROM {{ ref('positions') }} "
+                        "WHERE ABS(market_value - shares * price) > 0.01"
+                    ),
+                    # No test_metadata - this is what makes it a singular test
+                },
+            },
+            "sources": {},
+        }
+        manifest_file = tmp_path / "manifest.json"
+        manifest_file.write_text(json.dumps(manifest))
+
+        resp = await client.post(
+            f"/api/v1/sync/dbt?manifest_path={manifest_file}&owner_team_id={team_id}"
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["guarantees_extracted"] == 1
+
+        # Verify asset has singular test as custom guarantee
+        assets_resp = await client.get(f"/api/v1/assets?owner={team_id}")
+        assets = assets_resp.json()["results"]
+        asset = next(a for a in assets if "positions_singular" in a["fqn"])
+        asset_detail = await client.get(f"/api/v1/assets/{asset['id']}")
+        metadata = asset_detail.json().get("metadata", {})
+
+        assert "guarantees" in metadata
+        assert "custom" in metadata["guarantees"]
+        assert len(metadata["guarantees"]["custom"]) == 1
+
+        singular_test = metadata["guarantees"]["custom"][0]
+        assert singular_test["type"] == "singular"
+        assert singular_test["name"] == "assert_market_value_consistency"
+        assert singular_test["description"] == "Validates market_value = shares * price"
+        assert "market_value" in singular_test["sql"]
+        assert "shares * price" in singular_test["sql"]

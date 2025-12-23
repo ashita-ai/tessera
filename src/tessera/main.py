@@ -12,11 +12,13 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from sqlalchemy import text
 from starlette.exceptions import HTTPException
+from starlette.middleware.sessions import SessionMiddleware
 
 from tessera.api import (
     api_keys,
     assets,
     audit,
+    audits,
     contracts,
     dependencies,
     impact,
@@ -64,6 +66,9 @@ app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
 if settings.rate_limit_enabled:
     app.add_middleware(SlowAPIMiddleware)
 
+# Session middleware for web UI authentication
+app.add_middleware(SessionMiddleware, secret_key=settings.session_secret_key)
+
 # Request ID middleware (must be added first to wrap all other middleware)
 app.add_middleware(RequestIDMiddleware)
 
@@ -91,6 +96,7 @@ api_v1 = APIRouter(prefix="/api/v1")
 api_v1.include_router(users.router, prefix="/users", tags=["users"])
 api_v1.include_router(teams.router, prefix="/teams", tags=["teams"])
 api_v1.include_router(assets.router, prefix="/assets", tags=["assets"])
+api_v1.include_router(audits.router, prefix="/assets", tags=["audits"])
 api_v1.include_router(dependencies.router, prefix="/assets", tags=["dependencies"])
 api_v1.include_router(impact.router, prefix="/assets", tags=["impact"])
 api_v1.include_router(contracts.router, prefix="/contracts", tags=["contracts"])

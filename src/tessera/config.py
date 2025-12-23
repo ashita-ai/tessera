@@ -56,6 +56,7 @@ class Settings(BaseSettings):
     # Authentication
     auth_disabled: bool = False  # Set to True to disable auth (development only)
     bootstrap_api_key: str | None = None  # Initial admin API key for bootstrapping
+    session_secret_key: str = "tessera-dev-secret-key-change-in-production"  # Session signing key
 
     # Redis cache (optional)
     redis_url: str | None = None  # e.g., redis://localhost:6379/0

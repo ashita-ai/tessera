@@ -50,8 +50,9 @@ header h1 a {
 }
 
 .logo {
-  height: 32px;
-  width: auto;
+  height: 24px;
+  max-width: 120px;
+  object-fit: contain;
   display: block;
 }
 
@@ -241,6 +242,40 @@ button.secondary {
 button.secondary:hover {
   background: var(--black);
   color: var(--white);
+}
+
+/* Link styled as button */
+a.btn,
+a.btn-secondary {
+  display: inline-block;
+  font-family: inherit;
+  font-size: inherit;
+  padding: 0.5rem 1rem;
+  border: var(--border);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+a.btn {
+  background: var(--black);
+  color: var(--white);
+}
+
+a.btn:hover {
+  background: var(--white);
+  color: var(--black);
+  text-decoration: none;
+}
+
+a.btn-secondary {
+  background: var(--white);
+  color: var(--black);
+}
+
+a.btn-secondary:hover {
+  background: var(--black);
+  color: var(--white);
+  text-decoration: none;
 }
 
 /* Radio button groups */
