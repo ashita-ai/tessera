@@ -39,6 +39,43 @@ async function withdrawProposal() {
   }
 }
 
+async function acknowledgeProposal(teamId, teamName) {
+  if (!confirm(`Acknowledge this proposal as team "${teamName}"?`)) return;
+
+  try {
+    await api.acknowledgeProposal(proposalId, teamId);
+    loadProposalDetail();
+  } catch (error) {
+    showError(error.message);
+  }
+}
+
+async function forceApprove() {
+  const teams = await api.listTeams({ limit: 100 });
+  if (!teams.results || teams.results.length === 0) {
+    showError('No teams available');
+    return;
+  }
+
+  const teamOptions = teams.results.map(t => `${t.name} (${t.id})`).join('\n');
+  const selected = prompt(`Force approve this proposal?\n\nThis will publish the breaking change without all acknowledgments.\n\nSelect a team to act as (enter team name):\n${teamOptions}`);
+
+  if (!selected) return;
+
+  const team = teams.results.find(t => t.name === selected || t.id === selected);
+  if (!team) {
+    showError('Team not found');
+    return;
+  }
+
+  try {
+    await api.forceApproveProposal(proposalId, team.id);
+    loadProposalDetail();
+  } catch (error) {
+    showError(error.message);
+  }
+}
+
 async function loadProposalDetail() {
   try {
     const proposal = await api.getProposal(proposalId);
@@ -58,6 +95,7 @@ async function loadProposalDetail() {
       ${proposal.status === 'pending' ? `
         <div style="margin-top: 1rem;">
           <button onclick="withdrawProposal()">Withdraw Proposal</button>
+          <button class="secondary" onclick="forceApprove()" style="margin-left: 0.5rem;">Force Approve</button>
         </div>
       ` : ''}
       <div style="margin-top: 1rem;">
@@ -108,6 +146,7 @@ async function loadProposalDetail() {
               <tr>
                 <th>Team</th>
                 <th>Status</th>
+                <th>Action</th>
               </tr>
             </thead>
             <tbody>
@@ -115,6 +154,7 @@ async function loadProposalDetail() {
                 <tr>
                   <td><a href="/teams/${a.team_id}">${escapeHtml(a.team_name || a.team_id)}</a></td>
                   <td><span class="status status-pending">Pending</span></td>
+                  <td><button class="secondary" onclick="acknowledgeProposal('${a.team_id}', '${escapeHtml(a.team_name || a.team_id)}')">Acknowledge</button></td>
                 </tr>
               `).join('')}
             </tbody>

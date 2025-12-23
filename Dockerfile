@@ -19,6 +19,7 @@ WORKDIR /app
 COPY pyproject.toml uv.lock README.md ./
 COPY src/ ./src/
 COPY examples/ ./examples/
+COPY scripts/ ./scripts/
 
 # Install dependencies
 RUN uv sync --frozen --no-dev && \
@@ -40,6 +41,7 @@ WORKDIR /app
 COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /app/src /app/src
 COPY --from=builder /app/examples /app/examples
+COPY --from=builder /app/scripts /app/scripts
 
 # Set environment variables
 ENV PATH="/app/.venv/bin:$PATH"

@@ -69,6 +69,17 @@ services:
       timeout: 5s
       retries: 3
 
+  # Init container that imports sample dbt manifest after API is ready
+  init:
+    build: .
+    environment:
+      API_URL: http://api:8000
+    depends_on:
+      api:
+        condition: service_healthy
+    command: ["python", "/app/scripts/import_manifest.py"]
+    restart: "no"
+
 volumes:
   postgres_data:
   redis_data:

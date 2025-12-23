@@ -1,0 +1,136 @@
+{
+  "metadata": {
+    "dbt_schema_version": "https://schemas.getdbt.com/dbt/manifest/v11.json",
+    "generated_at": "2025-01-01T00:00:00Z",
+    "project_name": "ecommerce"
+  },
+  "nodes": {
+    "model.ecommerce.dim_customers": {
+      "name": "dim_customers",
+      "resource_type": "model",
+      "schema": "analytics",
+      "database": "warehouse",
+      "unique_id": "model.ecommerce.dim_customers",
+      "fqn": ["ecommerce", "dim_customers"],
+      "description": "Customer dimension table with demographics and loyalty tier",
+      "columns": {
+        "customer_id": {
+          "name": "customer_id",
+          "description": "Unique customer identifier",
+          "data_type": "integer"
+        },
+        "email": {
+          "name": "email",
+          "description": "Customer email address",
+          "data_type": "string"
+        },
+        "name": {
+          "name": "name",
+          "description": "Customer full name",
+          "data_type": "string"
+        },
+        "created_at": {
+          "name": "created_at",
+          "description": "Account creation timestamp",
+          "data_type": "timestamp"
+        },
+        "loyalty_tier": {
+          "name": "loyalty_tier",
+          "description": "Customer loyalty program tier",
+          "data_type": "string"
+        }
+      },
+      "depends_on": {
+        "nodes": ["source.ecommerce.raw_customers"]
+      }
+    },
+    "model.ecommerce.fct_orders": {
+      "name": "fct_orders",
+      "resource_type": "model",
+      "schema": "analytics",
+      "database": "warehouse",
+      "unique_id": "model.ecommerce.fct_orders",
+      "fqn": ["ecommerce", "fct_orders"],
+      "description": "Orders fact table with transaction details",
+      "columns": {
+        "order_id": {
+          "name": "order_id",
+          "description": "Unique order identifier",
+          "data_type": "integer"
+        },
+        "customer_id": {
+          "name": "customer_id",
+          "description": "Foreign key to dim_customers",
+          "data_type": "integer"
+        },
+        "order_date": {
+          "name": "order_date",
+          "description": "Date of order",
+          "data_type": "date"
+        },
+        "total_amount": {
+          "name": "total_amount",
+          "description": "Total order amount in USD",
+          "data_type": "number"
+        },
+        "status": {
+          "name": "status",
+          "description": "Order status",
+          "data_type": "string"
+        }
+      },
+      "depends_on": {
+        "nodes": ["model.ecommerce.dim_customers", "source.ecommerce.raw_orders"]
+      }
+    },
+    "model.ecommerce.int_daily_revenue": {
+      "name": "int_daily_revenue",
+      "resource_type": "model",
+      "schema": "analytics",
+      "database": "warehouse",
+      "unique_id": "model.ecommerce.int_daily_revenue",
+      "fqn": ["ecommerce", "int_daily_revenue"],
+      "description": "Daily revenue aggregation",
+      "columns": {
+        "date": {
+          "name": "date",
+          "description": "Report date",
+          "data_type": "date"
+        },
+        "total_orders": {
+          "name": "total_orders",
+          "description": "Number of orders",
+          "data_type": "integer"
+        },
+        "total_revenue": {
+          "name": "total_revenue",
+          "description": "Total revenue in USD",
+          "data_type": "number"
+        }
+      },
+      "depends_on": {
+        "nodes": ["model.ecommerce.fct_orders"]
+      }
+    }
+  },
+  "sources": {
+    "source.ecommerce.raw_customers": {
+      "name": "raw_customers",
+      "resource_type": "source",
+      "schema": "raw",
+      "database": "warehouse",
+      "unique_id": "source.ecommerce.raw_customers",
+      "source_name": "ecommerce",
+      "description": "Raw customer data from transactional database"
+    },
+    "source.ecommerce.raw_orders": {
+      "name": "raw_orders",
+      "resource_type": "source",
+      "schema": "raw",
+      "database": "warehouse",
+      "unique_id": "source.ecommerce.raw_orders",
+      "source_name": "ecommerce",
+      "description": "Raw order data from transactional database"
+    }
+  }
+}

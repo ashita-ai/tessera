@@ -80,10 +80,11 @@ async function loadAssetDetail() {
     }
 
     // Load dependencies
-    const deps = await api.getAssetDependencies(assetId);
+    const depsData = await api.getAssetDependencies(assetId);
     const depsContainer = document.getElementById('asset-dependencies');
+    const deps = depsData.results || [];
 
-    if (!deps || deps.length === 0) {
+    if (deps.length === 0) {
       depsContainer.innerHTML = '<div class="empty">No dependencies defined.</div>';
     } else {
       depsContainer.innerHTML = `
