@@ -294,6 +294,21 @@ class TesseraAPI {
       }),
     });
   }
+
+  // Audit Events (admin-only)
+  async listAuditEvents(params = {}) {
+    const query = new URLSearchParams(params).toString();
+    return this.request(`/audit/events${query ? `?${query}` : ''}`);
+  }
+
+  async getAuditEvent(id) {
+    return this.request(`/audit/events/${id}`);
+  }
+
+  async getEntityAuditHistory(entityType, entityId, params = {}) {
+    const query = new URLSearchParams(params).toString();
+    return this.request(`/audit/entities/${entityType}/${entityId}/history${query ? `?${query}` : ''}`);
+  }
 }
 
 class APIError extends Error {

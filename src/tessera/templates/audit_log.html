@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+
+{% block title %}Audit Log - Tessera{% endblock %}
+
+{% block content %}
+<section>
+  <h2>Audit Log</h2>
+
+  <div style="margin-bottom: 1rem; display: flex; gap: 1rem; flex-wrap: wrap;">
+    <select id="filter-entity-type" style="width: auto;">
+      <option value="">All entity types</option>
+      <option value="team">Teams</option>
+      <option value="asset">Assets</option>
+      <option value="contract">Contracts</option>
+      <option value="proposal">Proposals</option>
+      <option value="registration">Registrations</option>
+      <option value="api_key">API Keys</option>
+    </select>
+    <select id="filter-action" style="width: auto;">
+      <option value="">All actions</option>
+      <option value="team.created">Team Created</option>
+      <option value="team.updated">Team Updated</option>
+      <option value="asset.created">Asset Created</option>
+      <option value="asset.updated">Asset Updated</option>
+      <option value="contract.published">Contract Published</option>
+      <option value="contract.deprecated">Contract Deprecated</option>
+      <option value="contract.force_published">Contract Force Published</option>
+      <option value="proposal.created">Proposal Created</option>
+      <option value="proposal.acknowledged">Proposal Acknowledged</option>
+      <option value="proposal.approved">Proposal Approved</option>
+      <option value="proposal.rejected">Proposal Rejected</option>
+      <option value="proposal.force_approved">Proposal Force Approved</option>
+      <option value="proposal.withdrawn">Proposal Withdrawn</option>
+      <option value="registration.created">Registration Created</option>
+      <option value="registration.deleted">Registration Deleted</option>
+      <option value="api_key.created">API Key Created</option>
+      <option value="api_key.revoked">API Key Revoked</option>
+    </select>
+    <button class="secondary" onclick="loadAuditEvents()">Filter</button>
+  </div>
+
+  <div id="audit-list">
+    <div class="loading">Loading...</div>
+  </div>
+
+  <div id="pagination" style="margin-top: 1rem;"></div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let currentOffset = 0;
+const limit = 50;
+
+function getActionClass(action) {
+  if (action.includes('force') || action.includes('rejected')) return 'status-deprecated';
+  if (action.includes('created') || action.includes('published') || action.includes('approved')) return 'status-active';
+  if (action.includes('deleted') || action.includes('revoked') || action.includes('withdrawn')) return 'status-deprecated';
+  return 'status-pending';
+}
+
+function formatPayload(payload) {
+  if (!payload || Object.keys(payload).length === 0) return '-';
+  const items = Object.entries(payload)
+    .filter(([k, v]) => v !== null && v !== undefined)
+    .map(([k, v]) => `<strong>${escapeHtml(k)}:</strong> ${escapeHtml(String(v))}`)
+    .join(', ');
+  return items || '-';
+}
+
+async function loadAuditEvents() {
+  const container = document.getElementById('audit-list');
+  container.innerHTML = '<div class="loading">Loading...</div>';
+
+  const entityType = document.getElementById('filter-entity-type').value;
+  const action = document.getElementById('filter-action').value;
+
+  try {
+    const params = { offset: currentOffset, limit };
+    if (entityType) params.entity_type = entityType;
+    if (action) params.action = action;
+
+    const data = await api.listAuditEvents(params);
+
+    if (!data.results || data.results.length === 0) {
+      container.innerHTML = '<div class="empty">No audit events found.</div>';
+      return;
+    }
+
+    container.innerHTML = `
+      <table>
+        <thead>
+          <tr>
+            <th>Timestamp</th>
+            <th>Entity Type</th>
+            <th>Action</th>
+            <th>Entity ID</th>
+            <th>Actor ID</th>
+            <th>Details</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${data.results.map(e => `
+            <tr>
+              <td style="white-space: nowrap;">${formatDate(e.occurred_at)}</td>
+              <td><span class="status">${escapeHtml(e.entity_type)}</span></td>
+              <td><span class="status ${getActionClass(e.action)}">${escapeHtml(e.action)}</span></td>
+              <td style="font-size: 0.75rem; font-family: monospace;">${escapeHtml(e.entity_id.substring(0, 8))}...</td>
+              <td style="font-size: 0.75rem; font-family: monospace;">${e.actor_id ? escapeHtml(e.actor_id.substring(0, 8)) + '...' : '-'}</td>
+              <td style="font-size: 0.75rem;">${formatPayload(e.payload)}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+
+    // Pagination
+    const paginationContainer = document.getElementById('pagination');
+    const totalPages = Math.ceil(data.total / limit);
+    const currentPage = Math.floor(currentOffset / limit) + 1;
+
+    if (totalPages > 1) {
+      paginationContainer.innerHTML = `
+        <button class="secondary" ${currentOffset === 0 ? 'disabled' : ''} onclick="goToPage(${currentPage - 1})">Prev</button>
+        <span style="margin: 0 1rem;">Page ${currentPage} of ${totalPages} (${data.total} events)</span>
+        <button class="secondary" ${currentPage >= totalPages ? 'disabled' : ''} onclick="goToPage(${currentPage + 1})">Next</button>
+      `;
+    } else {
+      paginationContainer.innerHTML = `<span style="color: var(--gray);">${data.total} event(s)</span>`;
+    }
+  } catch (error) {
+    showError(error.message);
+    container.innerHTML = '<div class="error">Failed to load audit events. Admin access required.</div>';
+  }
+}
+
+function goToPage(page) {
+  currentOffset = (page - 1) * limit;
+  loadAuditEvents();
+}
+
+loadAuditEvents();
+</script>
+{% endblock %}

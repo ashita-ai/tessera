@@ -37,7 +37,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://tessera:tessera@db:5432/tessera
       REDIS_URL: redis://redis:6379/0
       BOOTSTRAP_API_KEY: tessera-dev-key
-      AUTH_DISABLED: "true"
+      AUTH_DISABLED: "false"
       API_HOST: "0.0.0.0"
       API_PORT: "8000"
       RATE_LIMIT_WRITE: "1000/minute"  # Higher limit for dev/seeding

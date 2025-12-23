@@ -299,3 +299,20 @@ async def settings_page(
             slack_configured=bool(settings.slack_webhook_url),
         ),
     )
+
+
+@router.get("/admin/audit", response_class=HTMLResponse, response_model=None)
+async def audit_log_page(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    """Admin audit log page."""
+    current_user = await get_current_user(request, session)
+    if not current_user:
+        return RedirectResponse(url="/login", status_code=302)
+    if current_user.get("role") != "admin":
+        return RedirectResponse(url="/", status_code=302)
+    return templates.TemplateResponse(
+        "audit_log.html",
+        make_context(request, "audit", current_user),
+    )
