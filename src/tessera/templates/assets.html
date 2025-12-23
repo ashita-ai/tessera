@@ -136,6 +136,20 @@ let currentSortOrder = 'asc';
 let selectedAssets = new Set();
 let allUsers = [];  // Store all users with team_id for intelligent filtering
 
+// Resource type badge styling
+const typeColors = {
+  'model': { bg: '#e3f2fd', color: '#1565c0', icon: '📊' },
+  'seed': { bg: '#fff3e0', color: '#e65100', icon: '📁' },
+  'source': { bg: '#f3e5f5', color: '#7b1fa2', icon: '🔌' },
+  'snapshot': { bg: '#e8f5e9', color: '#2e7d32', icon: '📸' },
+};
+
+function getTypeBadge(metadata) {
+  const resourceType = (metadata && metadata.resource_type) || 'model';
+  const style = typeColors[resourceType] || { bg: '#f5f5f5', color: '#616161', icon: '📦' };
+  return `<span style="display: inline-block; padding: 0.15rem 0.4rem; font-size: 0.75em; background: ${style.bg}; color: ${style.color}; border-radius: 3px; margin-left: 0.5rem; vertical-align: middle;">${style.icon} ${resourceType}</span>`;
+}
+
 const schemaTemplates = {
   'basic-table': [
     { name: 'id', type: 'integer', required: true },
@@ -421,7 +435,7 @@ async function loadAssets() {
           ${data.results.map(asset => `
             <tr>
               <td><input type="checkbox" class="asset-checkbox" data-id="${asset.id}" ${selectedAssets.has(asset.id) ? 'checked' : ''} onchange="toggleAssetSelection('${asset.id}', this.checked)"></td>
-              <td><a href="/assets/${asset.id}">${escapeHtml(asset.fqn)}</a></td>
+              <td><a href="/assets/${asset.id}">${escapeHtml(asset.fqn)}</a>${getTypeBadge(asset.metadata || asset.metadata_)}</td>
               <td>${asset.owner_user_name ? `<a href="/users/${asset.owner_user_id}">${escapeHtml(asset.owner_user_name)}</a>` : '<span style="color: var(--gray);">-</span>'}</td>
               <td><a href="/teams/${asset.owner_team_id}">${escapeHtml(asset.owner_team_name || asset.owner_team_id)}</a></td>
               <td>${asset.active_contract_version || '<span style="color: var(--gray);">-</span>'}</td>

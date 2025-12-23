@@ -518,11 +518,27 @@ async function loadAssetDetail() {
     const description = metadata.description || asset.description || '';
     const dbtFqn = metadata.dbt_fqn || [];
     const path = metadata.path || '';
+    const resourceType = metadata.resource_type || 'model';
+    const isSeed = resourceType === 'seed';
+
+    // Resource type badge styling
+    const typeColors = {
+      'model': { bg: '#e3f2fd', color: '#1565c0', icon: '📊' },
+      'seed': { bg: '#fff3e0', color: '#e65100', icon: '📁' },
+      'source': { bg: '#f3e5f5', color: '#7b1fa2', icon: '🔌' },
+      'snapshot': { bg: '#e8f5e9', color: '#2e7d32', icon: '📸' },
+    };
+    const typeStyle = typeColors[resourceType] || { bg: '#f5f5f5', color: '#616161', icon: '📦' };
 
     document.getElementById('asset-detail').innerHTML = `
       <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1rem;">
         <div>
-          <h2 style="margin-bottom: 0.5rem;">${escapeHtml(asset.fqn)}</h2>
+          <h2 style="margin-bottom: 0.5rem;">
+            ${escapeHtml(asset.fqn)}
+            <span style="display: inline-block; padding: 0.25rem 0.6rem; margin-left: 0.5rem; font-size: 0.7em; font-weight: normal; background: ${typeStyle.bg}; color: ${typeStyle.color}; border-radius: 4px; vertical-align: middle;">
+              ${typeStyle.icon} ${resourceType}
+            </span>
+          </h2>
           <p style="color: var(--gray); margin-top: 0;">
             Owned by <a href="/teams/${asset.owner_team_id}">${escapeHtml(asset.owner_team_name || asset.owner_team_id)}</a>
             ${asset.owner_user_name
@@ -618,7 +634,18 @@ async function loadAssetDetail() {
         schemaContainer.innerHTML = '<div class="empty">No columns defined in schema.</div>';
       }
     } else {
-      schemaContainer.innerHTML = '<div class="empty">No active contract. <button class="secondary" onclick="publishInitialContract()">Publish First Contract</button></div>';
+      if (isSeed) {
+        schemaContainer.innerHTML = `
+          <div class="empty" style="background: ${typeStyle.bg}; border: 1px solid ${typeStyle.color}33;">
+            <strong>${typeStyle.icon} This is a seed (raw data file)</strong>
+            <p style="margin-top: 0.5rem; color: var(--gray);">
+              Seeds are CSV files without schema definitions in dbt. They can be referenced by downstream models but don't have formal contracts.
+            </p>
+          </div>
+        `;
+      } else {
+        schemaContainer.innerHTML = '<div class="empty">No active contract. <button class="secondary" onclick="publishInitialContract()">Publish First Contract</button></div>';
+      }
     }
 
     // Guarantees - split into dbt-extracted (read-only) and SLAs (editable)
