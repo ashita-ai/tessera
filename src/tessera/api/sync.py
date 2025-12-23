@@ -18,9 +18,10 @@ from tessera.api.auth import Auth, RequireAdmin
 from tessera.api.errors import BadRequestError, ErrorCode, NotFoundError
 from tessera.api.rate_limit import limit_admin
 from tessera.config import settings
-from tessera.db import AssetDB, ContractDB, RegistrationDB, TeamDB, UserDB, get_session
+from tessera.db import AssetDB, ContractDB, ProposalDB, RegistrationDB, TeamDB, UserDB, get_session
 from tessera.models.enums import CompatibilityMode, ContractStatus, RegistrationStatus
 from tessera.services import validate_json_schema
+from tessera.services.audit import log_proposal_created
 from tessera.services.schema_diff import check_compatibility, diff_schemas
 
 router = APIRouter()
@@ -321,6 +322,10 @@ class DbtManifestUploadRequest(BaseModel):
     auto_publish_contracts: bool = Field(
         default=False,
         description="Automatically publish initial contracts for new assets with column schemas",
+    )
+    auto_create_proposals: bool = Field(
+        default=False,
+        description="Auto-create proposals for breaking schema changes on existing contracts",
     )
     auto_register_consumers: bool = Field(
         default=False,
@@ -862,11 +867,18 @@ async def upload_dbt_manifest(
     assets_updated = 0
     assets_skipped = 0
     contracts_published = 0
+    proposals_created = 0
     registrations_created = 0
     conflicts: list[str] = []
     ownership_warnings: list[str] = []
     contract_warnings: list[str] = []
     registration_warnings: list[str] = []
+    proposals_info: list[dict[str, Any]] = []
+
+    # Track existing assets with breaking changes for proposal creation
+    assets_for_proposals: list[
+        tuple[AssetDB, dict[str, Any], dict[str, Any] | None, ContractDB, UUID, UUID | None]
+    ] = []  # (asset, columns, guarantees, existing_contract, team_id, user_id)
 
     # Track newly created assets for auto-publish
     new_assets_for_contracts: list[
@@ -1014,12 +1026,35 @@ async def upload_dbt_manifest(
         if tessera_meta.consumers:
             metadata["tessera_consumers"] = tessera_meta.consumers
 
+        columns = node.get("columns", {})
         if existing:
             existing.metadata_ = metadata
             existing.owner_team_id = resolved_team_id
             if resolved_user_id:
                 existing.owner_user_id = resolved_user_id
             assets_updated += 1
+
+            # Check for breaking changes if auto_create_proposals is enabled
+            if upload_req.auto_create_proposals and columns:
+                # Get active contract for this asset
+                contract_result = await session.execute(
+                    select(ContractDB)
+                    .where(ContractDB.asset_id == existing.id)
+                    .where(ContractDB.status == ContractStatus.ACTIVE)
+                )
+                active_contract = contract_result.scalar_one_or_none()
+                if active_contract:
+                    # Track for proposal creation (checked after all assets are processed)
+                    assets_for_proposals.append(
+                        (
+                            existing,
+                            columns,
+                            guarantees,
+                            active_contract,
+                            resolved_team_id,
+                            resolved_user_id,
+                        )
+                    )
         else:
             new_asset = AssetDB(
                 fqn=fqn,
@@ -1031,7 +1066,6 @@ async def upload_dbt_manifest(
             assets_created += 1
 
             # Track for auto-publish if it has columns
-            columns = node.get("columns", {})
             if upload_req.auto_publish_contracts and columns:
                 new_assets_for_contracts.append(
                     (new_asset, columns, guarantees, tessera_meta.compatibility_mode)
@@ -1126,12 +1160,35 @@ async def upload_dbt_manifest(
         if tessera_meta.consumers:
             metadata["tessera_consumers"] = tessera_meta.consumers
 
+        columns = source.get("columns", {})
         if existing:
             existing.metadata_ = metadata
             existing.owner_team_id = resolved_team_id
             if resolved_user_id:
                 existing.owner_user_id = resolved_user_id
             assets_updated += 1
+
+            # Check for breaking changes if auto_create_proposals is enabled
+            if upload_req.auto_create_proposals and columns:
+                # Get active contract for this asset
+                contract_result = await session.execute(
+                    select(ContractDB)
+                    .where(ContractDB.asset_id == existing.id)
+                    .where(ContractDB.status == ContractStatus.ACTIVE)
+                )
+                active_contract = contract_result.scalar_one_or_none()
+                if active_contract:
+                    # Track for proposal creation
+                    assets_for_proposals.append(
+                        (
+                            existing,
+                            columns,
+                            guarantees,
+                            active_contract,
+                            resolved_team_id,
+                            resolved_user_id,
+                        )
+                    )
         else:
             new_asset = AssetDB(
                 fqn=fqn,
@@ -1143,7 +1200,6 @@ async def upload_dbt_manifest(
             assets_created += 1
 
             # Track for auto-publish if it has columns
-            columns = source.get("columns", {})
             if upload_req.auto_publish_contracts and columns:
                 new_assets_for_contracts.append(
                     (new_asset, columns, guarantees, tessera_meta.compatibility_mode)
@@ -1314,6 +1370,66 @@ async def upload_dbt_manifest(
                 session.add(new_reg)
                 registrations_created += 1
 
+    # Auto-create proposals for breaking schema changes
+    if upload_req.auto_create_proposals and assets_for_proposals:
+        # Flush to ensure asset IDs are available
+        await session.flush()
+
+        for (
+            asset,
+            columns,
+            asset_guarantees,
+            existing_contract,
+            team_id,
+            user_id,
+        ) in assets_for_proposals:
+            # Convert columns to proposed schema
+            proposed_schema = dbt_columns_to_json_schema(columns)
+            existing_schema = existing_contract.schema_def
+
+            # Check compatibility
+            diff_result = diff_schemas(existing_schema, proposed_schema)
+            is_compatible, breaking_changes_list = check_compatibility(
+                existing_schema,
+                proposed_schema,
+                existing_contract.compatibility_mode,
+            )
+
+            # Only create proposal if there are breaking changes
+            if not is_compatible and breaking_changes_list:
+                db_proposal = ProposalDB(
+                    asset_id=asset.id,
+                    proposed_schema=proposed_schema,
+                    proposed_guarantees=asset_guarantees,
+                    change_type=diff_result.change_type,
+                    breaking_changes=[bc.to_dict() for bc in breaking_changes_list],
+                    proposed_by=team_id,
+                    proposed_by_user_id=user_id,
+                )
+                session.add(db_proposal)
+                await session.flush()  # Get proposal ID
+
+                # Log audit event
+                await log_proposal_created(
+                    session,
+                    proposal_id=db_proposal.id,
+                    asset_id=asset.id,
+                    proposer_id=team_id,
+                    change_type=diff_result.change_type.value,
+                    breaking_changes=[bc.to_dict() for bc in breaking_changes_list],
+                )
+
+                proposals_created += 1
+                proposals_info.append(
+                    {
+                        "proposal_id": str(db_proposal.id),
+                        "asset_id": str(asset.id),
+                        "asset_fqn": asset.fqn,
+                        "change_type": diff_result.change_type.value,
+                        "breaking_changes_count": len(breaking_changes_list),
+                    }
+                )
+
     return {
         "status": "success",
         "conflict_mode": conflict_mode,
@@ -1324,6 +1440,10 @@ async def upload_dbt_manifest(
         },
         "contracts": {
             "published": contracts_published,
+        },
+        "proposals": {
+            "created": proposals_created,
+            "details": proposals_info[:20] if proposals_info else [],
         },
         "registrations": {
             "created": registrations_created,

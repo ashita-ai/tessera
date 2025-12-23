@@ -954,3 +954,214 @@ class TestDbtGuaranteesExtraction:
         assert singular_test["description"] == "Validates market_value = shares * price"
         assert "market_value" in singular_test["sql"]
         assert "shares * price" in singular_test["sql"]
+
+
+class TestDbtAutoCreateProposals:
+    """Tests for auto_create_proposals flag in dbt upload."""
+
+    async def test_auto_create_proposals_creates_proposal_for_breaking_change(
+        self, client: AsyncClient
+    ):
+        """auto_create_proposals should create proposal when schema has breaking changes."""
+        # Step 1: Create team
+        team_resp = await client.post("/api/v1/teams", json={"name": "proposals-test-team"})
+        assert team_resp.status_code == 201
+        team_id = team_resp.json()["id"]
+
+        # Step 2: Create asset with initial contract (id, name, email columns)
+        asset_resp = await client.post(
+            "/api/v1/assets",
+            json={"fqn": "test.main.users", "owner_team_id": team_id},
+        )
+        assert asset_resp.status_code == 201
+        asset_id = asset_resp.json()["id"]
+
+        # Publish initial contract
+        contract_resp = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            json={
+                "version": "1.0.0",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "integer"},
+                        "name": {"type": "string"},
+                        "email": {"type": "string"},
+                    },
+                    "required": [],
+                },
+                "compatibility_mode": "backward",
+            },
+        )
+        assert contract_resp.status_code == 201
+
+        # Step 3: Upload manifest with breaking change (removes email column)
+        manifest = {
+            "nodes": {
+                "model.project.users": {
+                    "resource_type": "model",
+                    "database": "test",
+                    "schema": "main",
+                    "name": "users",
+                    "columns": {
+                        "id": {"data_type": "integer"},
+                        "name": {"data_type": "string"},
+                        # email column removed - breaking change!
+                    },
+                }
+            },
+            "sources": {},
+        }
+
+        upload_resp = await client.post(
+            "/api/v1/sync/dbt/upload",
+            json={
+                "manifest": manifest,
+                "owner_team_id": team_id,
+                "conflict_mode": "overwrite",
+                "auto_create_proposals": True,
+            },
+        )
+        assert upload_resp.status_code == 200
+        result = upload_resp.json()
+
+        # Verify proposal was created
+        assert result["proposals"]["created"] == 1
+        assert len(result["proposals"]["details"]) == 1
+
+        proposal_info = result["proposals"]["details"][0]
+        assert proposal_info["asset_fqn"] == "test.main.users"
+        assert proposal_info["breaking_changes_count"] >= 1
+        assert proposal_info["change_type"] in ["major", "patch", "minor"]
+
+        # Verify proposal exists via API
+        proposal_id = proposal_info["proposal_id"]
+        get_resp = await client.get(f"/api/v1/proposals/{proposal_id}")
+        assert get_resp.status_code == 200
+        proposal = get_resp.json()
+        assert proposal["asset_id"] == asset_id
+        assert proposal["status"] == "pending"
+
+    async def test_auto_create_proposals_no_proposal_for_compatible_change(
+        self, client: AsyncClient
+    ):
+        """auto_create_proposals should not create proposal for compatible changes."""
+        # Create team and asset
+        team_resp = await client.post("/api/v1/teams", json={"name": "proposals-compat-team"})
+        team_id = team_resp.json()["id"]
+
+        asset_resp = await client.post(
+            "/api/v1/assets",
+            json={"fqn": "test.main.orders", "owner_team_id": team_id},
+        )
+        asset_id = asset_resp.json()["id"]
+
+        # Publish initial contract
+        await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            json={
+                "version": "1.0.0",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "integer"},
+                    },
+                    "required": [],
+                },
+                "compatibility_mode": "backward",
+            },
+        )
+
+        # Upload manifest with compatible change (add new column)
+        manifest = {
+            "nodes": {
+                "model.project.orders": {
+                    "resource_type": "model",
+                    "database": "test",
+                    "schema": "main",
+                    "name": "orders",
+                    "columns": {
+                        "id": {"data_type": "integer"},
+                        "amount": {"data_type": "numeric"},  # New column - compatible
+                    },
+                }
+            },
+            "sources": {},
+        }
+
+        upload_resp = await client.post(
+            "/api/v1/sync/dbt/upload",
+            json={
+                "manifest": manifest,
+                "owner_team_id": team_id,
+                "conflict_mode": "overwrite",
+                "auto_create_proposals": True,
+            },
+        )
+        assert upload_resp.status_code == 200
+        result = upload_resp.json()
+
+        # No proposal should be created for compatible changes
+        assert result["proposals"]["created"] == 0
+        assert len(result["proposals"]["details"]) == 0
+
+    async def test_auto_create_proposals_disabled_by_default(self, client: AsyncClient):
+        """auto_create_proposals should be disabled by default."""
+        # Create team and asset
+        team_resp = await client.post("/api/v1/teams", json={"name": "proposals-default-team"})
+        team_id = team_resp.json()["id"]
+
+        asset_resp = await client.post(
+            "/api/v1/assets",
+            json={"fqn": "test.main.products", "owner_team_id": team_id},
+        )
+        asset_id = asset_resp.json()["id"]
+
+        # Publish initial contract
+        await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            json={
+                "version": "1.0.0",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "integer"},
+                        "sku": {"type": "string"},
+                    },
+                    "required": [],
+                },
+                "compatibility_mode": "backward",
+            },
+        )
+
+        # Upload manifest with breaking change but WITHOUT auto_create_proposals
+        manifest = {
+            "nodes": {
+                "model.project.products": {
+                    "resource_type": "model",
+                    "database": "test",
+                    "schema": "main",
+                    "name": "products",
+                    "columns": {
+                        "id": {"data_type": "integer"},
+                        # sku removed - breaking change!
+                    },
+                }
+            },
+            "sources": {},
+        }
+
+        upload_resp = await client.post(
+            "/api/v1/sync/dbt/upload",
+            json={
+                "manifest": manifest,
+                "owner_team_id": team_id,
+                "conflict_mode": "overwrite",
+                # auto_create_proposals NOT specified (defaults to False)
+            },
+        )
+        assert upload_resp.status_code == 200
+        result = upload_resp.json()
+
+        # No proposal should be created when flag is not set
+        assert result["proposals"]["created"] == 0
