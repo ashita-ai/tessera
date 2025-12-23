@@ -1,5 +1,6 @@
 """FastAPI application entry point."""
 
+import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -39,15 +40,32 @@ from tessera.api.errors import (
     validation_exception_handler,
 )
 from tessera.api.rate_limit import limiter, rate_limit_exceeded_handler
-from tessera.config import settings
+from tessera.config import DEFAULT_SESSION_SECRET, settings
 from tessera.db import init_db
 from tessera.db.database import dispose_engine, get_async_session_maker
 from tessera.web import router as web_router
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan handler."""
+    # Security warnings
+    if (
+        settings.environment == "production"
+        and settings.session_secret_key == DEFAULT_SESSION_SECRET
+    ):
+        logger.warning(
+            "SECURITY WARNING: Using default session secret key in production! "
+            "Set SESSION_SECRET_KEY environment variable to a secure random value."
+        )
+    if settings.environment == "production" and settings.auth_disabled:
+        logger.warning(
+            "SECURITY WARNING: Authentication is disabled in production! "
+            "Set AUTH_DISABLED=false for production deployments."
+        )
+
     await init_db()
     yield
     # Clean up database connections on shutdown

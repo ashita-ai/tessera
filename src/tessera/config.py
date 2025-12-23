@@ -5,6 +5,9 @@ from pathlib import Path
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Default session secret - MUST be overridden in production
+DEFAULT_SESSION_SECRET = "tessera-dev-secret-key-change-in-production"
+
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
@@ -56,7 +59,7 @@ class Settings(BaseSettings):
     # Authentication
     auth_disabled: bool = False  # Set to True to disable auth (development only)
     bootstrap_api_key: str | None = None  # Initial admin API key for bootstrapping
-    session_secret_key: str = "tessera-dev-secret-key-change-in-production"  # Session signing key
+    session_secret_key: str = DEFAULT_SESSION_SECRET  # Session signing key
 
     # Redis cache (optional)
     redis_url: str | None = None  # e.g., redis://localhost:6379/0
