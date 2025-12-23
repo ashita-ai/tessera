@@ -32,11 +32,12 @@ def register_login_required_handler(app: Any) -> None:
     """Register exception handler for LoginRequiredError."""
     from starlette.requests import Request as StarletteRequest
 
-    @app.exception_handler(LoginRequiredError)
     async def login_required_handler(
         request: StarletteRequest, exc: LoginRequiredError
     ) -> RedirectResponse:
         return RedirectResponse(url="/login", status_code=302)
+
+    app.add_exception_handler(LoginRequiredError, login_required_handler)
 
 
 # Template directory
