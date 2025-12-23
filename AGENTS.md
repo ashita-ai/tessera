@@ -168,6 +168,52 @@ The core logic is in `services/schema_diff.py`. It detects:
 
 ---
 
+## Data Model: Teams vs Users
+
+Tessera uses a dual-level ownership model that separates organizational responsibility from individual accountability.
+
+### Design Philosophy
+
+Teams represent persistent organizational units (data platform team, analytics team). Users represent individuals who may change teams or leave. By anchoring ownership at the team level, assets survive personnel changes while still tracking who did what.
+
+### Ownership Model
+
+| Concept | Level | Why |
+|---------|-------|-----|
+| Asset ownership | Team | Organizational responsibility survives personnel changes |
+| Asset stewardship | User (optional) | Day-to-day contact, can be reassigned |
+| Consumer registration | Team | Team's pipelines depend on data, not individuals |
+| Acknowledgment | Team + User | Team accepts impact, individual is accountable |
+| Contract publishing | Team + User | Team publishes, individual did the action |
+| Proposal creation | Team + User | Team proposes change, individual authored it |
+
+### Database Fields
+
+**AssetDB**:
+- `owner_team_id` (required): Team responsible for the asset
+- `owner_user_id` (optional): Individual steward/contact
+
+**ContractDB**:
+- `published_by` (required): Team ID that published
+- `published_by_user_id` (optional): Individual who clicked publish
+
+**ProposalDB**:
+- `proposed_by` (required): Team ID that proposed
+- `proposed_by_user_id` (optional): Individual who created proposal
+
+**AcknowledgmentDB**:
+- `consumer_team_id` (required): Team accepting the breaking change
+- `acknowledged_by_user_id` (optional): Individual who acknowledged
+
+### Rationale
+
+1. **Notifications**: When breaking changes happen, notify the team (email list, Slack channel) as primary, individual steward as backup
+2. **Audit trail**: Always know which human approved a breaking change
+3. **Pipeline ownership**: CI/CD pipelines run as teams, not individuals
+4. **Organizational continuity**: When Alice leaves, her team still owns the assets
+
+---
+
 ## Testing Requirements
 
 ### Running Tests

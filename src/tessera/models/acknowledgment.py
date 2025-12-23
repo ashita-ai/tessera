@@ -20,6 +20,7 @@ class AcknowledgmentCreate(AcknowledgmentBase):
     """Fields for creating an acknowledgment."""
 
     consumer_team_id: UUID
+    acknowledged_by_user_id: UUID | None = None
 
 
 class AcknowledgmentResponse(AcknowledgmentBase):
@@ -36,4 +37,5 @@ class Acknowledgment(AcknowledgmentBase):
     id: UUID
     proposal_id: UUID
     consumer_team_id: UUID
+    acknowledged_by_user_id: UUID | None = None
     responded_at: datetime

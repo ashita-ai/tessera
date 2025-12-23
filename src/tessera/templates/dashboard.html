@@ -6,24 +6,172 @@
 <section>
   <h2>Overview</h2>
   <div class="stats">
-    <div class="stat">
+    <a href="/teams" class="stat stat-link">
       <div class="stat-value" id="stat-teams">-</div>
       <div class="stat-label">Teams</div>
-    </div>
-    <div class="stat">
+    </a>
+    <a href="/assets" class="stat stat-link">
       <div class="stat-value" id="stat-assets">-</div>
       <div class="stat-label">Assets</div>
-    </div>
-    <div class="stat">
+    </a>
+    <a href="/contracts" class="stat stat-link">
       <div class="stat-value" id="stat-contracts">-</div>
       <div class="stat-label">Contracts</div>
-    </div>
-    <div class="stat">
+    </a>
+    <a href="/proposals" class="stat stat-link stat-alert" id="stat-proposals-card">
       <div class="stat-value" id="stat-proposals">-</div>
       <div class="stat-label">Pending Proposals</div>
-    </div>
+    </a>
   </div>
 </section>
+
+<section>
+  <h2>Quick Actions</h2>
+  <div class="quick-actions">
+    <a href="/teams" class="quick-action" onclick="event.preventDefault(); showQuickCreateTeam();">
+      <span class="quick-action-icon">+</span>
+      <span>Create Team</span>
+    </a>
+    <a href="/users" class="quick-action" onclick="event.preventDefault(); showQuickCreateUser();">
+      <span class="quick-action-icon">+</span>
+      <span>Create User</span>
+    </a>
+    <a href="/assets" class="quick-action" onclick="event.preventDefault(); showQuickCreateAsset();">
+      <span class="quick-action-icon">+</span>
+      <span>Create Asset</span>
+    </a>
+    <a href="/import" class="quick-action">
+      <span class="quick-action-icon">&#8593;</span>
+      <span>Import dbt Manifest</span>
+    </a>
+  </div>
+</section>
+
+<!-- Quick Create Modals -->
+<div id="modal-overlay" class="modal-overlay" style="display: none;" onclick="closeQuickModal()"></div>
+
+<div id="quick-team-modal" class="modal" style="display: none;">
+  <div class="modal-content">
+    <h3>Create Team</h3>
+    <form onsubmit="quickCreateTeam(event)">
+      <label for="quick-team-name">Name</label>
+      <input type="text" id="quick-team-name" required placeholder="e.g., data-platform">
+      <div style="margin-top: 1rem; display: flex; gap: 0.5rem;">
+        <button type="submit">Create</button>
+        <button type="button" class="secondary" onclick="closeQuickModal()">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="quick-user-modal" class="modal" style="display: none;">
+  <div class="modal-content">
+    <h3>Create User</h3>
+    <form onsubmit="quickCreateUser(event)">
+      <label for="quick-user-name">Name</label>
+      <input type="text" id="quick-user-name" required placeholder="e.g., Jane Smith">
+      <label for="quick-user-email">Email</label>
+      <input type="email" id="quick-user-email" required placeholder="e.g., jane@example.com">
+      <label for="quick-user-team">Team (optional)</label>
+      <select id="quick-user-team">
+        <option value="">No team</option>
+      </select>
+      <div style="margin-top: 1rem; display: flex; gap: 0.5rem;">
+        <button type="submit">Create</button>
+        <button type="button" class="secondary" onclick="closeQuickModal()">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="quick-asset-modal" class="modal" style="display: none;">
+  <div class="modal-content">
+    <h3>Create Asset</h3>
+    <form onsubmit="quickCreateAsset(event)">
+      <label for="quick-asset-fqn">Fully Qualified Name</label>
+      <input type="text" id="quick-asset-fqn" required placeholder="e.g., warehouse.schema.table">
+      <label for="quick-asset-team">Owner Team</label>
+      <select id="quick-asset-team" required>
+        <option value="">Select team...</option>
+      </select>
+      <label for="quick-asset-description">Description (optional)</label>
+      <textarea id="quick-asset-description" rows="2" placeholder="Describe this asset..."></textarea>
+      <div style="margin-top: 1rem; display: flex; gap: 0.5rem;">
+        <button type="submit">Create</button>
+        <button type="button" class="secondary" onclick="closeQuickModal()">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<style>
+.quick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+.quick-action {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.25rem;
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  text-decoration: none;
+  color: var(--black);
+  transition: all 0.2s ease;
+}
+.quick-action:hover {
+  border-color: var(--black);
+  background: var(--bg-secondary);
+}
+.quick-action-icon {
+  font-size: 1.25rem;
+  font-weight: bold;
+  color: var(--primary);
+}
+.stat-link {
+  text-decoration: none;
+  color: inherit;
+  transition: all 0.2s ease;
+}
+.stat-link:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+.stat-alert .stat-value {
+  color: #dc3545;
+}
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.7);
+  z-index: 1000;
+  backdrop-filter: blur(2px);
+}
+.modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.5rem;
+  z-index: 1001;
+  max-width: 500px;
+  width: 90%;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+.modal-content h3 {
+  margin-top: 0;
+  margin-bottom: 1rem;
+}
+</style>
 
 <section>
   <h2>Pending Proposals</h2>
@@ -133,5 +281,117 @@ async function loadDashboard() {
 }
 
 loadDashboard();
+
+// Quick Create Modal Functions
+let teamsCache = [];
+
+async function loadTeamsCache() {
+  if (teamsCache.length === 0) {
+    try {
+      const data = await api.listTeams({ limit: 100 });
+      teamsCache = data.results || [];
+    } catch (e) {
+      console.error('Failed to load teams:', e);
+    }
+  }
+  return teamsCache;
+}
+
+function closeQuickModal() {
+  document.getElementById('modal-overlay').style.display = 'none';
+  document.getElementById('quick-team-modal').style.display = 'none';
+  document.getElementById('quick-user-modal').style.display = 'none';
+  document.getElementById('quick-asset-modal').style.display = 'none';
+}
+
+function showQuickCreateTeam() {
+  document.getElementById('modal-overlay').style.display = 'block';
+  document.getElementById('quick-team-modal').style.display = 'block';
+  document.getElementById('quick-team-name').value = '';
+  document.getElementById('quick-team-name').focus();
+}
+
+async function showQuickCreateUser() {
+  document.getElementById('modal-overlay').style.display = 'block';
+  document.getElementById('quick-user-modal').style.display = 'block';
+  document.getElementById('quick-user-name').value = '';
+  document.getElementById('quick-user-email').value = '';
+  document.getElementById('quick-user-name').focus();
+
+  // Populate teams dropdown
+  const teams = await loadTeamsCache();
+  const select = document.getElementById('quick-user-team');
+  select.innerHTML = '<option value="">No team</option>' +
+    teams.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
+}
+
+async function showQuickCreateAsset() {
+  document.getElementById('modal-overlay').style.display = 'block';
+  document.getElementById('quick-asset-modal').style.display = 'block';
+  document.getElementById('quick-asset-fqn').value = '';
+  document.getElementById('quick-asset-description').value = '';
+  document.getElementById('quick-asset-fqn').focus();
+
+  // Populate teams dropdown
+  const teams = await loadTeamsCache();
+  const select = document.getElementById('quick-asset-team');
+  select.innerHTML = '<option value="">Select team...</option>' +
+    teams.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
+}
+
+async function quickCreateTeam(event) {
+  event.preventDefault();
+  const name = document.getElementById('quick-team-name').value.trim();
+  if (!name) return;
+
+  try {
+    const team = await api.createTeam({ name });
+    teamsCache = []; // Clear cache
+    closeQuickModal();
+    showSuccess(`Team "${name}" created successfully`);
+    loadDashboard(); // Refresh stats
+  } catch (error) {
+    showError(error.message);
+  }
+}
+
+async function quickCreateUser(event) {
+  event.preventDefault();
+  const name = document.getElementById('quick-user-name').value.trim();
+  const email = document.getElementById('quick-user-email').value.trim();
+  const teamId = document.getElementById('quick-user-team').value || null;
+  if (!name || !email) return;
+
+  try {
+    await api.createUser({ name, email, team_id: teamId });
+    closeQuickModal();
+    showSuccess(`User "${name}" created successfully`);
+  } catch (error) {
+    showError(error.message);
+  }
+}
+
+async function quickCreateAsset(event) {
+  event.preventDefault();
+  const fqn = document.getElementById('quick-asset-fqn').value.trim();
+  const ownerTeamId = document.getElementById('quick-asset-team').value;
+  const description = document.getElementById('quick-asset-description').value.trim();
+  if (!fqn || !ownerTeamId) return;
+
+  try {
+    const asset = await api.createAsset({
+      fqn,
+      owner_team_id: ownerTeamId,
+      description: description || undefined,
+    });
+    closeQuickModal();
+    showSuccess(`Asset "${fqn}" created successfully`);
+    loadDashboard(); // Refresh stats
+    // Redirect to asset detail to publish contract
+    window.location.href = `/assets/${asset.id}`;
+  } catch (error) {
+    showError(error.message);
+  }
+}
 </script>
 {% endblock %}

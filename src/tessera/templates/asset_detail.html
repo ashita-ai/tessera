@@ -136,6 +136,26 @@
   </div>
 </div>
 
+<div id="owner-change-modal" class="modal" style="display: none;">
+  <div class="modal-content">
+    <h3>Change Asset Owner</h3>
+    <form onsubmit="submitOwnerChange(event)">
+      <label for="owner-user-select">Select New Owner</label>
+      <select id="owner-user-select" required>
+        <option value="">Loading users...</option>
+      </select>
+      <p style="color: var(--gray); font-size: 0.9em; margin-top: 0.5rem;">
+        Select the person who should own this asset.
+        Choose "(Unassign)" to remove the current owner.
+      </p>
+      <div style="margin-top: 1rem; display: flex; gap: 0.5rem;">
+        <button type="submit">Update Owner</button>
+        <button type="button" class="secondary" onclick="closeModal()">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <style>
 .modal-overlay {
   position: fixed;
@@ -143,15 +163,16 @@
   left: 0;
   width: 100%;
   height: 100%;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(0, 0, 0, 0.7);
   z-index: 1000;
+  backdrop-filter: blur(2px);
 }
 .modal {
   position: fixed;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  background: var(--bg);
+  background: #ffffff;
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 1.5rem;
@@ -160,6 +181,7 @@
   width: 90%;
   max-height: 90vh;
   overflow-y: auto;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
 }
 .modal-content h3 {
   margin-top: 0;
@@ -239,8 +261,8 @@ async function submitSchemaChange(event) {
   }
 
   try {
+    // Don't specify version - API will auto-increment based on change type
     const result = await api.publishContract(assetId, {
-      version: '2.0.0',
       schema: newSchema,
       compatibility_mode: activeContractCache.compatibility_mode,
     }, teamId);
@@ -332,19 +354,15 @@ async function submitGuarantees(event) {
     if (volumeMaxDelta) newGuarantees.volume.max_row_delta_pct = parseInt(volumeMaxDelta, 10);
   }
 
-  // Increment patch version
-  const versionParts = activeContractCache.version.split('.').map(Number);
-  versionParts[2] = (versionParts[2] || 0) + 1;
-  const newVersion = versionParts.join('.');
-
   try {
-    await api.publishContract(assetId, {
-      version: newVersion,
+    // Don't specify version - API will auto-increment
+    const result = await api.publishContract(assetId, {
       schema: activeContractCache.schema_def,
       compatibility_mode: activeContractCache.compatibility_mode,
       guarantees: newGuarantees,
     }, teamId);
     closeModal();
+    const newVersion = result.contract?.version || 'new version';
     showSuccess(`Guarantees updated! New contract version: ${newVersion}`);
     loadAssetDetail();
   } catch (error) {
@@ -374,8 +392,8 @@ async function submitInitialContract(event) {
   }
 
   try {
+    // Don't specify version - API will auto-generate (1.0.0 for first contract)
     await api.publishContract(assetId, {
-      version: '1.0.0',
       schema: schema,
       compatibility_mode: 'backward',
     }, teamId);
@@ -406,7 +424,11 @@ async function loadAssetDetail() {
           <h2 style="margin-bottom: 0.5rem;">${escapeHtml(asset.fqn)}</h2>
           <p style="color: var(--gray); margin-top: 0;">
             Owned by <a href="/teams/${asset.owner_team_id}">${escapeHtml(asset.owner_team_name || asset.owner_team_id)}</a>
-            ${asset.owner_user_name ? ` (${escapeHtml(asset.owner_user_name)})` : ''}
+            ${asset.owner_user_name
+              ? ` (<a href="/users/${asset.owner_user_id}">${escapeHtml(asset.owner_user_name)}</a>)`
+              : ' <span style="color: var(--warning);">(No individual owner)</span>'
+            }
+            <button class="secondary" onclick="showChangeOwnerModal()" style="margin-left: 0.5rem; padding: 0.2rem 0.5rem; font-size: 0.85em;">Change Owner</button>
           </p>
         </div>
         <div style="display: flex; gap: 0.5rem;">
@@ -577,10 +599,19 @@ async function loadAssetDetail() {
                 </tr>
               </thead>
               <tbody>
-                ${proposals.map(p => `
+                ${proposals.map(p => {
+                  const changes = p.breaking_changes || [];
+                  const changeCount = p.breaking_changes_count || changes.length || 0;
+                  const changeSummary = changes.slice(0, 3).map(c =>
+                    `${c.type || c.change_type}: ${c.path || c.column || 'schema'}`
+                  ).join(', ');
+                  return `
                   <tr>
                     <td><span class="status status-deprecated">${escapeHtml(p.change_type || 'major')}</span></td>
-                    <td>${p.breaking_changes_count || (p.breaking_changes ? p.breaking_changes.length : 0)}</td>
+                    <td>
+                      <strong style="color: var(--error);">${changeCount}</strong>
+                      ${changeSummary ? `<br><small style="color: var(--gray);">${escapeHtml(changeSummary)}${changes.length > 3 ? '...' : ''}</small>` : ''}
+                    </td>
                     <td>
                       ${p.total_consumers > 0
                         ? `<span style="color: ${p.acknowledgment_count >= p.total_consumers ? 'green' : 'orange'};">${p.acknowledgment_count || 0}/${p.total_consumers}</span>`
@@ -590,7 +621,7 @@ async function loadAssetDetail() {
                     <td>${formatDate(p.proposed_at)}</td>
                     <td><a href="/proposals/${p.id}">Review</a></td>
                   </tr>
-                `).join('')}
+                `}).join('')}
               </tbody>
             </table>
           </div>
@@ -666,7 +697,13 @@ async function loadAssetDetail() {
                 <td><span class="status status-${c.status}">${c.status}</span></td>
                 <td>${escapeHtml(c.compatibility_mode)}</td>
                 <td>${formatDate(c.published_at)}</td>
-                <td><a href="/teams/${c.published_by}">${c.published_by.slice(0, 8)}...</a></td>
+                <td>
+                  <a href="/teams/${c.published_by}">${escapeHtml(c.published_by_team_name || c.published_by)}</a>
+                  ${c.published_by_user_name
+                    ? `<br><small style="color: var(--gray);">by <a href="/users/${c.published_by_user_id}">${escapeHtml(c.published_by_user_name)}</a></small>`
+                    : ''
+                  }
+                </td>
                 <td><a href="/contracts/${c.id}">View</a></td>
               </tr>
             `).join('')}
@@ -733,6 +770,40 @@ async function loadAssetDetail() {
   } catch (error) {
     showError(error.message);
     document.getElementById('asset-detail').innerHTML = '<div class="error">Asset not found</div>';
+  }
+}
+
+let usersCache = [];
+
+async function loadUsers() {
+  if (usersCache.length === 0) {
+    const data = await api.listUsers({ limit: 100 });
+    usersCache = data.results || [];
+  }
+  return usersCache;
+}
+
+async function showChangeOwnerModal() {
+  await loadUsers();
+  const select = document.getElementById('owner-user-select');
+  select.innerHTML = '<option value="">(Unassign - no owner)</option>' +
+    usersCache.map(u => `<option value="${u.id}">${escapeHtml(u.name)}</option>`).join('');
+  showModal('owner-change-modal');
+}
+
+async function submitOwnerChange(event) {
+  event.preventDefault();
+  const userId = document.getElementById('owner-user-select').value;
+
+  try {
+    await api.updateAsset(assetId, {
+      owner_user_id: userId || null
+    });
+    closeModal();
+    showSuccess('Owner updated successfully!');
+    loadAssetDetail();
+  } catch (error) {
+    showError(error.message);
   }
 }
 

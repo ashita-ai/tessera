@@ -105,6 +105,25 @@ class TesseraAPI {
     });
   }
 
+  async getTeamMembers(teamId, params = {}) {
+    const query = new URLSearchParams(params).toString();
+    return this.request(`/teams/${teamId}/members${query ? `?${query}` : ''}`);
+  }
+
+  async reassignTeamAssets(teamId, targetTeamId, assetIds = null) {
+    const body = { target_team_id: targetTeamId };
+    if (assetIds) body.asset_ids = assetIds;
+    return this.request(`/teams/${teamId}/reassign-assets`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  async getTeamAssets(teamId, params = {}) {
+    const query = new URLSearchParams({ ...params, owner_team_id: teamId }).toString();
+    return this.request(`/assets?${query}`);
+  }
+
   // Assets
   async listAssets(params = {}) {
     const query = new URLSearchParams(params).toString();
@@ -199,9 +218,15 @@ class TesseraAPI {
     return this.request(`/proposals/${id}/status`);
   }
 
-  async acknowledgeProposal(id, teamId) {
-    return this.request(`/proposals/${id}/acknowledge?team_id=${teamId}`, {
+  async acknowledgeProposal(id, consumerTeamId, response = 'approved', notes = null) {
+    const body = {
+      consumer_team_id: consumerTeamId,
+      response: response,
+    };
+    if (notes) body.notes = notes;
+    return this.request(`/proposals/${id}/acknowledge`, {
       method: 'POST',
+      body: JSON.stringify(body),
     });
   }
 
@@ -224,9 +249,9 @@ class TesseraAPI {
     });
   }
 
-  // Registrations for a specific contract
+  // Registrations for a specific contract (includes team names)
   async getContractRegistrations(contractId) {
-    return this.request(`/registrations?contract_id=${contractId}`);
+    return this.request(`/contracts/${contractId}/registrations`);
   }
 
   // Dependencies
@@ -256,6 +281,18 @@ class TesseraAPI {
 
   async healthReady() {
     return this.request('/health/ready');
+  }
+
+  // Sync / Import
+  async uploadDbtManifest(manifest, ownerTeamId, conflictMode = 'ignore') {
+    return this.request('/sync/dbt/upload', {
+      method: 'POST',
+      body: JSON.stringify({
+        manifest: manifest,
+        owner_team_id: ownerTeamId,
+        conflict_mode: conflictMode,
+      }),
+    });
   }
 }
 

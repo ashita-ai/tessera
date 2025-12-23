@@ -10,9 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.api.auth import Auth, RequireRead
 from tessera.api.errors import ErrorCode, NotFoundError
-from tessera.api.pagination import PaginationParams, paginate, pagination_params
+from tessera.api.pagination import PaginationParams, pagination_params
 from tessera.api.rate_limit import limit_read
-from tessera.db import AssetDB, ContractDB, RegistrationDB, get_session
+from tessera.db import AssetDB, ContractDB, RegistrationDB, TeamDB, get_session
 from tessera.models import Contract, Registration
 from tessera.models.enums import CompatibilityMode, ContractStatus
 from tessera.services.cache import (
@@ -237,8 +237,10 @@ async def list_contract_registrations(
 ) -> dict[str, Any]:
     """List all registrations for a contract.
 
-    Requires read scope.
+    Requires read scope. Returns registrations with consumer team names.
     """
+    from sqlalchemy import func
+
     # Verify contract exists
     result = await session.execute(select(ContractDB).where(ContractDB.id == contract_id))
     contract = result.scalar_one_or_none()
@@ -249,5 +251,35 @@ async def list_contract_registrations(
             details={"contract_id": str(contract_id)},
         )
 
-    query = select(RegistrationDB).where(RegistrationDB.contract_id == contract_id)
-    return await paginate(session, query, params, response_model=Registration)
+    # Query with join to get team names
+    query = (
+        select(RegistrationDB, TeamDB.name.label("team_name"))
+        .outerjoin(TeamDB, RegistrationDB.consumer_team_id == TeamDB.id)
+        .where(RegistrationDB.contract_id == contract_id)
+        .order_by(RegistrationDB.registered_at.desc())
+    )
+
+    # Get total count
+    count_query = select(func.count()).select_from(
+        select(RegistrationDB).where(RegistrationDB.contract_id == contract_id).subquery()
+    )
+    total_result = await session.execute(count_query)
+    total = total_result.scalar() or 0
+
+    # Paginate
+    paginated_query = query.limit(params.limit).offset(params.offset)
+    result = await session.execute(paginated_query)
+    rows = result.all()
+
+    results = []
+    for reg_db, team_name in rows:
+        reg_dict = Registration.model_validate(reg_db).model_dump()
+        reg_dict["consumer_team_name"] = team_name
+        results.append(reg_dict)
+
+    return {
+        "results": results,
+        "total": total,
+        "limit": params.limit,
+        "offset": params.offset,
+    }

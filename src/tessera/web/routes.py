@@ -110,3 +110,12 @@ async def proposal_detail(request: Request, proposal_id: str) -> HTMLResponse:
         "proposal_detail.html",
         {"request": request, "active_page": "proposals", "proposal_id": proposal_id},
     )
+
+
+@router.get("/import", response_class=HTMLResponse)
+async def import_page(request: Request) -> HTMLResponse:
+    """Import manifest page."""
+    return templates.TemplateResponse(
+        "import.html",
+        {"request": request, "active_page": "import"},
+    )

@@ -1,6 +1,8 @@
-# Tessera
+<p align="center">
+  <img src="assets/logo.png" alt="Tessera" width="300">
+</p>
 
-Data contract coordination for warehouses.
+<h3 align="center">Data contract coordination for warehouses</h3>
 
 ## The Problem
 

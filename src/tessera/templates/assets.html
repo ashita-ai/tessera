@@ -77,13 +77,46 @@
 
   <div id="owner-filter-banner" style="display: none; margin-bottom: 1rem; padding: 0.75rem; background: var(--bg-secondary); border-radius: 4px;"></div>
 
-  <div style="margin-bottom: 1rem; display: flex; gap: 1rem; flex-wrap: wrap; align-items: center;">
-    <input type="text" id="search-fqn" placeholder="Search by FQN..." style="width: auto; display: inline-block;">
-    <label style="display: flex; align-items: center; gap: 0.25rem;">
-      <input type="checkbox" id="filter-unowned" onchange="loadAssets()">
-      Show only unowned assets
-    </label>
-    <button class="secondary" onclick="loadAssets()">Search</button>
+  <!-- Filters -->
+  <div class="filters" style="margin-bottom: 1rem; display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; padding: 1rem; background: var(--bg-secondary); border-radius: 4px;">
+    <div style="display: flex; align-items: center; gap: 0.5rem;">
+      <label for="search-fqn" style="margin: 0; white-space: nowrap;">FQN:</label>
+      <input type="text" id="search-fqn" placeholder="Search..." style="width: 200px;">
+    </div>
+    <div style="display: flex; align-items: center; gap: 0.5rem;">
+      <label for="filter-team" style="margin: 0; white-space: nowrap;">Team:</label>
+      <select id="filter-team" style="width: 150px;">
+        <option value="">All teams</option>
+      </select>
+    </div>
+    <div style="display: flex; align-items: center; gap: 0.5rem;">
+      <label for="filter-owner" style="margin: 0; white-space: nowrap;">Owner:</label>
+      <select id="filter-owner" style="width: 150px;">
+        <option value="">All owners</option>
+        <option value="unassigned">Unassigned</option>
+      </select>
+    </div>
+    <button onclick="loadAssets()">Filter</button>
+    <button class="secondary" onclick="clearFilters()">Clear</button>
+  </div>
+
+  <!-- Bulk actions -->
+  <div id="bulk-actions" style="display: none; margin-bottom: 1rem; padding: 0.75rem; background: #e7f3ff; border-radius: 4px; gap: 1rem; align-items: center; flex-wrap: wrap;">
+    <span><strong id="selected-count">0</strong> selected</span>
+    <div style="display: flex; gap: 0.5rem; align-items: center;">
+      <select id="bulk-owner-select" style="width: 180px;">
+        <option value="">Select user...</option>
+      </select>
+      <button onclick="bulkAssignOwner()">Assign User</button>
+    </div>
+    <div style="display: flex; gap: 0.5rem; align-items: center;">
+      <select id="bulk-team-select" style="width: 180px;">
+        <option value="">Select team...</option>
+      </select>
+      <button onclick="bulkReassignTeam()">Reassign Team</button>
+    </div>
+    <button class="secondary" onclick="bulkDeleteAssets()" style="color: #dc3545;">Delete Selected</button>
+    <button class="secondary" onclick="clearSelection()">Clear</button>
   </div>
 
   <div id="assets-list">
@@ -100,6 +133,7 @@ let currentOffset = 0;
 const limit = 20;
 let currentSortBy = 'fqn';
 let currentSortOrder = 'asc';
+let selectedAssets = new Set();
 
 const schemaTemplates = {
   'basic-table': [
@@ -318,32 +352,38 @@ async function loadAssets() {
   container.innerHTML = '<div class="loading">Loading...</div>';
 
   const searchFqn = document.getElementById('search-fqn').value.trim();
-  const showUnowned = document.getElementById('filter-unowned').checked;
+  const filterTeam = document.getElementById('filter-team').value;
+  const filterOwner = document.getElementById('filter-owner').value;
 
-  // Get filter from URL query params
+  // Get filter from URL query params (for links from other pages)
   const urlParams = new URLSearchParams(window.location.search);
-  const ownerTeamFilter = urlParams.get('owner');
-  const ownerUserFilter = urlParams.get('owner_user');
+  const ownerTeamFilter = filterTeam || urlParams.get('owner');
+  const ownerUserFilter = filterOwner && filterOwner !== 'unassigned' ? filterOwner : urlParams.get('owner_user');
+  const showUnowned = filterOwner === 'unassigned';
 
-  // Show filter banner if filtering
+  // Show filter banner if filtering via URL
   const banner = document.getElementById('owner-filter-banner');
-  if (ownerTeamFilter) {
-    try {
-      const team = await api.getTeam(ownerTeamFilter);
-      banner.innerHTML = `Showing assets owned by team <strong><a href="/teams/${ownerTeamFilter}">${escapeHtml(team.name)}</a></strong> &nbsp; <a href="/assets" style="font-size: 0.9em;">[Clear filter]</a>`;
-      banner.style.display = 'block';
-    } catch (e) {
-      banner.innerHTML = `Filtering by team ID: ${escapeHtml(ownerTeamFilter)} &nbsp; <a href="/assets" style="font-size: 0.9em;">[Clear filter]</a>`;
-      banner.style.display = 'block';
-    }
-  } else if (ownerUserFilter) {
-    try {
-      const user = await api.getUser(ownerUserFilter);
-      banner.innerHTML = `Showing assets owned by <strong><a href="/users/${ownerUserFilter}">${escapeHtml(user.name)}</a></strong> &nbsp; <a href="/assets" style="font-size: 0.9em;">[Clear filter]</a>`;
-      banner.style.display = 'block';
-    } catch (e) {
-      banner.innerHTML = `Filtering by user ID: ${escapeHtml(ownerUserFilter)} &nbsp; <a href="/assets" style="font-size: 0.9em;">[Clear filter]</a>`;
-      banner.style.display = 'block';
+  if (urlParams.get('owner') || urlParams.get('owner_user')) {
+    const teamId = urlParams.get('owner');
+    const userId = urlParams.get('owner_user');
+    if (teamId) {
+      try {
+        const team = await api.getTeam(teamId);
+        banner.innerHTML = `Showing assets owned by team <strong><a href="/teams/${teamId}">${escapeHtml(team.name)}</a></strong> &nbsp; <a href="/assets" style="font-size: 0.9em;">[Clear filter]</a>`;
+        banner.style.display = 'block';
+      } catch (e) {
+        banner.innerHTML = `Filtering by team ID: ${escapeHtml(teamId)} &nbsp; <a href="/assets" style="font-size: 0.9em;">[Clear filter]</a>`;
+        banner.style.display = 'block';
+      }
+    } else if (userId) {
+      try {
+        const user = await api.getUser(userId);
+        banner.innerHTML = `Showing assets owned by <strong><a href="/users/${userId}">${escapeHtml(user.name)}</a></strong> &nbsp; <a href="/assets" style="font-size: 0.9em;">[Clear filter]</a>`;
+        banner.style.display = 'block';
+      } catch (e) {
+        banner.innerHTML = `Filtering by user ID: ${escapeHtml(userId)} &nbsp; <a href="/assets" style="font-size: 0.9em;">[Clear filter]</a>`;
+        banner.style.display = 'block';
+      }
     }
   } else {
     banner.style.display = 'none';
@@ -360,6 +400,7 @@ async function loadAssets() {
 
     if (!data.results || data.results.length === 0) {
       container.innerHTML = '<div class="empty">No assets found. Create one to get started.</div>';
+      document.getElementById('bulk-actions').style.display = 'none';
       return;
     }
 
@@ -367,28 +408,32 @@ async function loadAssets() {
       <table>
         <thead>
           <tr>
+            <th style="width: 30px;"><input type="checkbox" id="select-all" onchange="toggleSelectAll(this.checked)"></th>
             <th class="${getSortClass('fqn')}" onclick="sortBy('fqn')">FQN</th>
-            <th class="${getSortClass('owner_user')}" onclick="sortBy('owner_user')">Owner (User)</th>
+            <th class="${getSortClass('owner_user')}" onclick="sortBy('owner_user')">Owner</th>
             <th class="${getSortClass('owner')}" onclick="sortBy('owner')">Team</th>
-            <th>Active Contract</th>
+            <th>Contract</th>
             <th>Actions</th>
           </tr>
         </thead>
         <tbody>
           ${data.results.map(asset => `
             <tr>
+              <td><input type="checkbox" class="asset-checkbox" data-id="${asset.id}" ${selectedAssets.has(asset.id) ? 'checked' : ''} onchange="toggleAssetSelection('${asset.id}', this.checked)"></td>
               <td><a href="/assets/${asset.id}">${escapeHtml(asset.fqn)}</a></td>
-              <td>${asset.owner_user_name ? `<a href="/users/${asset.owner_user_id}">${escapeHtml(asset.owner_user_name)}</a>` : '<span style="color: var(--gray);">Unassigned</span>'}</td>
+              <td>${asset.owner_user_name ? `<a href="/users/${asset.owner_user_id}">${escapeHtml(asset.owner_user_name)}</a>` : '<span style="color: var(--gray);">-</span>'}</td>
               <td><a href="/teams/${asset.owner_team_id}">${escapeHtml(asset.owner_team_name || asset.owner_team_id)}</a></td>
-              <td>${asset.active_contract_version || '<span style="color: var(--gray);">None</span>'}</td>
+              <td>${asset.active_contract_version || '<span style="color: var(--gray);">-</span>'}</td>
               <td>
-                <button class="secondary" onclick="deleteAsset('${asset.id}', '${escapeHtml(asset.fqn)}')">Delete</button>
+                <button class="secondary" onclick="deleteAsset('${asset.id}', '${escapeHtml(asset.fqn)}')" style="padding: 0.25rem 0.5rem;">Delete</button>
               </td>
             </tr>
           `).join('')}
         </tbody>
       </table>
     `;
+
+    updateBulkActionsVisibility();
 
     // Pagination
     const paginationContainer = document.getElementById('pagination');
@@ -420,6 +465,166 @@ document.getElementById('search-fqn').addEventListener('keypress', (e) => {
   if (e.key === 'Enter') loadAssets();
 });
 
+// Selection functions
+function toggleSelectAll(checked) {
+  const checkboxes = document.querySelectorAll('.asset-checkbox');
+  checkboxes.forEach(cb => {
+    cb.checked = checked;
+    if (checked) {
+      selectedAssets.add(cb.dataset.id);
+    } else {
+      selectedAssets.delete(cb.dataset.id);
+    }
+  });
+  updateBulkActionsVisibility();
+}
+
+function toggleAssetSelection(assetId, checked) {
+  if (checked) {
+    selectedAssets.add(assetId);
+  } else {
+    selectedAssets.delete(assetId);
+  }
+  updateBulkActionsVisibility();
+}
+
+function updateBulkActionsVisibility() {
+  const bulkActions = document.getElementById('bulk-actions');
+  const count = selectedAssets.size;
+  document.getElementById('selected-count').textContent = count;
+  bulkActions.style.display = count > 0 ? 'flex' : 'none';
+}
+
+function clearSelection() {
+  selectedAssets.clear();
+  const checkboxes = document.querySelectorAll('.asset-checkbox');
+  checkboxes.forEach(cb => cb.checked = false);
+  document.getElementById('select-all').checked = false;
+  updateBulkActionsVisibility();
+}
+
+async function bulkAssignOwner() {
+  const ownerId = document.getElementById('bulk-owner-select').value;
+  if (!ownerId) {
+    showError('Please select a user');
+    return;
+  }
+
+  if (selectedAssets.size === 0) {
+    showError('No assets selected');
+    return;
+  }
+
+  try {
+    await api.bulkAssignAssets(Array.from(selectedAssets), ownerId);
+    showSuccess(`Assigned user to ${selectedAssets.size} assets`);
+    clearSelection();
+    loadAssets();
+  } catch (error) {
+    showError(error.message);
+  }
+}
+
+async function bulkReassignTeam() {
+  const teamId = document.getElementById('bulk-team-select').value;
+  if (!teamId) {
+    showError('Please select a team');
+    return;
+  }
+
+  if (selectedAssets.size === 0) {
+    showError('No assets selected');
+    return;
+  }
+
+  const count = selectedAssets.size;
+  if (!confirm(`Reassign ${count} asset(s) to the selected team?`)) return;
+
+  try {
+    // Update each asset's owner_team_id
+    let successCount = 0;
+    for (const assetId of selectedAssets) {
+      try {
+        await api.updateAsset(assetId, { owner_team_id: teamId });
+        successCount++;
+      } catch (e) {
+        console.error(`Failed to update asset ${assetId}:`, e);
+      }
+    }
+    showSuccess(`Reassigned ${successCount} of ${count} assets to new team`);
+    clearSelection();
+    loadAssets();
+  } catch (error) {
+    showError(error.message);
+  }
+}
+
+async function bulkDeleteAssets() {
+  if (selectedAssets.size === 0) {
+    showError('No assets selected');
+    return;
+  }
+
+  const count = selectedAssets.size;
+  if (!confirm(`Delete ${count} asset(s)? This action cannot be undone.`)) return;
+
+  try {
+    let successCount = 0;
+    for (const assetId of selectedAssets) {
+      try {
+        await api.deleteAsset(assetId);
+        successCount++;
+      } catch (e) {
+        console.error(`Failed to delete asset ${assetId}:`, e);
+      }
+    }
+    showSuccess(`Deleted ${successCount} of ${count} assets`);
+    clearSelection();
+    loadAssets();
+  } catch (error) {
+    showError(error.message);
+  }
+}
+
+function clearFilters() {
+  document.getElementById('search-fqn').value = '';
+  document.getElementById('filter-team').value = '';
+  document.getElementById('filter-owner').value = '';
+  window.history.replaceState({}, '', '/assets');
+  loadAssets();
+}
+
+// Load filter options
+async function loadFilterOptions() {
+  try {
+    // Load teams
+    const teamsData = await api.listTeams({ limit: 100 });
+    const teamSelect = document.getElementById('filter-team');
+    teamSelect.innerHTML = '<option value="">All teams</option>' +
+      teamsData.results.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
+
+    // Also populate bulk team select
+    const bulkTeamSelect = document.getElementById('bulk-team-select');
+    bulkTeamSelect.innerHTML = '<option value="">Select team...</option>' +
+      teamsData.results.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
+
+    // Load users
+    const usersData = await api.listUsers({ limit: 100 });
+    const ownerSelect = document.getElementById('filter-owner');
+    ownerSelect.innerHTML = '<option value="">All owners</option><option value="unassigned">Unassigned</option>' +
+      usersData.results.map(u => `<option value="${u.id}">${escapeHtml(u.name)}</option>`).join('');
+
+    // Also populate bulk user assign select
+    const bulkSelect = document.getElementById('bulk-owner-select');
+    bulkSelect.innerHTML = '<option value="">Select user...</option>' +
+      usersData.results.map(u => `<option value="${u.id}">${escapeHtml(u.name)}</option>`).join('');
+  } catch (error) {
+    console.error('Failed to load filter options:', error);
+  }
+}
+
+// Initialize
+loadFilterOptions();
 loadAssets();
 </script>
 {% endblock %}

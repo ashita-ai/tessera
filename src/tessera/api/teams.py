@@ -6,6 +6,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request, Security
 from fastapi.security import APIKeyHeader
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,8 +22,8 @@ from tessera.api.errors import (
 from tessera.api.pagination import PaginationParams, paginate, pagination_params
 from tessera.api.rate_limit import limit_read, limit_write
 from tessera.config import settings
-from tessera.db import AssetDB, TeamDB, get_session
-from tessera.models import Team, TeamCreate, TeamUpdate
+from tessera.db import AssetDB, TeamDB, UserDB, get_session
+from tessera.models import Team, TeamCreate, TeamUpdate, User
 from tessera.models.enums import APIKeyScope
 from tessera.services.cache import team_cache
 
@@ -217,12 +218,14 @@ async def delete_team(
     request: Request,
     team_id: UUID,
     auth: Auth,
+    force: bool = Query(False, description="Force delete even if team has assets"),
     _: None = RequireAdmin,
     session: AsyncSession = Depends(get_session),
 ) -> None:
     """Soft delete a team.
 
-    Requires admin scope.
+    Requires admin scope. Will fail if team owns assets unless force=true.
+    Use /teams/{team_id}/reassign-assets to reassign assets first.
     """
     result = await session.execute(
         select(TeamDB).where(TeamDB.id == team_id).where(TeamDB.deleted_at.is_(None))
@@ -230,6 +233,24 @@ async def delete_team(
     team = result.scalar_one_or_none()
     if not team:
         raise NotFoundError(ErrorCode.TEAM_NOT_FOUND, "Team not found")
+
+    # Check if team has assets
+    asset_count_result = await session.execute(
+        select(func.count(AssetDB.id))
+        .where(AssetDB.owner_team_id == team_id)
+        .where(AssetDB.deleted_at.is_(None))
+    )
+    asset_count = asset_count_result.scalar() or 0
+
+    if asset_count > 0 and not force:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "TEAM_HAS_ASSETS",
+                "message": f"Team owns {asset_count} asset(s). Reassign or use force=true.",
+                "asset_count": asset_count,
+            },
+        )
 
     team.deleted_at = datetime.now(UTC)
     await session.flush()
@@ -267,3 +288,124 @@ async def restore_team(
     await team_cache.delete(str(team_id))
 
     return team
+
+
+@router.get("/{team_id}/members")
+@limit_read
+async def list_team_members(
+    request: Request,
+    team_id: UUID,
+    auth: Auth,
+    params: PaginationParams = Depends(pagination_params),
+    _: None = RequireRead,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """List all members of a team.
+
+    Requires read scope.
+    """
+    # Verify team exists
+    result = await session.execute(
+        select(TeamDB).where(TeamDB.id == team_id).where(TeamDB.deleted_at.is_(None))
+    )
+    team = result.scalar_one_or_none()
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+
+    # Build query for team members
+    base_query = (
+        select(UserDB).where(UserDB.team_id == team_id).where(UserDB.deactivated_at.is_(None))
+    )
+
+    # Get total count
+    count_query = select(func.count()).select_from(base_query.subquery())
+    total_result = await session.execute(count_query)
+    total = total_result.scalar() or 0
+
+    # Paginate
+    query = base_query.order_by(UserDB.name).limit(params.limit).offset(params.offset)
+    result = await session.execute(query)
+    users = list(result.scalars().all())
+
+    results = [User.model_validate(u).model_dump() for u in users]
+
+    return {
+        "results": results,
+        "total": total,
+        "limit": params.limit,
+        "offset": params.offset,
+    }
+
+
+class ReassignAssetsRequest(BaseModel):
+    """Request body for reassigning assets."""
+
+    target_team_id: UUID
+    asset_ids: list[UUID] | None = None  # If None, reassign all assets
+
+
+@router.post("/{team_id}/reassign-assets")
+@limit_write
+async def reassign_team_assets(
+    request: Request,
+    team_id: UUID,
+    reassign: ReassignAssetsRequest,
+    auth: Auth,
+    _: None = RequireAdmin,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Reassign assets from this team to another team.
+
+    Requires admin scope. Can reassign all assets or specific ones by ID.
+    """
+    # Verify source team exists
+    source_result = await session.execute(
+        select(TeamDB).where(TeamDB.id == team_id).where(TeamDB.deleted_at.is_(None))
+    )
+    source_team = source_result.scalar_one_or_none()
+    if not source_team:
+        raise HTTPException(status_code=404, detail="Source team not found")
+
+    # Verify target team exists
+    target_result = await session.execute(
+        select(TeamDB)
+        .where(TeamDB.id == reassign.target_team_id)
+        .where(TeamDB.deleted_at.is_(None))
+    )
+    target_team = target_result.scalar_one_or_none()
+    if not target_team:
+        raise HTTPException(status_code=404, detail="Target team not found")
+
+    if team_id == reassign.target_team_id:
+        raise HTTPException(status_code=400, detail="Source and target team cannot be the same")
+
+    # Build query for assets to reassign
+    query = (
+        select(AssetDB).where(AssetDB.owner_team_id == team_id).where(AssetDB.deleted_at.is_(None))
+    )
+
+    if reassign.asset_ids:
+        query = query.where(AssetDB.id.in_(reassign.asset_ids))
+
+    assets_result = await session.execute(query)
+    assets = list(assets_result.scalars().all())
+
+    if not assets:
+        return {
+            "reassigned": 0,
+            "source_team": {"id": str(team_id), "name": source_team.name},
+            "target_team": {"id": str(reassign.target_team_id), "name": target_team.name},
+        }
+
+    # Reassign assets
+    for asset in assets:
+        asset.owner_team_id = reassign.target_team_id
+
+    await session.flush()
+
+    return {
+        "reassigned": len(assets),
+        "source_team": {"id": str(team_id), "name": source_team.name},
+        "target_team": {"id": str(reassign.target_team_id), "name": target_team.name},
+        "asset_ids": [str(a.id) for a in assets],
+    }

@@ -130,11 +130,15 @@ class ContractDB(Base):
     published_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, index=True
     )
-    published_by: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    published_by: Mapped[UUID] = mapped_column(Uuid, nullable=False)  # Team ID
+    published_by_user_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("users.id"), nullable=True, index=True
+    )  # Individual who published
 
     # Relationships
     asset: Mapped["AssetDB"] = relationship(back_populates="contracts")
     registrations: Mapped[list["RegistrationDB"]] = relationship(back_populates="contract")
+    published_by_user: Mapped["UserDB | None"] = relationship()
 
 
 class RegistrationDB(Base):
@@ -177,7 +181,10 @@ class ProposalDB(Base):
     status: Mapped[ProposalStatus] = mapped_column(
         Enum(ProposalStatus), default=ProposalStatus.PENDING, index=True
     )
-    proposed_by: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    proposed_by: Mapped[UUID] = mapped_column(Uuid, nullable=False)  # Team ID
+    proposed_by_user_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("users.id"), nullable=True, index=True
+    )  # Individual who proposed
     proposed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, index=True
     )
@@ -186,6 +193,7 @@ class ProposalDB(Base):
     # Relationships
     asset: Mapped["AssetDB"] = relationship(back_populates="proposals")
     acknowledgments: Mapped[list["AcknowledgmentDB"]] = relationship(back_populates="proposal")
+    proposed_by_user: Mapped["UserDB | None"] = relationship()
 
 
 class AcknowledgmentDB(Base):
@@ -200,6 +208,9 @@ class AcknowledgmentDB(Base):
     consumer_team_id: Mapped[UUID] = mapped_column(
         Uuid, ForeignKey("teams.id"), nullable=False, index=True
     )
+    acknowledged_by_user_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("users.id"), nullable=True, index=True
+    )  # Individual who acknowledged
     response: Mapped[AcknowledgmentResponseType] = mapped_column(
         Enum(AcknowledgmentResponseType), nullable=False
     )
@@ -211,6 +222,7 @@ class AcknowledgmentDB(Base):
 
     # Relationships
     proposal: Mapped["ProposalDB"] = relationship(back_populates="acknowledgments")
+    acknowledged_by_user: Mapped["UserDB | None"] = relationship()
 
 
 class AssetDependencyDB(Base):

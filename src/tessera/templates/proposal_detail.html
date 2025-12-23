@@ -148,11 +148,16 @@ async function withdrawProposal() {
   }
 }
 
-async function acknowledgeProposal(teamId, teamName) {
-  if (!confirm(`Acknowledge this breaking change as team "${teamName}"?\n\nThis confirms your team accepts the impact.`)) return;
+async function acknowledgeProposal(teamId, teamName, response = 'approved') {
+  const action = response === 'blocked' ? 'BLOCK' : 'acknowledge';
+  const message = response === 'blocked'
+    ? `Block this proposal as team "${teamName}"?\n\nThis will REJECT the proposal and prevent the breaking change.`
+    : `Acknowledge this breaking change as team "${teamName}"?\n\nThis confirms your team accepts the impact.`;
+
+  if (!confirm(message)) return;
 
   try {
-    await api.acknowledgeProposal(proposalId, teamId);
+    await api.acknowledgeProposal(proposalId, teamId, response);
     loadProposalDetail();
   } catch (error) {
     showError(error.message);
@@ -272,7 +277,13 @@ async function loadProposalDetail() {
       <div style="display: flex; justify-content: space-between; align-items: flex-start;">
         <div>
           <h2 style="margin-bottom: 0.5rem;">Breaking Change Proposal</h2>
-          <p style="color: var(--gray); margin-top: 0;">Proposed by <a href="/teams/${status?.proposed_by?.team_id}">${escapeHtml(status?.proposed_by?.team_name || 'Unknown')}</a></p>
+          <p style="color: var(--gray); margin-top: 0;">
+            Proposed by <a href="/teams/${status?.proposed_by?.team_id}">${escapeHtml(status?.proposed_by?.team_name || 'Unknown')}</a>
+            ${status?.proposed_by?.user_name
+              ? ` (<a href="/users/${status.proposed_by.user_id}">${escapeHtml(status.proposed_by.user_name)}</a>)`
+              : ''
+            }
+          </p>
         </div>
         <span class="status status-${proposal.status}" style="font-size: 1rem; padding: 0.5rem 1rem;">${proposal.status.toUpperCase()}</span>
       </div>
@@ -395,7 +406,10 @@ async function loadProposalDetail() {
                   <tr>
                     <td><a href="/teams/${c.team_id}">${escapeHtml(c.team_name)}</a></td>
                     <td>${formatDate(c.registered_at)}</td>
-                    <td>${isPending ? `<button class="secondary" onclick="acknowledgeProposal('${c.team_id}', '${escapeHtml(c.team_name)}')">Acknowledge</button>` : '-'}</td>
+                    <td>${isPending ? `
+                      <button class="secondary" onclick="acknowledgeProposal('${c.team_id}', '${escapeHtml(c.team_name)}', 'approved')">Approve</button>
+                      <button class="secondary" style="background: var(--error); color: white;" onclick="acknowledgeProposal('${c.team_id}', '${escapeHtml(c.team_name)}', 'blocked')">Block</button>
+                    ` : '-'}</td>
                   </tr>
                 `).join('')}
               </tbody>
@@ -413,6 +427,7 @@ async function loadProposalDetail() {
           <thead>
             <tr>
               <th>Team</th>
+              <th>Acknowledged By</th>
               <th>Response</th>
               <th>Responded</th>
               <th>Notes</th>
@@ -422,6 +437,10 @@ async function loadProposalDetail() {
             ${acknowledgedConsumers.map(a => `
               <tr>
                 <td><a href="/teams/${a.consumer_team_id}">${escapeHtml(a.consumer_team_name)}</a></td>
+                <td>${a.acknowledged_by_user_name
+                  ? `<a href="/users/${a.acknowledged_by_user_id}">${escapeHtml(a.acknowledged_by_user_name)}</a>`
+                  : '<em style="color: var(--gray);">-</em>'
+                }</td>
                 <td><span class="status status-${a.response === 'blocked' ? 'deprecated' : 'active'}">${a.response}</span></td>
                 <td>${formatDate(a.responded_at)}</td>
                 <td>${a.notes ? escapeHtml(a.notes) : '<em>-</em>'}</td>

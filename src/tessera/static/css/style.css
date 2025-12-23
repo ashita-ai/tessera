@@ -49,6 +49,12 @@ header h1 a {
   text-decoration: none;
 }
 
+.logo {
+  height: 32px;
+  width: auto;
+  display: block;
+}
+
 /* Navigation */
 nav {
   margin-top: 1rem;
@@ -235,6 +241,78 @@ button.secondary {
 button.secondary:hover {
   background: var(--black);
   color: var(--white);
+}
+
+/* Radio button groups */
+.radio-group {
+  margin-bottom: 1rem;
+}
+
+.radio-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  margin: 0.5rem 0;
+  border: 1px solid var(--light-gray);
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: normal;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+
+.radio-option:hover {
+  border-color: var(--gray);
+  background: var(--light-gray);
+}
+
+.radio-option input[type="radio"] {
+  width: auto;
+  margin: 0.2rem 0 0 0;
+  flex-shrink: 0;
+}
+
+.radio-option input[type="radio"]:checked + .radio-content {
+  color: var(--black);
+}
+
+.radio-option:has(input:checked) {
+  border-color: var(--black);
+  background: var(--light-gray);
+}
+
+.radio-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.radio-content strong {
+  font-weight: 600;
+}
+
+.radio-content span {
+  color: var(--gray);
+  font-size: 0.9em;
+}
+
+/* Checkbox groups */
+.checkbox-group {
+  margin-bottom: 1rem;
+}
+
+.checkbox-option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+  cursor: pointer;
+  font-weight: normal;
+}
+
+.checkbox-option input[type="checkbox"] {
+  width: auto;
+  margin: 0;
 }
 
 /* Loading */

@@ -1,0 +1,190 @@
+{% extends "base.html" %}
+
+{% block title %}Import - Tessera{% endblock %}
+
+{% block content %}
+<section>
+  <h2>Import dbt Manifest</h2>
+  <p style="color: var(--gray); margin-bottom: 1.5rem;">
+    Import assets from a dbt manifest.json file. Assets will be created with their metadata,
+    columns, and descriptions from the manifest.
+  </p>
+
+  <div class="card" style="max-width: 700px;">
+    <form id="import-form" onsubmit="handleImport(event)">
+      <label for="manifest-file">manifest.json File</label>
+      <input type="file" id="manifest-file" accept=".json" required style="margin-bottom: 1rem;">
+      <p id="file-info" style="color: var(--gray); font-size: 0.9em; margin-top: -0.5rem;"></p>
+
+      <label for="owner-team">Owner Team</label>
+      <select id="owner-team" required>
+        <option value="">Loading teams...</option>
+      </select>
+      <p style="color: var(--gray); font-size: 0.9em; margin-top: 0.25rem;">
+        All imported assets will be assigned to this team.
+      </p>
+
+      <label style="margin-top: 1rem;">Conflict Handling</label>
+      <div class="radio-group">
+        <label class="radio-option">
+          <input type="radio" name="conflict-mode" value="ignore" checked>
+          <div class="radio-content">
+            <strong>Skip existing</strong>
+            <span>Only import new assets. Existing assets are left unchanged.</span>
+          </div>
+        </label>
+        <label class="radio-option">
+          <input type="radio" name="conflict-mode" value="overwrite">
+          <div class="radio-content">
+            <strong>Overwrite</strong>
+            <span>Update existing assets with new metadata from manifest.</span>
+          </div>
+        </label>
+        <label class="radio-option">
+          <input type="radio" name="conflict-mode" value="fail">
+          <div class="radio-content">
+            <strong>Stop on conflict</strong>
+            <span>Abort import if any asset already exists. Nothing is imported.</span>
+          </div>
+        </label>
+      </div>
+
+      <div style="margin-top: 1.5rem; display: flex; gap: 0.5rem;">
+        <button type="submit" id="import-btn">Import Manifest</button>
+        <a href="/assets" class="secondary" style="padding: 0.6rem 1rem; text-decoration: none;">Cancel</a>
+      </div>
+    </form>
+  </div>
+
+  <div id="import-result" style="display: none; margin-top: 2rem; max-width: 700px;"></div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let manifestData = null;
+
+document.getElementById('manifest-file').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  const fileInfo = document.getElementById('file-info');
+
+  if (!file) {
+    manifestData = null;
+    fileInfo.textContent = '';
+    return;
+  }
+
+  try {
+    const text = await file.text();
+    manifestData = JSON.parse(text);
+
+    // Count models and sources
+    const nodes = manifestData.nodes || {};
+    const sources = manifestData.sources || {};
+    const modelCount = Object.values(nodes).filter(n =>
+      ['model', 'seed', 'snapshot'].includes(n.resource_type)
+    ).length;
+    const sourceCount = Object.keys(sources).length;
+
+    fileInfo.innerHTML = `<span style="color: green;">Valid manifest:</span> ${modelCount} models, ${sourceCount} sources`;
+  } catch (err) {
+    manifestData = null;
+    fileInfo.innerHTML = `<span style="color: red;">Invalid JSON:</span> ${err.message}`;
+  }
+});
+
+async function loadTeams() {
+  try {
+    const data = await api.listTeams({ limit: 100 });
+    const select = document.getElementById('owner-team');
+    select.innerHTML = '<option value="">Select a team...</option>' +
+      data.results.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
+  } catch (error) {
+    showError('Failed to load teams: ' + error.message);
+  }
+}
+
+async function handleImport(event) {
+  event.preventDefault();
+
+  if (!manifestData) {
+    showError('Please select a valid manifest.json file');
+    return;
+  }
+
+  const ownerTeamId = document.getElementById('owner-team').value;
+  if (!ownerTeamId) {
+    showError('Please select an owner team');
+    return;
+  }
+
+  const conflictMode = document.querySelector('input[name="conflict-mode"]:checked').value;
+
+  const btn = document.getElementById('import-btn');
+  btn.disabled = true;
+  btn.textContent = 'Importing...';
+
+  try {
+    const result = await api.uploadDbtManifest(manifestData, ownerTeamId, conflictMode);
+
+    const resultDiv = document.getElementById('import-result');
+    resultDiv.style.display = 'block';
+    resultDiv.innerHTML = `
+      <div class="card" style="background: #d4edda; border-color: #c3e6cb;">
+        <h3 style="color: #155724; margin-top: 0;">Import Successful</h3>
+        <table style="width: auto;">
+          <tr><td style="padding: 0.25rem 1rem 0.25rem 0;"><strong>Assets Created:</strong></td><td>${result.assets.created}</td></tr>
+          <tr><td style="padding: 0.25rem 1rem 0.25rem 0;"><strong>Assets Updated:</strong></td><td>${result.assets.updated}</td></tr>
+          <tr><td style="padding: 0.25rem 1rem 0.25rem 0;"><strong>Assets Skipped:</strong></td><td>${result.assets.skipped}</td></tr>
+          <tr><td style="padding: 0.25rem 1rem 0.25rem 0;"><strong>Guarantees Extracted:</strong></td><td>${result.guarantees_extracted}</td></tr>
+        </table>
+        <p style="margin-bottom: 0; margin-top: 1rem;">
+          <a href="/assets">View all assets &rarr;</a>
+        </p>
+      </div>
+    `;
+
+    // Reset form
+    document.getElementById('import-form').reset();
+    document.getElementById('file-info').textContent = '';
+    manifestData = null;
+
+  } catch (error) {
+    const resultDiv = document.getElementById('import-result');
+    resultDiv.style.display = 'block';
+
+    if (error.status === 409) {
+      // Conflict error
+      const detail = typeof error.message === 'object' ? error.message : { message: error.message };
+      resultDiv.innerHTML = `
+        <div class="card" style="background: #fff3cd; border-color: #ffc107;">
+          <h3 style="color: #856404; margin-top: 0;">Import Stopped - Conflicts Found</h3>
+          <p>${escapeHtml(detail.message || 'Existing assets found')}</p>
+          ${detail.conflicts ? `
+            <p><strong>Conflicting assets:</strong></p>
+            <ul style="margin: 0;">
+              ${detail.conflicts.map(c => `<li><code>${escapeHtml(c)}</code></li>`).join('')}
+            </ul>
+          ` : ''}
+          <p style="margin-bottom: 0; margin-top: 1rem;">
+            Choose "Skip existing" or "Overwrite" mode to continue.
+          </p>
+        </div>
+      `;
+    } else {
+      resultDiv.innerHTML = `
+        <div class="card" style="background: #f8d7da; border-color: #f5c6cb;">
+          <h3 style="color: #721c24; margin-top: 0;">Import Failed</h3>
+          <p>${escapeHtml(error.message)}</p>
+        </div>
+      `;
+    }
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Import Manifest';
+  }
+}
+
+loadTeams();
+</script>
+{% endblock %}

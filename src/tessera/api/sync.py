@@ -18,11 +18,94 @@ from tessera.api.auth import Auth, RequireAdmin
 from tessera.api.errors import BadRequestError, ErrorCode, NotFoundError
 from tessera.api.rate_limit import limit_admin
 from tessera.config import settings
-from tessera.db import AssetDB, ContractDB, RegistrationDB, TeamDB, get_session
+from tessera.db import AssetDB, ContractDB, RegistrationDB, TeamDB, UserDB, get_session
 from tessera.models.enums import CompatibilityMode, ContractStatus, RegistrationStatus
+from tessera.services import validate_json_schema
 from tessera.services.schema_diff import check_compatibility, diff_schemas
 
 router = APIRouter()
+
+
+class TesseraMetaConfig:
+    """Parsed tessera configuration from dbt model meta."""
+
+    def __init__(
+        self,
+        owner_team: str | None = None,
+        owner_user: str | None = None,
+        consumers: list[dict[str, Any]] | None = None,
+        freshness: dict[str, Any] | None = None,
+        volume: dict[str, Any] | None = None,
+        compatibility_mode: str | None = None,
+    ):
+        self.owner_team = owner_team
+        self.owner_user = owner_user
+        self.consumers = consumers or []
+        self.freshness = freshness
+        self.volume = volume
+        self.compatibility_mode = compatibility_mode
+
+
+def extract_tessera_meta(node: dict[str, Any]) -> TesseraMetaConfig:
+    """Extract tessera configuration from dbt model meta.
+
+    Looks for meta.tessera in the node and parses ownership, consumers, and SLAs.
+
+    Example dbt YAML:
+    ```yaml
+    models:
+      - name: orders
+        meta:
+          tessera:
+            owner_team: data-platform
+            owner_user: alice@corp.com
+            consumers:
+              - team: marketing
+                purpose: Campaign attribution
+              - team: finance
+            freshness:
+              max_staleness_minutes: 60
+            volume:
+              min_rows: 1000
+            compatibility_mode: backward
+    ```
+    """
+    meta = node.get("meta", {})
+    tessera_config = meta.get("tessera", {})
+
+    if not tessera_config:
+        return TesseraMetaConfig()
+
+    return TesseraMetaConfig(
+        owner_team=tessera_config.get("owner_team"),
+        owner_user=tessera_config.get("owner_user"),
+        consumers=tessera_config.get("consumers", []),
+        freshness=tessera_config.get("freshness"),
+        volume=tessera_config.get("volume"),
+        compatibility_mode=tessera_config.get("compatibility_mode"),
+    )
+
+
+async def resolve_team_by_name(
+    session: AsyncSession,
+    team_name: str,
+) -> TeamDB | None:
+    """Look up a team by name (case-insensitive)."""
+    result = await session.execute(
+        select(TeamDB).where(TeamDB.name.ilike(team_name)).where(TeamDB.deleted_at.is_(None))
+    )
+    return result.scalar_one_or_none()
+
+
+async def resolve_user_by_email(
+    session: AsyncSession,
+    email: str,
+) -> UserDB | None:
+    """Look up a user by email (case-insensitive)."""
+    result = await session.execute(
+        select(UserDB).where(UserDB.email.ilike(email)).where(UserDB.deactivated_at.is_(None))
+    )
+    return result.scalar_one_or_none()
 
 
 def _require_git_sync_path() -> Path:
@@ -204,6 +287,32 @@ class DbtManifestRequest(BaseModel):
     owner_team_id: UUID = Field(..., description="Team ID to use for new assets")
 
 
+class DbtManifestUploadRequest(BaseModel):
+    """Request body for uploading a dbt manifest with conflict handling."""
+
+    manifest: dict[str, Any] = Field(..., description="Full dbt manifest.json contents")
+    owner_team_id: UUID | None = Field(
+        None,
+        description="Default team ID. Overridden by meta.tessera.owner_team.",
+    )
+    conflict_mode: str = Field(
+        default="ignore",
+        description="'overwrite', 'ignore', or 'fail' on conflict",
+    )
+    auto_publish_contracts: bool = Field(
+        default=False,
+        description="Automatically publish initial contracts for new assets with column schemas",
+    )
+    auto_register_consumers: bool = Field(
+        default=False,
+        description="Register consumers from meta.tessera.consumers and refs",
+    )
+    infer_consumers_from_refs: bool = Field(
+        default=True,
+        description="Infer consumer relationships from dbt ref() dependencies (depends_on)",
+    )
+
+
 class DbtImpactResult(BaseModel):
     """Impact analysis result for a single dbt model."""
 
@@ -223,6 +332,31 @@ class DbtImpactResponse(BaseModel):
     models_with_contracts: int
     breaking_changes_count: int
     results: list[DbtImpactResult]
+
+
+class DbtDiffItem(BaseModel):
+    """A single change detected in dbt manifest."""
+
+    fqn: str
+    node_id: str
+    change_type: str  # 'new', 'modified', 'deleted', 'unchanged'
+    owner_team: str | None = None
+    consumers_declared: int = 0
+    consumers_from_refs: int = 0
+    has_schema: bool = False
+    schema_change_type: str | None = None  # 'none', 'compatible', 'breaking'
+    breaking_changes: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class DbtDiffResponse(BaseModel):
+    """Response from dbt manifest diff (CI preview)."""
+
+    status: str  # 'clean', 'changes_detected', 'breaking_changes_detected'
+    summary: dict[str, int]  # {'new': N, 'modified': M, 'deleted': D, 'breaking': B}
+    blocking: bool  # True if CI should fail
+    models: list[DbtDiffItem]
+    warnings: list[str] = Field(default_factory=list)
+    meta_errors: list[str] = Field(default_factory=list)  # Missing teams, etc.
 
 
 @router.post("/push")
@@ -679,6 +813,507 @@ async def _check_dbt_node_impact(
     )
 
 
+@router.post("/dbt/upload")
+@limit_admin
+async def upload_dbt_manifest(
+    request: Request,
+    upload_req: DbtManifestUploadRequest,
+    auth: Auth,
+    _: None = RequireAdmin,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Import assets from an uploaded dbt manifest.json.
+
+    Accepts manifest JSON in the request body with conflict handling options:
+    - overwrite: Update existing assets with new data
+    - ignore: Skip assets that already exist (default)
+    - fail: Return error if any asset already exists
+    """
+    manifest = upload_req.manifest
+    owner_team_id = upload_req.owner_team_id
+    conflict_mode = upload_req.conflict_mode
+
+    if conflict_mode not in ("overwrite", "ignore", "fail"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid conflict_mode: {conflict_mode}. Use 'overwrite', 'ignore', or 'fail'",
+        )
+
+    assets_created = 0
+    assets_updated = 0
+    assets_skipped = 0
+    contracts_published = 0
+    registrations_created = 0
+    conflicts: list[str] = []
+    ownership_warnings: list[str] = []
+    contract_warnings: list[str] = []
+    registration_warnings: list[str] = []
+
+    # Track newly created assets for auto-publish
+    new_assets_for_contracts: list[
+        tuple[AssetDB, dict[str, Any], dict[str, Any] | None, str | None]
+    ] = []
+
+    # Track consumer relationships for auto-registration
+    # Maps FQN -> (asset, team_id, depends_on_node_ids, meta_consumers)
+    asset_consumer_map: dict[str, tuple[AssetDB, UUID, list[str], list[dict[str, Any]]]] = {}
+
+    # Build node_id -> FQN mapping for dependency resolution
+    node_id_to_fqn: dict[str, str] = {}
+
+    # Cache team/user lookups to avoid repeated queries
+    team_cache: dict[str, TeamDB | None] = {}
+    user_cache: dict[str, UserDB | None] = {}
+
+    async def get_team_by_name(name: str) -> TeamDB | None:
+        if name not in team_cache:
+            team_cache[name] = await resolve_team_by_name(session, name)
+        return team_cache[name]
+
+    async def get_user_by_email(email: str) -> UserDB | None:
+        if email not in user_cache:
+            user_cache[email] = await resolve_user_by_email(session, email)
+        return user_cache[email]
+
+    # Process nodes (models, seeds, snapshots)
+    nodes = manifest.get("nodes", {})
+    all_nodes = nodes  # For test extraction
+    tests_extracted = 0
+
+    # First pass: build node_id -> FQN mapping
+    for node_id, node in nodes.items():
+        resource_type = node.get("resource_type")
+        if resource_type not in ("model", "seed", "snapshot"):
+            continue
+        database = node.get("database", "")
+        schema = node.get("schema", "")
+        name = node.get("name", "")
+        fqn = f"{database}.{schema}.{name}".lower()
+        node_id_to_fqn[node_id] = fqn
+
+    # Also build mapping for sources
+    sources = manifest.get("sources", {})
+    for source_id, source in sources.items():
+        database = source.get("database", "")
+        schema = source.get("schema", "")
+        name = source.get("name", "")
+        fqn = f"{database}.{schema}.{name}".lower()
+        node_id_to_fqn[source_id] = fqn
+
+    # Second pass: process nodes
+    for node_id, node in nodes.items():
+        resource_type = node.get("resource_type")
+        if resource_type not in ("model", "seed", "snapshot"):
+            continue
+
+        # Build FQN from dbt metadata
+        database = node.get("database", "")
+        schema = node.get("schema", "")
+        name = node.get("name", "")
+        fqn = f"{database}.{schema}.{name}".lower()
+
+        # Check if asset exists
+        result = await session.execute(select(AssetDB).where(AssetDB.fqn == fqn))
+        existing = result.scalar_one_or_none()
+
+        if existing:
+            if conflict_mode == "fail":
+                conflicts.append(fqn)
+                continue
+            elif conflict_mode == "ignore":
+                assets_skipped += 1
+                continue
+            # else overwrite - continue to update
+
+        # Extract tessera meta for ownership
+        tessera_meta = extract_tessera_meta(node)
+        resolved_team_id = owner_team_id
+        resolved_user_id: UUID | None = None
+
+        # Resolve owner_team from meta.tessera.owner_team
+        if tessera_meta.owner_team:
+            team = await get_team_by_name(tessera_meta.owner_team)
+            if team:
+                resolved_team_id = team.id
+            else:
+                ownership_warnings.append(
+                    f"{fqn}: owner_team '{tessera_meta.owner_team}' not found, using default"
+                )
+
+        # Resolve owner_user from meta.tessera.owner_user
+        if tessera_meta.owner_user:
+            user = await get_user_by_email(tessera_meta.owner_user)
+            if user:
+                resolved_user_id = user.id
+            else:
+                ownership_warnings.append(
+                    f"{fqn}: owner_user '{tessera_meta.owner_user}' not found"
+                )
+
+        # Require at least a team ID
+        if resolved_team_id is None:
+            ownership_warnings.append(
+                f"{fqn}: No owner_team_id provided and no meta.tessera.owner_team set, skipping"
+            )
+            assets_skipped += 1
+            continue
+
+        # Extract guarantees from dbt tests
+        guarantees = extract_guarantees_from_tests(node_id, node, all_nodes)
+        if guarantees:
+            tests_extracted += 1
+
+        # Merge guarantees from meta.tessera (freshness, volume)
+        if tessera_meta.freshness or tessera_meta.volume:
+            if guarantees is None:
+                guarantees = {}
+            if tessera_meta.freshness:
+                guarantees["freshness"] = tessera_meta.freshness
+            if tessera_meta.volume:
+                guarantees["volume"] = tessera_meta.volume
+
+        # Build metadata from dbt
+        metadata = {
+            "dbt_node_id": node_id,
+            "resource_type": resource_type,
+            "description": node.get("description", ""),
+            "tags": node.get("tags", []),
+            "dbt_fqn": node.get("fqn", []),
+            "path": node.get("path", ""),
+            "depends_on": node.get("depends_on", {}).get("nodes", []),
+            "columns": {
+                col_name: {
+                    "description": col_info.get("description", ""),
+                    "data_type": col_info.get("data_type"),
+                }
+                for col_name, col_info in node.get("columns", {}).items()
+            },
+        }
+        if guarantees:
+            metadata["guarantees"] = guarantees
+        # Store tessera meta for reference
+        if tessera_meta.consumers:
+            metadata["tessera_consumers"] = tessera_meta.consumers
+
+        if existing:
+            existing.metadata_ = metadata
+            existing.owner_team_id = resolved_team_id
+            if resolved_user_id:
+                existing.owner_user_id = resolved_user_id
+            assets_updated += 1
+        else:
+            new_asset = AssetDB(
+                fqn=fqn,
+                owner_team_id=resolved_team_id,
+                owner_user_id=resolved_user_id,
+                metadata_=metadata,
+            )
+            session.add(new_asset)
+            assets_created += 1
+
+            # Track for auto-publish if it has columns
+            columns = node.get("columns", {})
+            if upload_req.auto_publish_contracts and columns:
+                new_assets_for_contracts.append(
+                    (new_asset, columns, guarantees, tessera_meta.compatibility_mode)
+                )
+
+            # Track for consumer registration
+            if upload_req.auto_register_consumers:
+                depends_on_nodes = node.get("depends_on", {}).get("nodes", [])
+                asset_consumer_map[fqn] = (
+                    new_asset,
+                    resolved_team_id,
+                    depends_on_nodes if upload_req.infer_consumers_from_refs else [],
+                    tessera_meta.consumers,
+                )
+
+    # Process sources
+    sources = manifest.get("sources", {})
+    for source_id, source in sources.items():
+        database = source.get("database", "")
+        schema = source.get("schema", "")
+        name = source.get("name", "")
+        fqn = f"{database}.{schema}.{name}".lower()
+
+        result = await session.execute(select(AssetDB).where(AssetDB.fqn == fqn))
+        existing = result.scalar_one_or_none()
+
+        if existing:
+            if conflict_mode == "fail":
+                conflicts.append(fqn)
+                continue
+            elif conflict_mode == "ignore":
+                assets_skipped += 1
+                continue
+
+        # Extract tessera meta for ownership (sources support meta too)
+        tessera_meta = extract_tessera_meta(source)
+        resolved_team_id = owner_team_id
+        resolved_user_id = None
+
+        if tessera_meta.owner_team:
+            team = await get_team_by_name(tessera_meta.owner_team)
+            if team:
+                resolved_team_id = team.id
+            else:
+                ownership_warnings.append(
+                    f"{fqn}: owner_team '{tessera_meta.owner_team}' not found, using default"
+                )
+
+        if tessera_meta.owner_user:
+            user = await get_user_by_email(tessera_meta.owner_user)
+            if user:
+                resolved_user_id = user.id
+            else:
+                ownership_warnings.append(
+                    f"{fqn}: owner_user '{tessera_meta.owner_user}' not found"
+                )
+
+        if resolved_team_id is None:
+            ownership_warnings.append(
+                f"{fqn}: No owner_team_id provided and no meta.tessera.owner_team set, skipping"
+            )
+            assets_skipped += 1
+            continue
+
+        guarantees = extract_guarantees_from_tests(source_id, source, all_nodes)
+        if guarantees:
+            tests_extracted += 1
+
+        # Merge guarantees from meta.tessera
+        if tessera_meta.freshness or tessera_meta.volume:
+            if guarantees is None:
+                guarantees = {}
+            if tessera_meta.freshness:
+                guarantees["freshness"] = tessera_meta.freshness
+            if tessera_meta.volume:
+                guarantees["volume"] = tessera_meta.volume
+
+        metadata = {
+            "dbt_source_id": source_id,
+            "resource_type": "source",
+            "description": source.get("description", ""),
+            "columns": {
+                col_name: {
+                    "description": col_info.get("description", ""),
+                    "data_type": col_info.get("data_type"),
+                }
+                for col_name, col_info in source.get("columns", {}).items()
+            },
+        }
+        if guarantees:
+            metadata["guarantees"] = guarantees
+        if tessera_meta.consumers:
+            metadata["tessera_consumers"] = tessera_meta.consumers
+
+        if existing:
+            existing.metadata_ = metadata
+            existing.owner_team_id = resolved_team_id
+            if resolved_user_id:
+                existing.owner_user_id = resolved_user_id
+            assets_updated += 1
+        else:
+            new_asset = AssetDB(
+                fqn=fqn,
+                owner_team_id=resolved_team_id,
+                owner_user_id=resolved_user_id,
+                metadata_=metadata,
+            )
+            session.add(new_asset)
+            assets_created += 1
+
+            # Track for auto-publish if it has columns
+            columns = source.get("columns", {})
+            if upload_req.auto_publish_contracts and columns:
+                new_assets_for_contracts.append(
+                    (new_asset, columns, guarantees, tessera_meta.compatibility_mode)
+                )
+
+    # If fail mode and conflicts found, raise error
+    if conflict_mode == "fail" and conflicts:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": f"Found {len(conflicts)} existing assets",
+                "conflicts": conflicts[:20],  # Limit to first 20
+            },
+        )
+
+    # Auto-publish contracts for new assets with column schemas
+    if upload_req.auto_publish_contracts and new_assets_for_contracts:
+        # Flush to get asset IDs
+        await session.flush()
+
+        for asset, columns, asset_guarantees, compat_mode_str in new_assets_for_contracts:
+            try:
+                # Convert columns to JSON Schema
+                schema_def = dbt_columns_to_json_schema(columns)
+
+                # Validate schema
+                is_valid, errors = validate_json_schema(schema_def)
+                if not is_valid:
+                    contract_warnings.append(
+                        f"{asset.fqn}: Invalid schema generated from columns: {errors}"
+                    )
+                    continue
+
+                # Determine compatibility mode
+                if compat_mode_str:
+                    try:
+                        compat_mode = CompatibilityMode(compat_mode_str.lower())
+                    except ValueError:
+                        compat_mode = CompatibilityMode.BACKWARD
+                        msg = f"{asset.fqn}: Unknown compatibility_mode, defaulting to backward"
+                        contract_warnings.append(msg)
+                else:
+                    compat_mode = CompatibilityMode.BACKWARD
+
+                # Create contract
+                new_contract = ContractDB(
+                    asset_id=asset.id,
+                    version="1.0.0",
+                    schema_def=schema_def,
+                    compatibility_mode=compat_mode,
+                    guarantees=asset_guarantees,
+                    status=ContractStatus.ACTIVE,
+                    published_by=asset.owner_team_id,
+                    published_by_user_id=asset.owner_user_id,
+                )
+                session.add(new_contract)
+                contracts_published += 1
+
+            except Exception as e:
+                contract_warnings.append(f"{asset.fqn}: Failed to publish contract: {str(e)}")
+
+    # Auto-register consumers from refs and meta.tessera.consumers
+    if upload_req.auto_register_consumers and asset_consumer_map:
+        # Build FQN -> asset lookup for the entire manifest
+        fqn_to_asset: dict[str, AssetDB] = {}
+
+        # Get all assets by FQN that we know about
+        all_fqns = list(node_id_to_fqn.values())
+        if all_fqns:
+            existing_assets_result = await session.execute(
+                select(AssetDB).where(AssetDB.fqn.in_(all_fqns))
+            )
+            for asset in existing_assets_result.scalars().all():
+                fqn_to_asset[asset.fqn] = asset
+
+        # Also include newly created assets that may not be flushed yet
+        for fqn, (asset, team_id, depends_on, meta_consumers) in asset_consumer_map.items():
+            fqn_to_asset[fqn] = asset
+
+        # Process each model's consumer relationships
+        for consumer_fqn, (
+            consumer_asset,
+            consumer_team_id,
+            depends_on_node_ids,
+            meta_consumers,
+        ) in asset_consumer_map.items():
+            # From refs (depends_on)
+            if upload_req.infer_consumers_from_refs:
+                for dep_node_id in depends_on_node_ids:
+                    upstream_fqn = node_id_to_fqn.get(dep_node_id)
+                    if not upstream_fqn:
+                        continue
+
+                    upstream_asset = fqn_to_asset.get(upstream_fqn)
+                    if not upstream_asset:
+                        continue
+
+                    # Get active contract for upstream asset
+                    contract_result = await session.execute(
+                        select(ContractDB)
+                        .where(ContractDB.asset_id == upstream_asset.id)
+                        .where(ContractDB.status == ContractStatus.ACTIVE)
+                    )
+                    contract = contract_result.scalar_one_or_none()
+                    if not contract:
+                        continue
+
+                    # Check if registration already exists
+                    existing_reg_result = await session.execute(
+                        select(RegistrationDB)
+                        .where(RegistrationDB.contract_id == contract.id)
+                        .where(RegistrationDB.consumer_team_id == consumer_team_id)
+                    )
+                    if existing_reg_result.scalar_one_or_none():
+                        continue
+
+                    # Create registration
+                    new_reg = RegistrationDB(
+                        contract_id=contract.id,
+                        consumer_team_id=consumer_team_id,
+                        status=RegistrationStatus.ACTIVE,
+                    )
+                    session.add(new_reg)
+                    registrations_created += 1
+
+            # From meta.tessera.consumers
+            for consumer_entry in meta_consumers:
+                consumer_team_name = consumer_entry.get("team")
+                if not consumer_team_name:
+                    continue
+
+                team = await get_team_by_name(consumer_team_name)
+                if not team:
+                    registration_warnings.append(
+                        f"{consumer_fqn}: consumer team '{consumer_team_name}' not found"
+                    )
+                    continue
+
+                # Get active contract for this asset
+                contract_result = await session.execute(
+                    select(ContractDB)
+                    .where(ContractDB.asset_id == consumer_asset.id)
+                    .where(ContractDB.status == ContractStatus.ACTIVE)
+                )
+                contract = contract_result.scalar_one_or_none()
+                if not contract:
+                    msg = f"{consumer_fqn}: no active contract for '{consumer_team_name}'"
+                    registration_warnings.append(msg)
+                    continue
+
+                # Check if registration already exists
+                existing_reg_result = await session.execute(
+                    select(RegistrationDB)
+                    .where(RegistrationDB.contract_id == contract.id)
+                    .where(RegistrationDB.consumer_team_id == team.id)
+                )
+                if existing_reg_result.scalar_one_or_none():
+                    continue
+
+                # Create registration
+                new_reg = RegistrationDB(
+                    contract_id=contract.id,
+                    consumer_team_id=team.id,
+                    status=RegistrationStatus.ACTIVE,
+                )
+                session.add(new_reg)
+                registrations_created += 1
+
+    return {
+        "status": "success",
+        "conflict_mode": conflict_mode,
+        "assets": {
+            "created": assets_created,
+            "updated": assets_updated,
+            "skipped": assets_skipped,
+        },
+        "contracts": {
+            "published": contracts_published,
+        },
+        "registrations": {
+            "created": registrations_created,
+        },
+        "guarantees_extracted": tests_extracted,
+        "ownership_warnings": ownership_warnings[:20] if ownership_warnings else [],
+        "contract_warnings": contract_warnings[:20] if contract_warnings else [],
+        "registration_warnings": registration_warnings[:20] if registration_warnings else [],
+    }
+
+
 @router.post("/dbt/impact", response_model=DbtImpactResponse)
 @limit_admin
 async def check_dbt_impact(
@@ -721,4 +1356,217 @@ async def check_dbt_impact(
         models_with_contracts=models_with_contracts,
         breaking_changes_count=breaking_changes_count,
         results=results,
+    )
+
+
+class DbtDiffRequest(BaseModel):
+    """Request body for dbt manifest diff (CI preview)."""
+
+    manifest: dict[str, Any] = Field(..., description="Full dbt manifest.json contents")
+    fail_on_breaking: bool = Field(
+        default=True,
+        description="Return blocking=true if any breaking changes are detected",
+    )
+
+
+@router.post("/dbt/diff", response_model=DbtDiffResponse)
+@limit_admin
+async def diff_dbt_manifest(
+    request: Request,
+    diff_req: DbtDiffRequest,
+    auth: Auth,
+    _: None = RequireAdmin,
+    session: AsyncSession = Depends(get_session),
+) -> DbtDiffResponse:
+    """Preview what would change if this manifest is applied (CI dry-run).
+
+    This is the primary CI/CD integration point. Call this in your PR checks to:
+    1. See what assets would be created/modified/deleted
+    2. Detect breaking schema changes
+    3. Validate meta.tessera configuration (team names exist, etc.)
+    4. Fail the build if breaking changes aren't acknowledged
+
+    Example CI usage:
+    ```yaml
+    - name: Check contract impact
+      run: |
+        dbt compile
+        curl -X POST $TESSERA_URL/api/v1/sync/dbt/diff \\
+          -H "Authorization: Bearer $TESSERA_API_KEY" \\
+          -H "Content-Type: application/json" \\
+          -d '{"manifest": '$(cat target/manifest.json)', "fail_on_breaking": true}'
+    ```
+    """
+    manifest = diff_req.manifest
+    models: list[DbtDiffItem] = []
+    warnings: list[str] = []
+    meta_errors: list[str] = []
+
+    # Build FQN -> node_id mapping from manifest
+    manifest_fqns: dict[str, tuple[str, dict[str, Any]]] = {}
+    nodes = manifest.get("nodes", {})
+    for node_id, node in nodes.items():
+        resource_type = node.get("resource_type")
+        if resource_type not in ("model", "seed", "snapshot"):
+            continue
+        database = node.get("database", "")
+        schema = node.get("schema", "")
+        name = node.get("name", "")
+        fqn = f"{database}.{schema}.{name}".lower()
+        manifest_fqns[fqn] = (node_id, node)
+
+    # Also include sources
+    sources = manifest.get("sources", {})
+    for source_id, source in sources.items():
+        database = source.get("database", "")
+        schema = source.get("schema", "")
+        name = source.get("name", "")
+        fqn = f"{database}.{schema}.{name}".lower()
+        manifest_fqns[fqn] = (source_id, source)
+
+    # Get all existing assets
+    existing_result = await session.execute(select(AssetDB).where(AssetDB.deleted_at.is_(None)))
+    existing_assets = {a.fqn: a for a in existing_result.scalars().all()}
+
+    # Process each model in manifest
+    for fqn, (node_id, node) in manifest_fqns.items():
+        tessera_meta = extract_tessera_meta(node)
+        columns = node.get("columns", {})
+        has_schema = bool(columns)
+
+        # Count consumers from refs (models that depend on this one)
+        consumers_from_refs = sum(
+            1
+            for other_fqn, (_, other_node) in manifest_fqns.items()
+            if other_fqn != fqn and node_id in other_node.get("depends_on", {}).get("nodes", [])
+        )
+
+        # Validate owner_team if specified
+        owner_team_name = tessera_meta.owner_team
+        if owner_team_name:
+            team = await resolve_team_by_name(session, owner_team_name)
+            if not team:
+                meta_errors.append(f"{fqn}: owner_team '{owner_team_name}' not found")
+
+        # Validate consumer teams
+        consumers_declared = len(tessera_meta.consumers)
+        for consumer in tessera_meta.consumers:
+            consumer_team = consumer.get("team")
+            if consumer_team:
+                team = await resolve_team_by_name(session, consumer_team)
+                if not team:
+                    meta_errors.append(f"{fqn}: consumer team '{consumer_team}' not found")
+
+        existing_asset = existing_assets.get(fqn)
+        if not existing_asset:
+            # New asset
+            models.append(
+                DbtDiffItem(
+                    fqn=fqn,
+                    node_id=node_id,
+                    change_type="new",
+                    owner_team=owner_team_name,
+                    consumers_declared=consumers_declared,
+                    consumers_from_refs=consumers_from_refs,
+                    has_schema=has_schema,
+                    schema_change_type=None,
+                    breaking_changes=[],
+                )
+            )
+        else:
+            # Existing asset - check for schema changes
+            contract_result = await session.execute(
+                select(ContractDB)
+                .where(ContractDB.asset_id == existing_asset.id)
+                .where(ContractDB.status == ContractStatus.ACTIVE)
+            )
+            existing_contract = contract_result.scalar_one_or_none()
+
+            if not existing_contract or not has_schema:
+                # No contract or no schema to compare
+                models.append(
+                    DbtDiffItem(
+                        fqn=fqn,
+                        node_id=node_id,
+                        change_type="unchanged" if not has_schema else "modified",
+                        owner_team=owner_team_name,
+                        consumers_declared=consumers_declared,
+                        consumers_from_refs=consumers_from_refs,
+                        has_schema=has_schema,
+                        schema_change_type=None,
+                        breaking_changes=[],
+                    )
+                )
+            else:
+                # Compare schemas
+                proposed_schema = dbt_columns_to_json_schema(columns)
+                existing_schema = existing_contract.schema_def
+
+                diff_result = diff_schemas(existing_schema, proposed_schema)
+                is_compatible, breaking_changes_list = check_compatibility(
+                    existing_schema,
+                    proposed_schema,
+                    existing_contract.compatibility_mode,
+                )
+
+                if diff_result.change_type.value == "none":
+                    schema_change_type = "none"
+                    change_type = "unchanged"
+                elif is_compatible:
+                    schema_change_type = "compatible"
+                    change_type = "modified"
+                else:
+                    schema_change_type = "breaking"
+                    change_type = "modified"
+
+                models.append(
+                    DbtDiffItem(
+                        fqn=fqn,
+                        node_id=node_id,
+                        change_type=change_type,
+                        owner_team=owner_team_name,
+                        consumers_declared=consumers_declared,
+                        consumers_from_refs=consumers_from_refs,
+                        has_schema=has_schema,
+                        schema_change_type=schema_change_type,
+                        breaking_changes=[bc.to_dict() for bc in breaking_changes_list],
+                    )
+                )
+
+    # Check for deleted assets (in DB but not in manifest)
+    for fqn, asset in existing_assets.items():
+        if fqn not in manifest_fqns:
+            # Check if it's a dbt-managed asset
+            metadata = asset.metadata_ or {}
+            if metadata.get("dbt_node_id") or metadata.get("dbt_source_id"):
+                warnings.append(f"{fqn}: Asset in Tessera but missing from manifest (deleted?)")
+
+    # Calculate summary
+    summary = {
+        "new": sum(1 for m in models if m.change_type == "new"),
+        "modified": sum(1 for m in models if m.change_type == "modified"),
+        "unchanged": sum(1 for m in models if m.change_type == "unchanged"),
+        "breaking": sum(1 for m in models if m.schema_change_type == "breaking"),
+    }
+
+    # Determine status and blocking
+    has_breaking = summary["breaking"] > 0
+    has_meta_errors = len(meta_errors) > 0
+
+    if has_breaking:
+        status = "breaking_changes_detected"
+    elif summary["new"] > 0 or summary["modified"] > 0:
+        status = "changes_detected"
+    else:
+        status = "clean"
+
+    blocking = (has_breaking and diff_req.fail_on_breaking) or has_meta_errors
+
+    return DbtDiffResponse(
+        status=status,
+        summary=summary,
+        blocking=blocking,
+        models=models,
+        warnings=warnings,
+        meta_errors=meta_errors,
     )

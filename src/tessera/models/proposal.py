@@ -40,5 +40,6 @@ class Proposal(ProposalBase):
     breaking_changes: list[BreakingChange] = Field(default_factory=list)
     status: ProposalStatus = ProposalStatus.PENDING
     proposed_by: UUID
+    proposed_by_user_id: UUID | None = None
     proposed_at: datetime
     resolved_at: datetime | None = None

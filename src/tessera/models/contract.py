@@ -35,12 +35,12 @@ class Guarantees(BaseModel):
 class ContractBase(BaseModel):
     """Base contract fields."""
 
-    version: str = Field(
-        ...,
+    version: str | None = Field(
+        None,
         min_length=5,  # Minimum: "0.0.0"
         max_length=50,
         pattern=r"^\d+\.\d+\.\d+(-[a-zA-Z0-9.-]+)?(\+[a-zA-Z0-9.-]+)?$",
-        description="Semantic version (e.g., '1.0.0', '2.1.0-beta.1')",
+        description="Semantic version (e.g., '1.0.0'). Auto-incremented if not provided.",
     )
     schema_def: dict[str, Any] = Field(..., alias="schema", description="JSON Schema definition")
     compatibility_mode: CompatibilityMode = CompatibilityMode.BACKWARD
@@ -83,6 +83,8 @@ class Contract(ContractBase):
 
     id: UUID
     asset_id: UUID
+    version: str = Field(..., description="Semantic version")  # Required for stored contracts
     status: ContractStatus = ContractStatus.ACTIVE
     published_at: datetime
     published_by: UUID
+    published_by_user_id: UUID | None = None

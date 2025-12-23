@@ -65,6 +65,26 @@ from tessera.services.webhooks import send_proposal_created
 router = APIRouter()
 
 
+def parse_semver(version: str) -> tuple[int, int, int]:
+    """Parse a semantic version string into (major, minor, patch)."""
+    # Strip any prerelease/build metadata
+    base = version.split("-")[0].split("+")[0]
+    parts = base.split(".")
+    return (int(parts[0]), int(parts[1]), int(parts[2]))
+
+
+def bump_version(current: str, bump_type: str) -> str:
+    """Bump a semantic version based on change type.
+
+    bump_type: 'major' or 'minor'
+    """
+    major, minor, patch = parse_semver(current)
+    if bump_type == "major":
+        return f"{major + 1}.0.0"
+    else:  # minor
+        return f"{major}.{minor + 1}.0"
+
+
 @router.post("", response_model=Asset, status_code=201)
 @limit_write
 async def create_asset(
@@ -515,6 +535,7 @@ async def create_contract(
     asset_id: UUID,
     contract: ContractCreate,
     published_by: UUID = Query(..., description="Team ID of the publisher"),
+    published_by_user_id: UUID | None = Query(None, description="User ID who published"),
     force: bool = Query(False, description="Force publish even if breaking (creates audit trail)"),
     _: None = RequireWrite,
     session: AsyncSession = Depends(get_session),
@@ -566,7 +587,7 @@ async def create_contract(
             details={"errors": errors},
         )
 
-    # Get current active contract
+    # Get current active contract first (needed for version auto-generation)
     contract_result = await session.execute(
         select(ContractDB)
         .where(ContractDB.asset_id == asset_id)
@@ -576,17 +597,54 @@ async def create_contract(
     )
     current_contract = contract_result.scalar_one_or_none()
 
+    # Auto-generate version if not provided
+    version_auto_generated = False
+    if contract.version is None:
+        version_auto_generated = True
+        if not current_contract:
+            # First contract for this asset
+            version = "1.0.0"
+        else:
+            # Determine bump type based on compatibility
+            is_compatible, _ = check_compatibility(
+                current_contract.schema_def,
+                contract.schema_def,
+                current_contract.compatibility_mode,
+            )
+            bump_type = "minor" if is_compatible else "major"
+            version = bump_version(current_contract.version, bump_type)
+    else:
+        version = contract.version
+
+    # Check if version already exists for this asset
+    existing_version_result = await session.execute(
+        select(ContractDB)
+        .where(ContractDB.asset_id == asset_id)
+        .where(ContractDB.version == version)
+    )
+    existing_version = existing_version_result.scalar_one_or_none()
+    if existing_version:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "VERSION_EXISTS",
+                "message": f"Contract version {version} already exists for this asset",
+                "existing_contract_id": str(existing_version.id),
+            },
+        )
+
     # Helper to create and return the new contract
     # Uses nested transaction (savepoint) to ensure atomicity of multi-step publish
     async def publish_contract() -> ContractDB:
         async with session.begin_nested():
             db_contract = ContractDB(
                 asset_id=asset_id,
-                version=contract.version,
+                version=version,
                 schema_def=contract.schema_def,
                 compatibility_mode=contract.compatibility_mode,
                 guarantees=contract.guarantees.model_dump() if contract.guarantees else None,
                 published_by=published_by,
+                published_by_user_id=published_by_user_id,
             )
             session.add(db_contract)
 
@@ -611,10 +669,13 @@ async def create_contract(
         await invalidate_asset(str(asset_id))
         contract_data = Contract.model_validate(new_contract).model_dump()
         await cache_contract(str(new_contract.id), contract_data)
-        return {
+        response: dict[str, Any] = {
             "action": "published",
             "contract": contract_data,
         }
+        if version_auto_generated:
+            response["version_auto_generated"] = True
+        return response
 
     # Diff schemas and check compatibility
     is_compatible, breaking_changes = check_compatibility(
@@ -638,11 +699,14 @@ async def create_contract(
         await invalidate_asset(str(asset_id))
         contract_data = Contract.model_validate(new_contract).model_dump()
         await cache_contract(str(new_contract.id), contract_data)
-        return {
+        response = {
             "action": "published",
             "change_type": str(diff_result.change_type),
             "contract": contract_data,
         }
+        if version_auto_generated:
+            response["version_auto_generated"] = True
+        return response
 
     # Breaking change with force flag = publish anyway (logged)
     if force:
@@ -659,13 +723,16 @@ async def create_contract(
         await invalidate_asset(str(asset_id))
         contract_data = Contract.model_validate(new_contract).model_dump()
         await cache_contract(str(new_contract.id), contract_data)
-        return {
+        response = {
             "action": "force_published",
             "change_type": str(diff_result.change_type),
             "breaking_changes": [bc.to_dict() for bc in breaking_changes],
             "contract": contract_data,
             "warning": "Breaking change was force-published. Consumers may be affected.",
         }
+        if version_auto_generated:
+            response["version_auto_generated"] = True
+        return response
 
     # Breaking change without force = create proposal
     db_proposal = ProposalDB(
@@ -674,6 +741,7 @@ async def create_contract(
         change_type=diff_result.change_type,
         breaking_changes=[bc.to_dict() for bc in breaking_changes],
         proposed_by=published_by,
+        proposed_by_user_id=published_by_user_id,
     )
     session.add(db_proposal)
     await session.flush()
@@ -713,7 +781,7 @@ async def create_contract(
         asset_fqn=asset.fqn,
         producer_team_id=publisher_team.id,
         producer_team_name=publisher_team.name,
-        proposed_version=contract.version,
+        proposed_version=version,
         breaking_changes=[bc.to_dict() for bc in breaking_changes],
         impacted_consumers=impacted_consumers,
     )
@@ -721,7 +789,7 @@ async def create_contract(
     # Send Slack notification
     await notify_proposal_created(
         asset_fqn=asset.fqn,
-        version=contract.version,
+        version=version,
         producer_team=publisher_team.name,
         affected_consumers=[c["team_name"] for c in impacted_consumers],
         breaking_changes=[bc.to_dict() for bc in breaking_changes],
@@ -748,7 +816,7 @@ async def list_asset_contracts(
 ) -> dict[str, Any]:
     """List all contracts for an asset.
 
-    Requires read scope.
+    Requires read scope. Returns contracts with publisher team and user names.
     """
     # Try cache first (only for default pagination to keep cache simple)
     if params.limit == settings.pagination_limit_default and params.offset == 0:
@@ -756,18 +824,50 @@ async def list_asset_contracts(
         if cached:
             return cached
 
+    # Query with join to get publisher team and user names
     query = (
-        select(ContractDB)
+        select(
+            ContractDB,
+            TeamDB.name.label("publisher_team_name"),
+            UserDB.name.label("publisher_user_name"),
+        )
+        .outerjoin(TeamDB, ContractDB.published_by == TeamDB.id)
+        .outerjoin(UserDB, ContractDB.published_by_user_id == UserDB.id)
         .where(ContractDB.asset_id == asset_id)
         .order_by(ContractDB.published_at.desc())
     )
-    result = await paginate(session, query, params, response_model=Contract)
+
+    # Get total count
+    count_query = select(func.count()).select_from(
+        select(ContractDB).where(ContractDB.asset_id == asset_id).subquery()
+    )
+    total_result = await session.execute(count_query)
+    total = total_result.scalar() or 0
+
+    # Paginate
+    paginated_query = query.limit(params.limit).offset(params.offset)
+    result = await session.execute(paginated_query)
+    rows = result.all()
+
+    results = []
+    for contract_db, publisher_team_name, publisher_user_name in rows:
+        contract_dict = Contract.model_validate(contract_db).model_dump()
+        contract_dict["published_by_team_name"] = publisher_team_name
+        contract_dict["published_by_user_name"] = publisher_user_name
+        results.append(contract_dict)
+
+    response = {
+        "results": results,
+        "total": total,
+        "limit": params.limit,
+        "offset": params.offset,
+    }
 
     # Cache result if default pagination
     if params.limit == settings.pagination_limit_default and params.offset == 0:
-        await cache_asset_contracts_list(str(asset_id), result)
+        await cache_asset_contracts_list(str(asset_id), response)
 
-    return result
+    return response
 
 
 @router.get("/{asset_id}/contracts/history")

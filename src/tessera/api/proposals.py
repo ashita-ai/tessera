@@ -25,6 +25,7 @@ from tessera.db import (
     ProposalDB,
     RegistrationDB,
     TeamDB,
+    UserDB,
     get_session,
 )
 from tessera.models import Acknowledgment, AcknowledgmentCreate, Contract, Proposal
@@ -60,6 +61,7 @@ class PublishRequest(BaseModel):
 
     version: str
     published_by: UUID
+    published_by_user_id: UUID | None = None
 
 
 async def check_proposal_completion(
@@ -300,9 +302,25 @@ async def get_proposal_status(
     team_ids_to_lookup.update(ack.consumer_team_id for ack in acknowledgments)
     team_ids_to_lookup.update(reg.consumer_team_id for reg in registrations)
 
+    # Collect all user IDs we need to look up
+    user_ids_to_lookup: set[UUID] = set()
+    if proposal.proposed_by_user_id:
+        user_ids_to_lookup.add(proposal.proposed_by_user_id)
+    for ack in acknowledgments:
+        if ack.acknowledged_by_user_id:
+            user_ids_to_lookup.add(ack.acknowledged_by_user_id)
+
     # Batch fetch all teams in single query
     teams_result = await session.execute(select(TeamDB).where(TeamDB.id.in_(team_ids_to_lookup)))
     teams_map: dict[UUID, TeamDB] = {t.id: t for t in teams_result.scalars().all()}
+
+    # Batch fetch all users in single query
+    users_map: dict[UUID, UserDB] = {}
+    if user_ids_to_lookup:
+        users_result = await session.execute(
+            select(UserDB).where(UserDB.id.in_(user_ids_to_lookup))
+        )
+        users_map = {u.id: u for u in users_result.scalars().all()}
 
     # Build acknowledgment details
     ack_list = []
@@ -311,12 +329,17 @@ async def get_proposal_status(
     for ack in acknowledgments:
         acknowledged_team_ids.add(ack.consumer_team_id)
         team = teams_map.get(ack.consumer_team_id)
+        user = users_map.get(ack.acknowledged_by_user_id) if ack.acknowledged_by_user_id else None
         if str(ack.response) == "blocked":
             blocked_count += 1
         ack_list.append(
             {
                 "consumer_team_id": str(ack.consumer_team_id),
                 "consumer_team_name": team.name if team else "Unknown",
+                "acknowledged_by_user_id": str(ack.acknowledged_by_user_id)
+                if ack.acknowledged_by_user_id
+                else None,
+                "acknowledged_by_user_name": user.name if user else None,
                 "response": str(ack.response),
                 "responded_at": ack.responded_at.isoformat(),
                 "notes": ack.notes,
@@ -337,6 +360,9 @@ async def get_proposal_status(
             )
 
     proposer = teams_map.get(proposal.proposed_by)
+    proposer_user = (
+        users_map.get(proposal.proposed_by_user_id) if proposal.proposed_by_user_id else None
+    )
     total_consumers = len(registrations)
 
     return {
@@ -348,6 +374,8 @@ async def get_proposal_status(
         "proposed_by": {
             "team_id": str(proposal.proposed_by),
             "team_name": proposer.name if proposer else "Unknown",
+            "user_id": str(proposal.proposed_by_user_id) if proposal.proposed_by_user_id else None,
+            "user_name": proposer_user.name if proposer_user else None,
         },
         "proposed_at": proposal.proposed_at.isoformat(),
         "resolved_at": proposal.resolved_at.isoformat() if proposal.resolved_at else None,
@@ -421,6 +449,7 @@ async def acknowledge_proposal(
     db_ack = AcknowledgmentDB(
         proposal_id=proposal_id,
         consumer_team_id=ack.consumer_team_id,
+        acknowledged_by_user_id=ack.acknowledged_by_user_id,
         response=ack.response,
         migration_deadline=ack.migration_deadline,
         notes=ack.notes,
@@ -714,6 +743,7 @@ async def publish_from_proposal(
             compatibility_mode=compat_mode,
             guarantees=current_contract.guarantees if current_contract else {},
             published_by=publish_request.published_by,
+            published_by_user_id=publish_request.published_by_user_id,
         )
         session.add(new_contract)
 
