@@ -69,7 +69,9 @@ async function loadDashboard() {
           <thead>
             <tr>
               <th>Asset</th>
-              <th>Version</th>
+              <th>Change Type</th>
+              <th>Breaking Changes</th>
+              <th>Acknowledgments</th>
               <th>Created</th>
               <th>Action</th>
             </tr>
@@ -77,9 +79,16 @@ async function loadDashboard() {
           <tbody>
             ${pendingProposals.results.map(p => `
               <tr>
-                <td>${escapeHtml(p.asset_fqn || p.asset_id)}</td>
-                <td>${escapeHtml(p.proposed_version)}</td>
-                <td>${formatDate(p.created_at)}</td>
+                <td><a href="/assets/${p.asset_id}">${escapeHtml(p.asset_fqn || p.asset_id)}</a></td>
+                <td><span class="status status-${p.change_type === 'major' ? 'deprecated' : 'active'}">${escapeHtml(p.change_type || 'unknown')}</span></td>
+                <td>${p.breaking_changes_count || 0}</td>
+                <td>
+                  ${p.total_consumers > 0
+                    ? `<span style="color: ${p.acknowledgment_count >= p.total_consumers ? 'green' : 'orange'};">${p.acknowledgment_count || 0}/${p.total_consumers}</span>`
+                    : '<span style="color: var(--gray);">N/A</span>'
+                  }
+                </td>
+                <td>${formatDate(p.proposed_at)}</td>
                 <td><a href="/proposals/${p.id}">View</a></td>
               </tr>
             `).join('')}
@@ -101,16 +110,16 @@ async function loadDashboard() {
             <tr>
               <th>FQN</th>
               <th>Owner</th>
-              <th>Status</th>
+              <th>Active Contract</th>
               <th>Action</th>
             </tr>
           </thead>
           <tbody>
             ${recentAssets.results.map(a => `
               <tr>
-                <td>${escapeHtml(a.fqn)}</td>
-                <td>${escapeHtml(a.owner_team_name || a.owner_team_id)}</td>
-                <td><span class="status status-${a.status || 'active'}">${a.status || 'active'}</span></td>
+                <td><a href="/assets/${a.id}">${escapeHtml(a.fqn)}</a></td>
+                <td><a href="/teams/${a.owner_team_id}">${escapeHtml(a.owner_team_name || a.owner_team_id)}</a></td>
+                <td>${a.active_contract_version ? `<span class="status status-active">${escapeHtml(a.active_contract_version)}</span>` : '<span style="color: var(--gray);">None</span>'}</td>
                 <td><a href="/assets/${a.id}">View</a></td>
               </tr>
             `).join('')}

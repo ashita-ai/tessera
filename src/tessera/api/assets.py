@@ -26,12 +26,14 @@ from tessera.db import (
     ProposalDB,
     RegistrationDB,
     TeamDB,
+    UserDB,
     get_session,
 )
 from tessera.models import (
     Asset,
     AssetCreate,
     AssetUpdate,
+    BulkAssignRequest,
     Contract,
     ContractCreate,
     Proposal,
@@ -88,6 +90,16 @@ async def create_asset(
     if not result.scalar_one_or_none():
         raise NotFoundError(ErrorCode.TEAM_NOT_FOUND, "Owner team not found")
 
+    # Validate owner user exists if provided
+    if asset.owner_user_id:
+        user_result = await session.execute(
+            select(UserDB)
+            .where(UserDB.id == asset.owner_user_id)
+            .where(UserDB.deactivated_at.is_(None))
+        )
+        if not user_result.scalar_one_or_none():
+            raise HTTPException(status_code=404, detail="Owner user not found")
+
     # Check for duplicate FQN
     existing = await session.execute(
         select(AssetDB)
@@ -104,6 +116,7 @@ async def create_asset(
     db_asset = AssetDB(
         fqn=asset.fqn,
         owner_team_id=asset.owner_team_id,
+        owner_user_id=asset.owner_user_id,
         environment=asset.environment,
         metadata_=asset.metadata,
     )
@@ -124,26 +137,115 @@ async def list_assets(
     request: Request,
     auth: Auth,
     owner: UUID | None = Query(None, description="Filter by owner team ID"),
+    owner_user: UUID | None = Query(None, description="Filter by owner user ID"),
+    unowned: bool = Query(False, description="Filter to assets without a user owner"),
     fqn: str | None = Query(None, description="Filter by FQN pattern (case-insensitive)"),
     environment: str | None = Query(None, description="Filter by environment"),
+    sort_by: str | None = Query(None, description="Sort by field (fqn, owner, created_at)"),
+    sort_order: str = Query("asc", description="Sort order (asc, desc)"),
     params: PaginationParams = Depends(pagination_params),
     _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    """List all assets with filtering and pagination.
+    """List all assets with filtering, sorting, and pagination.
 
-    Requires read scope.
+    Requires read scope. Returns assets with owner team/user names and active contract version.
+
+    Filters:
+    - owner: Filter by owner team ID
+    - owner_user: Filter by owner user ID
+    - unowned: If true, only return assets without a user owner
     """
-    query = select(AssetDB).where(AssetDB.deleted_at.is_(None))
+    # Query with joins to get team and user names
+    query = (
+        select(
+            AssetDB,
+            TeamDB.name.label("team_name"),
+            UserDB.name.label("user_name"),
+            UserDB.email.label("user_email"),
+        )
+        .outerjoin(TeamDB, AssetDB.owner_team_id == TeamDB.id)
+        .outerjoin(UserDB, AssetDB.owner_user_id == UserDB.id)
+        .where(AssetDB.deleted_at.is_(None))
+    )
+
+    # Build count query base
+    count_base = select(AssetDB).where(AssetDB.deleted_at.is_(None))
+
     if owner:
         query = query.where(AssetDB.owner_team_id == owner)
+        count_base = count_base.where(AssetDB.owner_team_id == owner)
+    if owner_user:
+        query = query.where(AssetDB.owner_user_id == owner_user)
+        count_base = count_base.where(AssetDB.owner_user_id == owner_user)
+    if unowned:
+        query = query.where(AssetDB.owner_user_id.is_(None))
+        count_base = count_base.where(AssetDB.owner_user_id.is_(None))
     if fqn:
         query = query.where(AssetDB.fqn.ilike(f"%{fqn}%"))
+        count_base = count_base.where(AssetDB.fqn.ilike(f"%{fqn}%"))
     if environment:
         query = query.where(AssetDB.environment == environment)
-    query = query.order_by(AssetDB.fqn)
+        count_base = count_base.where(AssetDB.environment == environment)
 
-    return await paginate(session, query, params, response_model=Asset)
+    # Apply sorting
+    sort_column = AssetDB.fqn  # default
+    if sort_by == "owner":
+        sort_column = TeamDB.name
+    elif sort_by == "owner_user":
+        sort_column = UserDB.name
+    elif sort_by == "created_at":
+        sort_column = AssetDB.created_at
+    elif sort_by == "fqn":
+        sort_column = AssetDB.fqn
+
+    if sort_order == "desc":
+        query = query.order_by(sort_column.desc())
+    else:
+        query = query.order_by(sort_column.asc())
+
+    # Get total count
+    count_query = select(func.count()).select_from(count_base.subquery())
+    total_result = await session.execute(count_query)
+    total = total_result.scalar() or 0
+
+    paginated_query = query.limit(params.limit).offset(params.offset)
+    result = await session.execute(paginated_query)
+    rows = result.all()
+
+    # Collect asset IDs to batch fetch active contracts
+    asset_ids = [asset_db.id for asset_db, _, _, _ in rows]
+
+    # Batch fetch active contracts for all assets (fixes N+1)
+    active_contracts_map: dict[UUID, str] = {}
+    if asset_ids:
+        # Get all active contracts for these assets, ordered by published_at desc
+        contracts_result = await session.execute(
+            select(ContractDB.asset_id, ContractDB.version, ContractDB.published_at)
+            .where(ContractDB.asset_id.in_(asset_ids))
+            .where(ContractDB.status == ContractStatus.ACTIVE)
+            .order_by(ContractDB.published_at.desc())
+        )
+        # Keep only the most recent active contract per asset
+        for asset_id, version, _ in contracts_result.all():
+            if asset_id not in active_contracts_map:
+                active_contracts_map[asset_id] = version
+
+    results = []
+    for asset_db, team_name, user_name, user_email in rows:
+        asset_dict = Asset.model_validate(asset_db).model_dump()
+        asset_dict["owner_team_name"] = team_name
+        asset_dict["owner_user_name"] = user_name
+        asset_dict["owner_user_email"] = user_email
+        asset_dict["active_contract_version"] = active_contracts_map.get(asset_db.id)
+        results.append(asset_dict)
+
+    return {
+        "results": results,
+        "total": total,
+        "limit": params.limit,
+        "offset": params.offset,
+    }
 
 
 @router.get("/search")
@@ -237,7 +339,7 @@ async def search_assets(
     return response
 
 
-@router.get("/{asset_id}", response_model=Asset)
+@router.get("/{asset_id}")
 @limit_read
 async def get_asset(
     request: Request,
@@ -245,27 +347,43 @@ async def get_asset(
     auth: Auth,
     _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
-) -> AssetDB | dict[str, Any]:
+) -> dict[str, Any]:
     """Get an asset by ID.
 
-    Requires read scope.
+    Requires read scope. Returns asset with owner team and user names.
     """
     # Try cache first
     cached = await get_cached_asset(str(asset_id))
     if cached:
         return cached
 
+    # Query with joins to get team and user names
     result = await session.execute(
-        select(AssetDB).where(AssetDB.id == asset_id).where(AssetDB.deleted_at.is_(None))
+        select(
+            AssetDB,
+            TeamDB.name.label("team_name"),
+            UserDB.name.label("user_name"),
+            UserDB.email.label("user_email"),
+        )
+        .outerjoin(TeamDB, AssetDB.owner_team_id == TeamDB.id)
+        .outerjoin(UserDB, AssetDB.owner_user_id == UserDB.id)
+        .where(AssetDB.id == asset_id)
+        .where(AssetDB.deleted_at.is_(None))
     )
-    asset = result.scalar_one_or_none()
-    if not asset:
+    row = result.one_or_none()
+    if not row:
         raise NotFoundError(ErrorCode.ASSET_NOT_FOUND, "Asset not found")
 
-    # Cache result
-    await cache_asset(str(asset_id), Asset.model_validate(asset).model_dump())
+    asset, team_name, user_name, user_email = row
+    asset_dict = Asset.model_validate(asset).model_dump()
+    asset_dict["owner_team_name"] = team_name
+    asset_dict["owner_user_name"] = user_name
+    asset_dict["owner_user_email"] = user_email
 
-    return asset
+    # Cache result
+    await cache_asset(str(asset_id), asset_dict)
+
+    return asset_dict
 
 
 @router.patch("/{asset_id}", response_model=Asset)
@@ -300,6 +418,16 @@ async def update_asset(
         asset.fqn = update.fqn
     if update.owner_team_id is not None:
         asset.owner_team_id = update.owner_team_id
+    if update.owner_user_id is not None:
+        # Validate user exists
+        user_result = await session.execute(
+            select(UserDB)
+            .where(UserDB.id == update.owner_user_id)
+            .where(UserDB.deactivated_at.is_(None))
+        )
+        if not user_result.scalar_one_or_none():
+            raise HTTPException(status_code=404, detail="Owner user not found")
+        asset.owner_user_id = update.owner_user_id
     if update.environment is not None:
         asset.environment = update.environment
     if update.metadata is not None:
@@ -784,4 +912,60 @@ async def diff_contract_versions(
         "breaking_changes": [bc.to_dict() for bc in breaking],
         "all_changes": diff_result_data["all_changes"],
         "compatibility_mode": str(from_contract.compatibility_mode.value),
+    }
+
+
+@router.post("/bulk-assign")
+@limit_write
+async def bulk_assign_owner(
+    request: Request,
+    bulk_request: BulkAssignRequest,
+    auth: Auth,
+    _: None = RequireAdmin,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Bulk assign or unassign a user owner for multiple assets.
+
+    Requires admin scope.
+
+    Set owner_user_id to null to unassign user ownership from assets.
+    """
+    # Validate user exists if assigning
+    if bulk_request.owner_user_id:
+        user_result = await session.execute(
+            select(UserDB)
+            .where(UserDB.id == bulk_request.owner_user_id)
+            .where(UserDB.deactivated_at.is_(None))
+        )
+        if not user_result.scalar_one_or_none():
+            raise HTTPException(status_code=404, detail="Owner user not found")
+
+    # Get all assets
+    result = await session.execute(
+        select(AssetDB)
+        .where(AssetDB.id.in_(bulk_request.asset_ids))
+        .where(AssetDB.deleted_at.is_(None))
+    )
+    assets = list(result.scalars().all())
+
+    # Track which were found and updated
+    found_ids = {a.id for a in assets}
+    not_found = [str(aid) for aid in bulk_request.asset_ids if aid not in found_ids]
+
+    # Update all found assets
+    updated = 0
+    for asset in assets:
+        asset.owner_user_id = bulk_request.owner_user_id
+        updated += 1
+
+    await session.flush()
+
+    # Invalidate caches for all updated assets
+    for asset in assets:
+        await invalidate_asset(str(asset.id))
+
+    return {
+        "updated": updated,
+        "not_found": not_found,
+        "owner_user_id": str(bulk_request.owner_user_id) if bulk_request.owner_user_id else None,
     }

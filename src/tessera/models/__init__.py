@@ -5,7 +5,14 @@ from tessera.models.acknowledgment import (
     AcknowledgmentCreate,
     AcknowledgmentResponse,
 )
-from tessera.models.asset import Asset, AssetCreate, AssetUpdate
+from tessera.models.asset import (
+    Asset,
+    AssetCreate,
+    AssetUpdate,
+    AssetWithOwners,
+    AssetWithTeam,
+    BulkAssignRequest,
+)
 from tessera.models.contract import Contract, ContractCreate
 from tessera.models.dependency import Dependency, DependencyCreate
 from tessera.models.enums import (
@@ -20,6 +27,7 @@ from tessera.models.enums import (
 from tessera.models.proposal import Proposal, ProposalCreate
 from tessera.models.registration import Registration, RegistrationCreate, RegistrationUpdate
 from tessera.models.team import Team, TeamCreate, TeamUpdate
+from tessera.models.user import User, UserCreate, UserUpdate, UserWithTeam
 
 __all__ = [
     # Enums
@@ -30,6 +38,11 @@ __all__ = [
     "DependencyType",
     "ProposalStatus",
     "RegistrationStatus",
+    # User
+    "User",
+    "UserCreate",
+    "UserUpdate",
+    "UserWithTeam",
     # Team
     "Team",
     "TeamCreate",
@@ -38,6 +51,9 @@ __all__ = [
     "Asset",
     "AssetCreate",
     "AssetUpdate",
+    "AssetWithOwners",
+    "AssetWithTeam",
+    "BulkAssignRequest",
     # Contract
     "Contract",
     "ContractCreate",

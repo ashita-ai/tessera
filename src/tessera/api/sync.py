@@ -35,6 +35,100 @@ def _require_git_sync_path() -> Path:
     return settings.git_sync_path
 
 
+def extract_guarantees_from_tests(
+    node_id: str, node: dict[str, Any], all_nodes: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Extract guarantees from dbt tests attached to a model/source.
+
+    Parses dbt test nodes and converts them to Tessera guarantees format:
+    - not_null tests -> nullability: {column: "never"}
+    - accepted_values tests -> accepted_values: {column: [values]}
+    - unique tests -> (stored in metadata, not a direct guarantee)
+    - relationships tests -> (stored in metadata for dependency tracking)
+    - dbt_expectations/dbt_utils tests -> custom: {test_name: config}
+
+    Args:
+        node_id: The dbt node ID (e.g., "model.project.users")
+        node: The node data from manifest
+        all_nodes: All nodes from the manifest to find related tests
+
+    Returns:
+        Guarantees dict if any tests found, None otherwise
+    """
+    nullability: dict[str, str] = {}
+    accepted_values: dict[str, list[str]] = {}
+    custom_tests: list[dict[str, Any]] = []
+
+    # dbt tests reference their model via depends_on.nodes or attached via refs
+    # Test nodes have patterns like: test.project.not_null_users_id
+    # They contain test_metadata with test name and kwargs
+    for test_id, test_node in all_nodes.items():
+        if test_node.get("resource_type") != "test":
+            continue
+
+        # Check if test depends on this node
+        depends_on = test_node.get("depends_on", {}).get("nodes", [])
+        if node_id not in depends_on:
+            continue
+
+        # Extract test metadata
+        test_metadata = test_node.get("test_metadata", {})
+        test_name = test_metadata.get("name", "")
+        kwargs = test_metadata.get("kwargs", {})
+
+        # Get column name from kwargs or test config
+        column_name = kwargs.get("column_name") or test_node.get("column_name")
+
+        # Map standard dbt tests to guarantees
+        if test_name == "not_null" and column_name:
+            nullability[column_name] = "never"
+        elif test_name == "accepted_values" and column_name:
+            values = kwargs.get("values", [])
+            if values:
+                accepted_values[column_name] = values
+        elif test_name in ("unique", "relationships"):
+            # Store as custom test for reference
+            custom_tests.append(
+                {
+                    "type": test_name,
+                    "column": column_name,
+                    "config": kwargs,
+                }
+            )
+        elif test_name.startswith(("dbt_expectations.", "dbt_utils.")):
+            # dbt-expectations and dbt-utils tests
+            custom_tests.append(
+                {
+                    "type": test_name,
+                    "column": column_name,
+                    "config": kwargs,
+                }
+            )
+        elif test_metadata.get("namespace"):
+            # Other namespaced tests (custom packages)
+            custom_tests.append(
+                {
+                    "type": f"{test_metadata['namespace']}.{test_name}",
+                    "column": column_name,
+                    "config": kwargs,
+                }
+            )
+
+    # Build guarantees dict only if we have something
+    if not (nullability or accepted_values or custom_tests):
+        return None
+
+    guarantees: dict[str, Any] = {}
+    if nullability:
+        guarantees["nullability"] = nullability
+    if accepted_values:
+        guarantees["accepted_values"] = accepted_values
+    if custom_tests:
+        guarantees["custom"] = custom_tests
+
+    return guarantees
+
+
 def dbt_columns_to_json_schema(columns: dict[str, Any]) -> dict[str, Any]:
     """Convert dbt column definitions to JSON Schema.
 
@@ -408,6 +502,7 @@ async def sync_from_dbt(
 
     # Process nodes (models, seeds, snapshots)
     nodes = manifest.get("nodes", {})
+    tests_extracted = 0
     for node_id, node in nodes.items():
         resource_type = node.get("resource_type")
         if resource_type not in ("model", "seed", "snapshot"):
@@ -423,6 +518,11 @@ async def sync_from_dbt(
         result = await session.execute(select(AssetDB).where(AssetDB.fqn == fqn))
         existing = result.scalar_one_or_none()
 
+        # Extract guarantees from dbt tests
+        guarantees = extract_guarantees_from_tests(node_id, node, nodes)
+        if guarantees:
+            tests_extracted += 1
+
         # Build metadata from dbt
         metadata = {
             "dbt_node_id": node_id,
@@ -437,6 +537,9 @@ async def sync_from_dbt(
                 for col_name, col_info in node.get("columns", {}).items()
             },
         }
+        # Store extracted guarantees in metadata for use when publishing contracts
+        if guarantees:
+            metadata["guarantees"] = guarantees
 
         if existing:
             existing.metadata_ = metadata
@@ -461,6 +564,11 @@ async def sync_from_dbt(
         result = await session.execute(select(AssetDB).where(AssetDB.fqn == fqn))
         existing = result.scalar_one_or_none()
 
+        # Extract guarantees from tests for sources (they're in nodes too)
+        guarantees = extract_guarantees_from_tests(source_id, source, nodes)
+        if guarantees:
+            tests_extracted += 1
+
         metadata = {
             "dbt_source_id": source_id,
             "resource_type": "source",
@@ -473,6 +581,9 @@ async def sync_from_dbt(
                 for col_name, col_info in source.get("columns", {}).items()
             },
         }
+        # Store extracted guarantees in metadata for use when publishing contracts
+        if guarantees:
+            metadata["guarantees"] = guarantees
 
         if existing:
             existing.metadata_ = metadata
@@ -493,6 +604,7 @@ async def sync_from_dbt(
             "created": assets_created,
             "updated": assets_updated,
         },
+        "guarantees_extracted": tests_extracted,
     }
 
 

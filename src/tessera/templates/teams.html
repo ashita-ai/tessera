@@ -88,6 +88,7 @@ async function loadTeams() {
         <thead>
           <tr>
             <th>Name</th>
+            <th>Assets</th>
             <th>Created</th>
             <th>Actions</th>
           </tr>
@@ -96,6 +97,7 @@ async function loadTeams() {
           ${data.results.map(team => `
             <tr>
               <td><a href="/teams/${team.id}">${escapeHtml(team.name)}</a></td>
+              <td>${team.asset_count != null ? `<a href="/assets?owner=${team.id}">${team.asset_count}</a>` : '0'}</td>
               <td>${formatDate(team.created_at)}</td>
               <td>
                 <button class="secondary" onclick="deleteTeam('${team.id}', '${escapeHtml(team.name)}')">Delete</button>

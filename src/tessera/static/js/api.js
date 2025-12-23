@@ -45,6 +45,36 @@ class TesseraAPI {
     }
   }
 
+  // Users
+  async listUsers(params = {}) {
+    const query = new URLSearchParams(params).toString();
+    return this.request(`/users${query ? `?${query}` : ''}`);
+  }
+
+  async getUser(id) {
+    return this.request(`/users/${id}`);
+  }
+
+  async createUser(data) {
+    return this.request('/users', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateUser(id, data) {
+    return this.request(`/users/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteUser(id) {
+    return this.request(`/users/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
   // Teams
   async listTeams(params = {}) {
     const query = new URLSearchParams(params).toString();
@@ -102,6 +132,16 @@ class TesseraAPI {
   async deleteAsset(id) {
     return this.request(`/assets/${id}`, {
       method: 'DELETE',
+    });
+  }
+
+  async bulkAssignAssets(assetIds, ownerUserId) {
+    return this.request('/assets/bulk-assign', {
+      method: 'POST',
+      body: JSON.stringify({
+        asset_ids: assetIds,
+        owner_user_id: ownerUserId,
+      }),
     });
   }
 
@@ -177,6 +217,18 @@ class TesseraAPI {
     });
   }
 
+  async publishFromProposal(proposalId, version, publishedBy) {
+    return this.request(`/proposals/${proposalId}/publish`, {
+      method: 'POST',
+      body: JSON.stringify({ version, published_by: publishedBy }),
+    });
+  }
+
+  // Registrations for a specific contract
+  async getContractRegistrations(contractId) {
+    return this.request(`/registrations?contract_id=${contractId}`);
+  }
+
   // Dependencies
   async getAssetDependencies(assetId) {
     return this.request(`/assets/${assetId}/dependencies`);
@@ -248,6 +300,17 @@ function showError(message) {
   const container = document.getElementById('error-container');
   if (container) {
     container.innerHTML = `<div class="error">${escapeHtml(message)}</div>`;
+    container.style.display = 'block';
+    setTimeout(() => {
+      container.style.display = 'none';
+    }, 5000);
+  }
+}
+
+function showSuccess(message) {
+  const container = document.getElementById('error-container');
+  if (container) {
+    container.innerHTML = `<div class="success" style="background: #d4edda; color: #155724; border: 1px solid #c3e6cb; padding: 1rem; border-radius: 4px;">${escapeHtml(message)}</div>`;
     container.style.display = 'block';
     setTimeout(() => {
       container.style.display = 'none';

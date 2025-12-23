@@ -12,7 +12,7 @@ from tessera.api.auth import Auth, RequireRead
 from tessera.api.errors import ErrorCode, NotFoundError
 from tessera.api.pagination import PaginationParams, paginate, pagination_params
 from tessera.api.rate_limit import limit_read
-from tessera.db import ContractDB, RegistrationDB, get_session
+from tessera.db import AssetDB, ContractDB, RegistrationDB, get_session
 from tessera.models import Contract, Registration
 from tessera.models.enums import CompatibilityMode, ContractStatus
 from tessera.services.cache import (
@@ -60,9 +60,14 @@ async def list_contracts(
 ) -> dict[str, Any]:
     """List all contracts with filtering and pagination.
 
-    Requires read scope.
+    Requires read scope. Returns contracts with asset FQN for display.
     """
-    query = select(ContractDB)
+    from sqlalchemy import func
+
+    # Query with join to get asset FQN
+    query = select(ContractDB, AssetDB.fqn.label("asset_fqn")).outerjoin(
+        AssetDB, ContractDB.asset_id == AssetDB.id
+    )
     if asset_id:
         query = query.where(ContractDB.asset_id == asset_id)
     if status:
@@ -71,7 +76,35 @@ async def list_contracts(
         query = query.where(ContractDB.version.ilike(f"%{version}%"))
     query = query.order_by(ContractDB.published_at.desc())
 
-    return await paginate(session, query, params, response_model=Contract)
+    # Manual pagination to handle join result
+    count_query = select(func.count()).select_from(select(ContractDB).subquery())
+    if asset_id:
+        count_query = select(func.count()).select_from(
+            select(ContractDB).where(ContractDB.asset_id == asset_id).subquery()
+        )
+    if status:
+        count_query = select(func.count()).select_from(
+            select(ContractDB).where(ContractDB.status == status).subquery()
+        )
+    total_result = await session.execute(count_query)
+    total = total_result.scalar() or 0
+
+    paginated_query = query.limit(params.limit).offset(params.offset)
+    result = await session.execute(paginated_query)
+    rows = result.all()
+
+    results = []
+    for contract_db, asset_fqn in rows:
+        contract_dict = Contract.model_validate(contract_db).model_dump()
+        contract_dict["asset_fqn"] = asset_fqn
+        results.append(contract_dict)
+
+    return {
+        "results": results,
+        "total": total,
+        "limit": params.limit,
+        "offset": params.offset,
+    }
 
 
 @router.post("/compare", response_model=ContractCompareResponse)

@@ -12,6 +12,7 @@
       <h1><a href="/">TESSERA</a></h1>
       <nav>
         <a href="/" {% if active_page == 'dashboard' %}class="active"{% endif %}>Dashboard</a>
+        <a href="/users" {% if active_page == 'users' %}class="active"{% endif %}>Users</a>
         <a href="/teams" {% if active_page == 'teams' %}class="active"{% endif %}>Teams</a>
         <a href="/assets" {% if active_page == 'assets' %}class="active"{% endif %}>Assets</a>
         <a href="/contracts" {% if active_page == 'contracts' %}class="active"{% endif %}>Contracts</a>

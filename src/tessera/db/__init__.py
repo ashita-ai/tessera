@@ -11,12 +11,14 @@ from tessera.db.models import (
     ProposalDB,
     RegistrationDB,
     TeamDB,
+    UserDB,
 )
 
 __all__ = [
     "Base",
     "get_session",
     "init_db",
+    "UserDB",
     "TeamDB",
     "AssetDB",
     "AssetDependencyDB",

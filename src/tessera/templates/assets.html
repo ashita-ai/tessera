@@ -12,7 +12,7 @@
 
   <div id="create-form" style="display: none; margin-bottom: 2rem;">
     <div class="card">
-      <h3>Create Asset</h3>
+      <h3>Create Asset with Initial Contract</h3>
       <form onsubmit="createAsset(event)">
         <label for="asset-fqn">Fully Qualified Name</label>
         <input type="text" id="asset-fqn" name="fqn" required placeholder="e.g., warehouse.schema.table">
@@ -23,16 +23,66 @@
         </select>
 
         <label for="asset-description">Description (optional)</label>
-        <textarea id="asset-description" name="description" rows="3" placeholder="Describe this asset..."></textarea>
+        <textarea id="asset-description" name="description" rows="2" placeholder="Describe this asset..."></textarea>
 
-        <button type="submit">Create</button>
+        <fieldset style="border: 1px solid var(--gray); padding: 1rem; margin: 1rem 0; border-radius: 4px;">
+          <legend><strong>Initial Schema</strong></legend>
+
+          <label for="schema-template">Start from template</label>
+          <select id="schema-template" onchange="applySchemaTemplate()">
+            <option value="">Custom schema...</option>
+            <option value="basic-table">Basic Table (id, name, created_at)</option>
+            <option value="user-table">User Table (id, email, name, role)</option>
+            <option value="event-table">Event Table (id, event_type, user_id, timestamp, payload)</option>
+            <option value="fact-table">Fact Table (id, dimensions, metrics, date)</option>
+            <option value="dimension-table">Dimension Table (id, name, description, is_active)</option>
+          </select>
+
+          <div id="schema-builder" style="margin-top: 1rem;">
+            <p style="color: var(--gray); margin-bottom: 0.5rem;">Define columns:</p>
+            <div id="columns-container">
+              <div class="column-row" style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
+                <input type="text" class="col-name" placeholder="Column name" style="flex: 2;" required>
+                <select class="col-type" style="flex: 1;" required>
+                  <option value="string">string</option>
+                  <option value="integer">integer</option>
+                  <option value="number">number</option>
+                  <option value="boolean">boolean</option>
+                  <option value="object">object</option>
+                  <option value="array">array</option>
+                </select>
+                <label style="display: flex; align-items: center; gap: 0.25rem;">
+                  <input type="checkbox" class="col-required" checked> Required
+                </label>
+                <button type="button" class="secondary" onclick="removeColumn(this)" style="padding: 0.25rem 0.5rem;">X</button>
+              </div>
+            </div>
+            <button type="button" class="secondary" onclick="addColumn()" style="margin-top: 0.5rem;">+ Add Column</button>
+          </div>
+
+          <label for="compatibility-mode" style="margin-top: 1rem;">Compatibility Mode</label>
+          <select id="compatibility-mode" required>
+            <option value="backward" selected>Backward (consumers safe from breaking changes)</option>
+            <option value="forward">Forward (producers can add fields)</option>
+            <option value="full">Full (strictest - any change breaks)</option>
+            <option value="none">None (no compatibility checks)</option>
+          </select>
+        </fieldset>
+
+        <button type="submit">Create Asset & Publish Contract</button>
         <button type="button" class="secondary" onclick="hideCreateForm()">Cancel</button>
       </form>
     </div>
   </div>
 
-  <div style="margin-bottom: 1rem;">
+  <div id="owner-filter-banner" style="display: none; margin-bottom: 1rem; padding: 0.75rem; background: var(--bg-secondary); border-radius: 4px;"></div>
+
+  <div style="margin-bottom: 1rem; display: flex; gap: 1rem; flex-wrap: wrap; align-items: center;">
     <input type="text" id="search-fqn" placeholder="Search by FQN..." style="width: auto; display: inline-block;">
+    <label style="display: flex; align-items: center; gap: 0.25rem;">
+      <input type="checkbox" id="filter-unowned" onchange="loadAssets()">
+      Show only unowned assets
+    </label>
     <button class="secondary" onclick="loadAssets()">Search</button>
   </div>
 
@@ -48,6 +98,45 @@
 <script>
 let currentOffset = 0;
 const limit = 20;
+let currentSortBy = 'fqn';
+let currentSortOrder = 'asc';
+
+const schemaTemplates = {
+  'basic-table': [
+    { name: 'id', type: 'integer', required: true },
+    { name: 'name', type: 'string', required: true },
+    { name: 'created_at', type: 'string', required: true },
+  ],
+  'user-table': [
+    { name: 'id', type: 'integer', required: true },
+    { name: 'email', type: 'string', required: true },
+    { name: 'name', type: 'string', required: true },
+    { name: 'role', type: 'string', required: false },
+    { name: 'created_at', type: 'string', required: true },
+    { name: 'updated_at', type: 'string', required: false },
+  ],
+  'event-table': [
+    { name: 'id', type: 'integer', required: true },
+    { name: 'event_type', type: 'string', required: true },
+    { name: 'user_id', type: 'integer', required: false },
+    { name: 'timestamp', type: 'string', required: true },
+    { name: 'payload', type: 'object', required: false },
+  ],
+  'fact-table': [
+    { name: 'id', type: 'integer', required: true },
+    { name: 'date_key', type: 'integer', required: true },
+    { name: 'dimension_key', type: 'integer', required: true },
+    { name: 'metric_value', type: 'number', required: true },
+    { name: 'metric_count', type: 'integer', required: true },
+  ],
+  'dimension-table': [
+    { name: 'id', type: 'integer', required: true },
+    { name: 'name', type: 'string', required: true },
+    { name: 'description', type: 'string', required: false },
+    { name: 'is_active', type: 'boolean', required: true },
+    { name: 'created_at', type: 'string', required: true },
+  ],
+};
 
 function showCreateForm() {
   document.getElementById('create-form').style.display = 'block';
@@ -58,6 +147,93 @@ function hideCreateForm() {
   document.getElementById('create-form').style.display = 'none';
   document.getElementById('asset-fqn').value = '';
   document.getElementById('asset-description').value = '';
+  document.getElementById('schema-template').value = '';
+  document.getElementById('columns-container').innerHTML = `
+    <div class="column-row" style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
+      <input type="text" class="col-name" placeholder="Column name" style="flex: 2;" required>
+      <select class="col-type" style="flex: 1;" required>
+        <option value="string">string</option>
+        <option value="integer">integer</option>
+        <option value="number">number</option>
+        <option value="boolean">boolean</option>
+        <option value="object">object</option>
+        <option value="array">array</option>
+      </select>
+      <label style="display: flex; align-items: center; gap: 0.25rem;">
+        <input type="checkbox" class="col-required" checked> Required
+      </label>
+      <button type="button" class="secondary" onclick="removeColumn(this)" style="padding: 0.25rem 0.5rem;">X</button>
+    </div>
+  `;
+}
+
+function addColumn(name = '', type = 'string', required = true) {
+  const container = document.getElementById('columns-container');
+  const row = document.createElement('div');
+  row.className = 'column-row';
+  row.style = 'display: flex; gap: 0.5rem; margin-bottom: 0.5rem;';
+  row.innerHTML = `
+    <input type="text" class="col-name" placeholder="Column name" style="flex: 2;" value="${escapeHtml(name)}" required>
+    <select class="col-type" style="flex: 1;" required>
+      <option value="string" ${type === 'string' ? 'selected' : ''}>string</option>
+      <option value="integer" ${type === 'integer' ? 'selected' : ''}>integer</option>
+      <option value="number" ${type === 'number' ? 'selected' : ''}>number</option>
+      <option value="boolean" ${type === 'boolean' ? 'selected' : ''}>boolean</option>
+      <option value="object" ${type === 'object' ? 'selected' : ''}>object</option>
+      <option value="array" ${type === 'array' ? 'selected' : ''}>array</option>
+    </select>
+    <label style="display: flex; align-items: center; gap: 0.25rem;">
+      <input type="checkbox" class="col-required" ${required ? 'checked' : ''}> Required
+    </label>
+    <button type="button" class="secondary" onclick="removeColumn(this)" style="padding: 0.25rem 0.5rem;">X</button>
+  `;
+  container.appendChild(row);
+}
+
+function removeColumn(button) {
+  const container = document.getElementById('columns-container');
+  if (container.children.length > 1) {
+    button.closest('.column-row').remove();
+  } else {
+    showError('Must have at least one column');
+  }
+}
+
+function applySchemaTemplate() {
+  const template = document.getElementById('schema-template').value;
+  if (!template || !schemaTemplates[template]) return;
+
+  const container = document.getElementById('columns-container');
+  container.innerHTML = '';
+
+  schemaTemplates[template].forEach(col => {
+    addColumn(col.name, col.type, col.required);
+  });
+}
+
+function buildSchemaFromForm() {
+  const rows = document.querySelectorAll('#columns-container .column-row');
+  const properties = {};
+  const required = [];
+
+  rows.forEach(row => {
+    const name = row.querySelector('.col-name').value.trim();
+    const type = row.querySelector('.col-type').value;
+    const isRequired = row.querySelector('.col-required').checked;
+
+    if (name) {
+      properties[name] = { type };
+      if (isRequired) {
+        required.push(name);
+      }
+    }
+  });
+
+  return {
+    type: 'object',
+    properties,
+    required: required.length > 0 ? required : undefined,
+  };
 }
 
 async function loadTeamsForSelect() {
@@ -76,16 +252,34 @@ async function createAsset(event) {
   const fqn = document.getElementById('asset-fqn').value.trim();
   const owner_team_id = document.getElementById('asset-owner').value;
   const description = document.getElementById('asset-description').value.trim();
+  const compatibilityMode = document.getElementById('compatibility-mode').value;
 
   if (!fqn || !owner_team_id) return;
 
+  // Build schema from form
+  const schema = buildSchemaFromForm();
+  if (Object.keys(schema.properties).length === 0) {
+    showError('Please define at least one column in the schema');
+    return;
+  }
+
   try {
-    await api.createAsset({
+    // Create asset first
+    const asset = await api.createAsset({
       fqn,
       owner_team_id,
       description: description || undefined,
     });
+
+    // Then publish the initial contract
+    await api.publishContract(asset.id, {
+      version: '1.0.0',
+      schema: schema,
+      compatibility_mode: compatibilityMode,
+    }, owner_team_id);
+
     hideCreateForm();
+    showSuccess(`Asset "${fqn}" created with initial contract v1.0.0`);
     loadAssets();
   } catch (error) {
     showError(error.message);
@@ -103,15 +297,64 @@ async function deleteAsset(id, fqn) {
   }
 }
 
+function sortBy(field) {
+  if (currentSortBy === field) {
+    currentSortOrder = currentSortOrder === 'asc' ? 'desc' : 'asc';
+  } else {
+    currentSortBy = field;
+    currentSortOrder = 'asc';
+  }
+  currentOffset = 0;
+  loadAssets();
+}
+
+function getSortClass(field) {
+  if (currentSortBy !== field) return 'sortable';
+  return 'sortable ' + currentSortOrder;
+}
+
 async function loadAssets() {
   const container = document.getElementById('assets-list');
   container.innerHTML = '<div class="loading">Loading...</div>';
 
   const searchFqn = document.getElementById('search-fqn').value.trim();
+  const showUnowned = document.getElementById('filter-unowned').checked;
+
+  // Get filter from URL query params
+  const urlParams = new URLSearchParams(window.location.search);
+  const ownerTeamFilter = urlParams.get('owner');
+  const ownerUserFilter = urlParams.get('owner_user');
+
+  // Show filter banner if filtering
+  const banner = document.getElementById('owner-filter-banner');
+  if (ownerTeamFilter) {
+    try {
+      const team = await api.getTeam(ownerTeamFilter);
+      banner.innerHTML = `Showing assets owned by team <strong><a href="/teams/${ownerTeamFilter}">${escapeHtml(team.name)}</a></strong> &nbsp; <a href="/assets" style="font-size: 0.9em;">[Clear filter]</a>`;
+      banner.style.display = 'block';
+    } catch (e) {
+      banner.innerHTML = `Filtering by team ID: ${escapeHtml(ownerTeamFilter)} &nbsp; <a href="/assets" style="font-size: 0.9em;">[Clear filter]</a>`;
+      banner.style.display = 'block';
+    }
+  } else if (ownerUserFilter) {
+    try {
+      const user = await api.getUser(ownerUserFilter);
+      banner.innerHTML = `Showing assets owned by <strong><a href="/users/${ownerUserFilter}">${escapeHtml(user.name)}</a></strong> &nbsp; <a href="/assets" style="font-size: 0.9em;">[Clear filter]</a>`;
+      banner.style.display = 'block';
+    } catch (e) {
+      banner.innerHTML = `Filtering by user ID: ${escapeHtml(ownerUserFilter)} &nbsp; <a href="/assets" style="font-size: 0.9em;">[Clear filter]</a>`;
+      banner.style.display = 'block';
+    }
+  } else {
+    banner.style.display = 'none';
+  }
 
   try {
-    const params = { offset: currentOffset, limit };
+    const params = { offset: currentOffset, limit, sort_by: currentSortBy, sort_order: currentSortOrder };
     if (searchFqn) params.fqn = searchFqn;
+    if (ownerTeamFilter) params.owner = ownerTeamFilter;
+    if (ownerUserFilter) params.owner_user = ownerUserFilter;
+    if (showUnowned) params.unowned = true;
 
     const data = await api.listAssets(params);
 
@@ -124,8 +367,9 @@ async function loadAssets() {
       <table>
         <thead>
           <tr>
-            <th>FQN</th>
-            <th>Owner</th>
+            <th class="${getSortClass('fqn')}" onclick="sortBy('fqn')">FQN</th>
+            <th class="${getSortClass('owner_user')}" onclick="sortBy('owner_user')">Owner (User)</th>
+            <th class="${getSortClass('owner')}" onclick="sortBy('owner')">Team</th>
             <th>Active Contract</th>
             <th>Actions</th>
           </tr>
@@ -134,7 +378,8 @@ async function loadAssets() {
           ${data.results.map(asset => `
             <tr>
               <td><a href="/assets/${asset.id}">${escapeHtml(asset.fqn)}</a></td>
-              <td>${escapeHtml(asset.owner_team_name || asset.owner_team_id)}</td>
+              <td>${asset.owner_user_name ? `<a href="/users/${asset.owner_user_id}">${escapeHtml(asset.owner_user_name)}</a>` : '<span style="color: var(--gray);">Unassigned</span>'}</td>
+              <td><a href="/teams/${asset.owner_team_id}">${escapeHtml(asset.owner_team_name || asset.owner_team_id)}</a></td>
               <td>${asset.active_contract_version || '<span style="color: var(--gray);">None</span>'}</td>
               <td>
                 <button class="secondary" onclick="deleteAsset('${asset.id}', '${escapeHtml(asset.fqn)}')">Delete</button>

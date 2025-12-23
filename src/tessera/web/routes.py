@@ -22,6 +22,24 @@ async def dashboard(request: Request) -> HTMLResponse:
     )
 
 
+@router.get("/users", response_class=HTMLResponse)
+async def users_list(request: Request) -> HTMLResponse:
+    """Users list page."""
+    return templates.TemplateResponse(
+        "users.html",
+        {"request": request, "active_page": "users"},
+    )
+
+
+@router.get("/users/{user_id}", response_class=HTMLResponse)
+async def user_detail(request: Request, user_id: str) -> HTMLResponse:
+    """User detail page."""
+    return templates.TemplateResponse(
+        "user_detail.html",
+        {"request": request, "active_page": "users", "user_id": user_id},
+    )
+
+
 @router.get("/teams", response_class=HTMLResponse)
 async def teams_list(request: Request) -> HTMLResponse:
     """Teams list page."""

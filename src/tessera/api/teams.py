@@ -6,7 +6,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request, Security
 from fastapi.security import APIKeyHeader
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,7 +21,7 @@ from tessera.api.errors import (
 from tessera.api.pagination import PaginationParams, paginate, pagination_params
 from tessera.api.rate_limit import limit_read, limit_write
 from tessera.config import settings
-from tessera.db import TeamDB, get_session
+from tessera.db import AssetDB, TeamDB, get_session
 from tessera.models import Team, TeamCreate, TeamUpdate
 from tessera.models.enums import APIKeyScope
 from tessera.services.cache import team_cache
@@ -112,14 +112,47 @@ async def list_teams(
 ) -> dict[str, Any]:
     """List all teams with filtering and pagination.
 
-    Requires read scope.
+    Requires read scope. Returns teams with asset counts.
     """
-    query = select(TeamDB).where(TeamDB.deleted_at.is_(None))
+    # Build base query with filters
+    base_query = select(TeamDB).where(TeamDB.deleted_at.is_(None))
     if name:
-        query = query.where(TeamDB.name.ilike(f"%{name}%"))
-    query = query.order_by(TeamDB.name)
+        base_query = base_query.where(TeamDB.name.ilike(f"%{name}%"))
 
-    return await paginate(session, query, params, response_model=Team)
+    # Get total count
+    count_query = select(func.count()).select_from(base_query.subquery())
+    total_result = await session.execute(count_query)
+    total = total_result.scalar() or 0
+
+    # Main query with pagination
+    query = base_query.order_by(TeamDB.name).limit(params.limit).offset(params.offset)
+    result = await session.execute(query)
+    teams = list(result.scalars().all())
+
+    # Batch fetch asset counts for all teams
+    team_ids = [t.id for t in teams]
+    asset_counts: dict[UUID, int] = {}
+    if team_ids:
+        counts_result = await session.execute(
+            select(AssetDB.owner_team_id, func.count(AssetDB.id))
+            .where(AssetDB.owner_team_id.in_(team_ids))
+            .where(AssetDB.deleted_at.is_(None))
+            .group_by(AssetDB.owner_team_id)
+        )
+        asset_counts = {team_id: count for team_id, count in counts_result.all()}
+
+    results = []
+    for team in teams:
+        team_dict = Team.model_validate(team).model_dump()
+        team_dict["asset_count"] = asset_counts.get(team.id, 0)
+        results.append(team_dict)
+
+    return {
+        "results": results,
+        "total": total,
+        "limit": params.limit,
+        "offset": params.offset,
+    }
 
 
 @router.get("/{team_id}", response_model=Team)

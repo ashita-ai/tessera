@@ -10,8 +10,22 @@
 </section>
 
 <section>
+  <h2>Schema Changes</h2>
+  <div id="schema-diff">
+    <div class="loading">Loading...</div>
+  </div>
+</section>
+
+<section>
   <h2>Breaking Changes</h2>
   <div id="breaking-changes">
+    <div class="loading">Loading...</div>
+  </div>
+</section>
+
+<section>
+  <h2>Impacted Consumers</h2>
+  <div id="impacted-consumers">
     <div class="loading">Loading...</div>
   </div>
 </section>
@@ -22,11 +36,106 @@
     <div class="loading">Loading...</div>
   </div>
 </section>
+
+<!-- Modal Dialogs -->
+<div id="modal-overlay" class="modal-overlay" style="display: none;" onclick="closeModal()"></div>
+
+<div id="publish-modal" class="modal" style="display: none;">
+  <div class="modal-content">
+    <h3>Publish Contract</h3>
+    <form onsubmit="submitPublish(event)">
+      <label for="publish-version">Version</label>
+      <input type="text" id="publish-version" pattern="^\d+\.\d+\.\d+.*$" placeholder="e.g., 2.0.0" required>
+      <small style="color: var(--gray);">Use semantic versioning (e.g., 2.0.0)</small>
+
+      <label for="publish-team">Publish as Team</label>
+      <select id="publish-team" required></select>
+
+      <div style="margin-top: 1rem; display: flex; gap: 0.5rem;">
+        <button type="submit" style="background: green;">Publish</button>
+        <button type="button" class="secondary" onclick="closeModal()">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="force-modal" class="modal" style="display: none;">
+  <div class="modal-content">
+    <h3>Force Approve Proposal</h3>
+    <p style="color: var(--error);">This will approve the breaking change WITHOUT all consumer acknowledgments. Consumers may experience breaking changes!</p>
+    <form onsubmit="submitForceApprove(event)">
+      <label for="force-team">Approve as Team</label>
+      <select id="force-team" required></select>
+
+      <div style="margin-top: 1rem; display: flex; gap: 0.5rem;">
+        <button type="submit" style="background: var(--error);">Force Approve</button>
+        <button type="button" class="secondary" onclick="closeModal()">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<style>
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 1000;
+}
+.modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.5rem;
+  z-index: 1001;
+  max-width: 500px;
+  width: 90%;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+.modal-content h3 {
+  margin-top: 0;
+  margin-bottom: 1rem;
+}
+</style>
 {% endblock %}
 
 {% block scripts %}
 <script>
 const proposalId = '{{ proposal_id }}';
+let teamsCache = [];
+
+function closeModal() {
+  document.getElementById('modal-overlay').style.display = 'none';
+  document.querySelectorAll('.modal').forEach(m => m.style.display = 'none');
+}
+
+function showModal(id) {
+  document.getElementById('modal-overlay').style.display = 'block';
+  document.getElementById(id).style.display = 'block';
+}
+
+async function loadTeams() {
+  if (teamsCache.length === 0) {
+    const data = await api.listTeams({ limit: 100 });
+    teamsCache = data.results || [];
+  }
+  return teamsCache;
+}
+
+function populateTeamSelect(selectId) {
+  const select = document.getElementById(selectId);
+  select.innerHTML = teamsCache.map(t =>
+    `<option value="${t.id}">${escapeHtml(t.name)}</option>`
+  ).join('');
+}
 
 async function withdrawProposal() {
   if (!confirm('Withdraw this proposal?')) return;
@@ -40,7 +149,7 @@ async function withdrawProposal() {
 }
 
 async function acknowledgeProposal(teamId, teamName) {
-  if (!confirm(`Acknowledge this proposal as team "${teamName}"?`)) return;
+  if (!confirm(`Acknowledge this breaking change as team "${teamName}"?\n\nThis confirms your team accepts the impact.`)) return;
 
   try {
     await api.acknowledgeProposal(proposalId, teamId);
@@ -50,30 +159,94 @@ async function acknowledgeProposal(teamId, teamName) {
   }
 }
 
-async function forceApprove() {
-  const teams = await api.listTeams({ limit: 100 });
-  if (!teams.results || teams.results.length === 0) {
-    showError('No teams available');
-    return;
-  }
+async function approveAndPublish() {
+  await loadTeams();
+  populateTeamSelect('publish-team');
+  document.getElementById('publish-version').value = '2.0.0';
+  showModal('publish-modal');
+}
 
-  const teamOptions = teams.results.map(t => `${t.name} (${t.id})`).join('\n');
-  const selected = prompt(`Force approve this proposal?\n\nThis will publish the breaking change without all acknowledgments.\n\nSelect a team to act as (enter team name):\n${teamOptions}`);
+async function submitPublish(event) {
+  event.preventDefault();
 
-  if (!selected) return;
+  const version = document.getElementById('publish-version').value;
+  const teamId = document.getElementById('publish-team').value;
 
-  const team = teams.results.find(t => t.name === selected || t.id === selected);
-  if (!team) {
-    showError('Team not found');
+  if (!/^\d+\.\d+\.\d+/.test(version)) {
+    showError('Invalid version format. Use semantic versioning (e.g., 2.0.0)');
     return;
   }
 
   try {
-    await api.forceApproveProposal(proposalId, team.id);
+    await api.publishFromProposal(proposalId, version, teamId);
+    closeModal();
+    showSuccess('Contract published successfully!');
     loadProposalDetail();
   } catch (error) {
     showError(error.message);
   }
+}
+
+async function forceApprove() {
+  await loadTeams();
+  populateTeamSelect('force-team');
+  showModal('force-modal');
+}
+
+async function submitForceApprove(event) {
+  event.preventDefault();
+
+  const teamId = document.getElementById('force-team').value;
+
+  try {
+    await api.forceApproveProposal(proposalId, teamId);
+    closeModal();
+    loadProposalDetail();
+  } catch (error) {
+    showError(error.message);
+  }
+}
+
+function renderSchemaDiff(currentSchema, proposedSchema) {
+  const currentProps = currentSchema?.properties || {};
+  const proposedProps = proposedSchema?.properties || {};
+
+  const allKeys = new Set([...Object.keys(currentProps), ...Object.keys(proposedProps)]);
+
+  let html = '<table><thead><tr><th>Column</th><th>Current</th><th>Proposed</th><th>Change</th></tr></thead><tbody>';
+
+  for (const key of [...allKeys].sort()) {
+    const current = currentProps[key];
+    const proposed = proposedProps[key];
+
+    let changeClass = '';
+    let changeLabel = '';
+
+    if (!current && proposed) {
+      changeClass = 'added';
+      changeLabel = '<span style="color: green;">+ Added</span>';
+    } else if (current && !proposed) {
+      changeClass = 'removed';
+      changeLabel = '<span style="color: red;">- Removed</span>';
+    } else if (current && proposed) {
+      if (JSON.stringify(current) !== JSON.stringify(proposed)) {
+        changeClass = 'modified';
+        changeLabel = '<span style="color: orange;">~ Modified</span>';
+      } else {
+        changeLabel = '<span style="color: gray;">No change</span>';
+      }
+    }
+
+    html += `<tr class="${changeClass}">
+      <td><code>${escapeHtml(key)}</code></td>
+      <td>${current ? `<code>${escapeHtml(current.type || 'unknown')}</code>${current.description ? `<br><small>${escapeHtml(current.description)}</small>` : ''}` : '<em>-</em>'}</td>
+      <td>${proposed ? `<code>${escapeHtml(proposed.type || 'unknown')}</code>${proposed.description ? `<br><small>${escapeHtml(proposed.description)}</small>` : ''}` : '<em>-</em>'}</td>
+      <td>${changeLabel}</td>
+    </tr>`;
+  }
+
+  html += '</tbody></table>';
+  return html;
 }
 
 async function loadProposalDetail() {
@@ -81,116 +254,184 @@ async function loadProposalDetail() {
     const proposal = await api.getProposal(proposalId);
     const status = await api.getProposalStatus(proposalId);
 
+    // Try to get current contract for diff
+    let currentSchema = null;
+    try {
+      const contracts = await api.getAssetContracts(proposal.asset_id);
+      const activeContract = contracts.results?.find(c => c.status === 'active');
+      if (activeContract) {
+        currentSchema = activeContract.schema_def;
+      }
+    } catch (e) { /* ignore */ }
+
+    const isPending = proposal.status === 'pending';
+    const isApproved = proposal.status === 'approved';
+    const allAcknowledged = status?.consumers?.pending === 0 && status?.consumers?.total > 0;
+
     document.getElementById('proposal-detail').innerHTML = `
-      <h2>Proposal: v${escapeHtml(proposal.proposed_version)}</h2>
-      <div class="card">
-        <p><strong>ID:</strong> ${proposal.id}</p>
-        <p><strong>Asset:</strong> <a href="/assets/${proposal.asset_id}">${escapeHtml(proposal.asset_fqn || proposal.asset_id)}</a></p>
-        <p><strong>Status:</strong> <span class="status status-${proposal.status}">${proposal.status}</span></p>
-        <p><strong>Proposed Version:</strong> ${escapeHtml(proposal.proposed_version)}</p>
-        <p><strong>Supersedes:</strong> ${proposal.supersedes_version || 'N/A'}</p>
-        <p><strong>Created:</strong> ${formatDate(proposal.created_at)}</p>
-        ${proposal.resolved_at ? `<p><strong>Resolved:</strong> ${formatDate(proposal.resolved_at)}</p>` : ''}
-      </div>
-      ${proposal.status === 'pending' ? `
-        <div style="margin-top: 1rem;">
-          <button onclick="withdrawProposal()">Withdraw Proposal</button>
-          <button class="secondary" onclick="forceApprove()" style="margin-left: 0.5rem;">Force Approve</button>
+      <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+        <div>
+          <h2 style="margin-bottom: 0.5rem;">Breaking Change Proposal</h2>
+          <p style="color: var(--gray); margin-top: 0;">Proposed by <a href="/teams/${status?.proposed_by?.team_id}">${escapeHtml(status?.proposed_by?.team_name || 'Unknown')}</a></p>
         </div>
-      ` : ''}
-      <div style="margin-top: 1rem;">
-        <a href="/proposals">&larr; Back to Proposals</a>
+        <span class="status status-${proposal.status}" style="font-size: 1rem; padding: 0.5rem 1rem;">${proposal.status.toUpperCase()}</span>
+      </div>
+
+      <div class="card">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
+          <div>
+            <strong>Asset</strong><br>
+            <a href="/assets/${proposal.asset_id}">${escapeHtml(status?.asset_fqn || proposal.asset_id)}</a>
+          </div>
+          <div>
+            <strong>Change Type</strong><br>
+            <span class="status status-${proposal.change_type === 'major' ? 'deprecated' : 'active'}">${proposal.change_type || 'Unknown'}</span>
+          </div>
+          <div>
+            <strong>Created</strong><br>
+            ${formatDate(proposal.proposed_at)}
+          </div>
+          <div>
+            <strong>Impacted Teams</strong><br>
+            ${status?.consumers?.total || 0} consumer${status?.consumers?.total !== 1 ? 's' : ''}
+          </div>
+        </div>
+        ${proposal.resolved_at ? `<p style="margin-top: 1rem;"><strong>Resolved:</strong> ${formatDate(proposal.resolved_at)}</p>` : ''}
+      </div>
+
+      <div style="margin-top: 1.5rem; display: flex; gap: 0.5rem; flex-wrap: wrap;">
+        ${isPending && allAcknowledged ? `
+          <button onclick="approveAndPublish()" style="background: green;">Approve & Publish</button>
+        ` : ''}
+        ${isApproved ? `
+          <button onclick="approveAndPublish()" style="background: green;">Publish Contract</button>
+        ` : ''}
+        ${isPending ? `
+          <button class="secondary" onclick="forceApprove()">Force Approve (Skip Acknowledgments)</button>
+          <button class="secondary" onclick="withdrawProposal()">Withdraw</button>
+        ` : ''}
+        <a href="/proposals" class="button secondary">&larr; Back to Proposals</a>
       </div>
     `;
 
+    // Schema diff
+    const diffContainer = document.getElementById('schema-diff');
+    if (currentSchema && proposal.proposed_schema) {
+      diffContainer.innerHTML = renderSchemaDiff(currentSchema, proposal.proposed_schema);
+    } else if (proposal.proposed_schema) {
+      diffContainer.innerHTML = `
+        <p><em>No current schema to compare against.</em></p>
+        <details>
+          <summary>View Proposed Schema</summary>
+          <pre style="background: var(--bg-secondary); padding: 1rem; overflow-x: auto;">${escapeHtml(JSON.stringify(proposal.proposed_schema, null, 2))}</pre>
+        </details>
+      `;
+    } else {
+      diffContainer.innerHTML = '<div class="empty">No schema information available.</div>';
+    }
+
     // Breaking changes
     const changesContainer = document.getElementById('breaking-changes');
-    if (proposal.breaking_changes && proposal.breaking_changes.length > 0) {
+    const breakingChanges = status?.breaking_changes || proposal.breaking_changes || [];
+    if (breakingChanges.length > 0) {
       changesContainer.innerHTML = `
+        <div class="card" style="border-left: 4px solid var(--error);">
+          <table>
+            <thead>
+              <tr>
+                <th>Change Type</th>
+                <th>Location</th>
+                <th>Description</th>
+                <th>Impact</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${breakingChanges.map(c => `
+                <tr>
+                  <td><strong style="color: var(--error);">${escapeHtml(c.type || c.change_type || 'Unknown')}</strong></td>
+                  <td><code>${escapeHtml(c.path || c.column || 'N/A')}</code></td>
+                  <td>${escapeHtml(c.message || c.description || '')}</td>
+                  <td>${c.old_value ? `<code>${escapeHtml(String(c.old_value))}</code> → ` : ''}${c.new_value !== undefined ? `<code>${escapeHtml(String(c.new_value || 'removed'))}</code>` : ''}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    } else {
+      changesContainer.innerHTML = '<div class="empty">No breaking changes documented.</div>';
+    }
+
+    // Impacted consumers
+    const consumersContainer = document.getElementById('impacted-consumers');
+    const pendingConsumers = status?.pending_consumers || [];
+    const acknowledgedConsumers = status?.acknowledgments || [];
+
+    if (pendingConsumers.length === 0 && acknowledgedConsumers.length === 0) {
+      consumersContainer.innerHTML = '<div class="card"><p>No consumers are registered for this asset. The change can be published immediately.</p></div>';
+    } else {
+      consumersContainer.innerHTML = `
+        <div class="card">
+          <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; text-align: center; margin-bottom: 1rem;">
+            <div>
+              <div style="font-size: 2rem; font-weight: bold;">${status?.consumers?.total || 0}</div>
+              <div style="color: var(--gray);">Total Consumers</div>
+            </div>
+            <div>
+              <div style="font-size: 2rem; font-weight: bold; color: green;">${status?.consumers?.acknowledged || 0}</div>
+              <div style="color: var(--gray);">Acknowledged</div>
+            </div>
+            <div>
+              <div style="font-size: 2rem; font-weight: bold; color: orange;">${status?.consumers?.pending || 0}</div>
+              <div style="color: var(--gray);">Awaiting</div>
+            </div>
+          </div>
+          ${pendingConsumers.length > 0 ? `
+            <h4 style="margin: 1rem 0 0.5rem 0;">Awaiting Acknowledgment</h4>
+            <table>
+              <thead><tr><th>Team</th><th>Registered</th><th>Action</th></tr></thead>
+              <tbody>
+                ${pendingConsumers.map(c => `
+                  <tr>
+                    <td><a href="/teams/${c.team_id}">${escapeHtml(c.team_name)}</a></td>
+                    <td>${formatDate(c.registered_at)}</td>
+                    <td>${isPending ? `<button class="secondary" onclick="acknowledgeProposal('${c.team_id}', '${escapeHtml(c.team_name)}')">Acknowledge</button>` : '-'}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          ` : ''}
+        </div>
+      `;
+    }
+
+    // Acknowledgments
+    const acksContainer = document.getElementById('acknowledgments');
+    if (acknowledgedConsumers.length > 0) {
+      acksContainer.innerHTML = `
         <table>
           <thead>
             <tr>
-              <th>Type</th>
-              <th>Path</th>
-              <th>Description</th>
+              <th>Team</th>
+              <th>Response</th>
+              <th>Responded</th>
+              <th>Notes</th>
             </tr>
           </thead>
           <tbody>
-            ${proposal.breaking_changes.map(c => `
+            ${acknowledgedConsumers.map(a => `
               <tr>
-                <td><strong>${escapeHtml(c.change_type || c.type)}</strong></td>
-                <td><code>${escapeHtml(c.path)}</code></td>
-                <td>${escapeHtml(c.description || c.message || '')}</td>
+                <td><a href="/teams/${a.consumer_team_id}">${escapeHtml(a.consumer_team_name)}</a></td>
+                <td><span class="status status-${a.response === 'blocked' ? 'deprecated' : 'active'}">${a.response}</span></td>
+                <td>${formatDate(a.responded_at)}</td>
+                <td>${a.notes ? escapeHtml(a.notes) : '<em>-</em>'}</td>
               </tr>
             `).join('')}
           </tbody>
         </table>
       `;
     } else {
-      changesContainer.innerHTML = '<div class="empty">No breaking changes listed.</div>';
-    }
-
-    // Acknowledgments
-    const acksContainer = document.getElementById('acknowledgments');
-    if (status && status.acknowledgments) {
-      const pending = status.acknowledgments.filter(a => !a.acknowledged_at);
-      const completed = status.acknowledgments.filter(a => a.acknowledged_at);
-
-      let html = '';
-
-      if (pending.length > 0) {
-        html += `
-          <h3 style="font-size: 1rem; margin-bottom: 0.5rem;">Pending (${pending.length})</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>Team</th>
-                <th>Status</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${pending.map(a => `
-                <tr>
-                  <td><a href="/teams/${a.team_id}">${escapeHtml(a.team_name || a.team_id)}</a></td>
-                  <td><span class="status status-pending">Pending</span></td>
-                  <td><button class="secondary" onclick="acknowledgeProposal('${a.team_id}', '${escapeHtml(a.team_name || a.team_id)}')">Acknowledge</button></td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        `;
-      }
-
-      if (completed.length > 0) {
-        html += `
-          <h3 style="font-size: 1rem; margin: 1rem 0 0.5rem 0;">Completed (${completed.length})</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>Team</th>
-                <th>Acknowledged</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${completed.map(a => `
-                <tr>
-                  <td><a href="/teams/${a.team_id}">${escapeHtml(a.team_name || a.team_id)}</a></td>
-                  <td>${formatDate(a.acknowledged_at)}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        `;
-      }
-
-      if (!html) {
-        html = '<div class="empty">No acknowledgments required.</div>';
-      }
-
-      acksContainer.innerHTML = html;
-    } else {
-      acksContainer.innerHTML = '<div class="empty">No acknowledgments required.</div>';
+      acksContainer.innerHTML = '<div class="empty">No acknowledgments yet.</div>';
     }
   } catch (error) {
     showError(error.message);

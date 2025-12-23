@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+
+{% block title %}Users - Tessera{% endblock %}
+
+{% block content %}
+<section>
+  <h2>Users</h2>
+
+  <div style="margin-bottom: 1rem;">
+    <button onclick="showCreateForm()">+ New User</button>
+  </div>
+
+  <div id="create-form" style="display: none; margin-bottom: 2rem;">
+    <div class="card">
+      <h3>Create User</h3>
+      <form onsubmit="createUser(event)">
+        <label for="user-name">Name</label>
+        <input type="text" id="user-name" name="name" required placeholder="e.g., Jane Smith">
+
+        <label for="user-email">Email</label>
+        <input type="email" id="user-email" name="email" required placeholder="e.g., jane@example.com">
+
+        <label for="user-team">Team (optional)</label>
+        <select id="user-team" name="team_id">
+          <option value="">No team</option>
+        </select>
+
+        <button type="submit">Create</button>
+        <button type="button" class="secondary" onclick="hideCreateForm()">Cancel</button>
+      </form>
+    </div>
+  </div>
+
+  <div id="users-list">
+    <div class="loading">Loading...</div>
+  </div>
+
+  <div id="pagination" style="margin-top: 1rem;"></div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let currentOffset = 0;
+const limit = 20;
+let teamsCache = [];
+
+function showCreateForm() {
+  document.getElementById('create-form').style.display = 'block';
+  document.getElementById('user-name').focus();
+  loadTeamsForSelect();
+}
+
+function hideCreateForm() {
+  document.getElementById('create-form').style.display = 'none';
+  document.getElementById('user-name').value = '';
+  document.getElementById('user-email').value = '';
+  document.getElementById('user-team').value = '';
+}
+
+async function loadTeamsForSelect() {
+  try {
+    const data = await api.listTeams({ limit: 100 });
+    teamsCache = data.results || [];
+    const select = document.getElementById('user-team');
+    select.innerHTML = '<option value="">No team</option>' +
+      teamsCache.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
+  } catch (error) {
+    console.error('Failed to load teams:', error);
+  }
+}
+
+async function createUser(event) {
+  event.preventDefault();
+  const name = document.getElementById('user-name').value.trim();
+  const email = document.getElementById('user-email').value.trim();
+  const teamId = document.getElementById('user-team').value || null;
+
+  if (!name || !email) return;
+
+  try {
+    await api.createUser({ name, email, team_id: teamId });
+    hideCreateForm();
+    loadUsers();
+  } catch (error) {
+    showError(error.message);
+  }
+}
+
+async function deleteUser(id, name) {
+  if (!confirm(`Deactivate user "${name}"?`)) return;
+
+  try {
+    await api.deleteUser(id);
+    loadUsers();
+  } catch (error) {
+    showError(error.message);
+  }
+}
+
+async function loadUsers() {
+  const container = document.getElementById('users-list');
+  container.innerHTML = '<div class="loading">Loading...</div>';
+
+  try {
+    const data = await api.listUsers({ offset: currentOffset, limit });
+
+    if (!data.results || data.results.length === 0) {
+      container.innerHTML = '<div class="empty">No users found. Create one to get started.</div>';
+      return;
+    }
+
+    container.innerHTML = `
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Email</th>
+            <th>Team</th>
+            <th>Assets</th>
+            <th>Created</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${data.results.map(user => `
+            <tr>
+              <td><a href="/users/${user.id}">${escapeHtml(user.name)}</a></td>
+              <td>${escapeHtml(user.email)}</td>
+              <td>${user.team_name ? `<a href="/teams/${user.team_id}">${escapeHtml(user.team_name)}</a>` : '<span style="color: var(--gray);">-</span>'}</td>
+              <td>${user.asset_count != null ? `<a href="/assets?owner_user=${user.id}">${user.asset_count}</a>` : '0'}</td>
+              <td>${formatDate(user.created_at)}</td>
+              <td>
+                <button class="secondary" onclick="deleteUser('${user.id}', '${escapeHtml(user.name)}')">Deactivate</button>
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+
+    // Pagination
+    const paginationContainer = document.getElementById('pagination');
+    const totalPages = Math.ceil(data.total / limit);
+    const currentPage = Math.floor(currentOffset / limit) + 1;
+
+    if (totalPages > 1) {
+      paginationContainer.innerHTML = `
+        <button class="secondary" ${currentOffset === 0 ? 'disabled' : ''} onclick="goToPage(${currentPage - 1})">Prev</button>
+        <span style="margin: 0 1rem;">Page ${currentPage} of ${totalPages}</span>
+        <button class="secondary" ${currentPage >= totalPages ? 'disabled' : ''} onclick="goToPage(${currentPage + 1})">Next</button>
+      `;
+    } else {
+      paginationContainer.innerHTML = '';
+    }
+  } catch (error) {
+    showError(error.message);
+    container.innerHTML = '<div class="error">Failed to load users</div>';
+  }
+}
+
+function goToPage(page) {
+  currentOffset = (page - 1) * limit;
+  loadUsers();
+}
+
+loadUsers();
+</script>
+{% endblock %}

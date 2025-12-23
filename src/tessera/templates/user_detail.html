@@ -1,17 +1,17 @@
 {% extends "base.html" %}
 
-{% block title %}Team - Tessera{% endblock %}
+{% block title %}User - Tessera{% endblock %}
 
 {% block content %}
 <section>
-  <div id="team-detail">
+  <div id="user-detail">
     <div class="loading">Loading...</div>
   </div>
 </section>
 
 <section>
   <h2>Owned Assets</h2>
-  <div id="team-assets">
+  <div id="user-assets">
     <div class="loading">Loading...</div>
   </div>
 </section>
@@ -19,45 +19,47 @@
 
 {% block scripts %}
 <script>
-const teamId = '{{ team_id }}';
+const userId = '{{ user_id }}';
 let assetsOffset = 0;
 const assetsLimit = 20;
 let totalAssets = 0;
 
-async function loadTeamDetail() {
+async function loadUserDetail() {
   try {
-    const team = await api.getTeam(teamId);
+    const user = await api.getUser(userId);
 
-    document.getElementById('team-detail').innerHTML = `
-      <h2>${escapeHtml(team.name)}</h2>
+    document.getElementById('user-detail').innerHTML = `
+      <h2>${escapeHtml(user.name)}</h2>
       <div class="card">
-        <p><strong>ID:</strong> ${team.id}</p>
-        <p><strong>Created:</strong> ${formatDate(team.created_at)}</p>
-        ${team.metadata ? `<p><strong>Metadata:</strong> <pre>${JSON.stringify(team.metadata, null, 2)}</pre></p>` : ''}
+        <p><strong>Email:</strong> ${escapeHtml(user.email)}</p>
+        <p><strong>ID:</strong> ${user.id}</p>
+        <p><strong>Team:</strong> ${user.team_name ? `<a href="/teams/${user.team_id}">${escapeHtml(user.team_name)}</a>` : '<span style="color: var(--gray);">None</span>'}</p>
+        <p><strong>Created:</strong> ${formatDate(user.created_at)}</p>
+        ${user.metadata && Object.keys(user.metadata).length > 0 ? `<p><strong>Metadata:</strong> <pre>${JSON.stringify(user.metadata, null, 2)}</pre></p>` : ''}
       </div>
       <div style="margin-top: 1rem;">
-        <a href="/teams">&larr; Back to Teams</a>
+        <a href="/users">&larr; Back to Users</a>
       </div>
     `;
 
     // Load assets
-    loadTeamAssets();
+    loadUserAssets();
   } catch (error) {
     showError(error.message);
-    document.getElementById('team-detail').innerHTML = '<div class="error">Team not found</div>';
+    document.getElementById('user-detail').innerHTML = '<div class="error">User not found</div>';
   }
 }
 
-async function loadTeamAssets() {
-  const assetsContainer = document.getElementById('team-assets');
+async function loadUserAssets() {
+  const assetsContainer = document.getElementById('user-assets');
   assetsContainer.innerHTML = '<div class="loading">Loading...</div>';
 
   try {
-    const assets = await api.listAssets({ owner: teamId, limit: assetsLimit, offset: assetsOffset });
+    const assets = await api.listAssets({ owner_user: userId, limit: assetsLimit, offset: assetsOffset });
     totalAssets = assets.total || 0;
 
     if (!assets.results || assets.results.length === 0) {
-      assetsContainer.innerHTML = '<div class="empty">No assets owned by this team.</div>';
+      assetsContainer.innerHTML = '<div class="empty">No assets owned by this user.</div>';
       return;
     }
 
@@ -65,11 +67,12 @@ async function loadTeamAssets() {
     const currentPage = Math.floor(assetsOffset / assetsLimit) + 1;
 
     assetsContainer.innerHTML = `
-      <p style="margin-bottom: 0.5rem;"><strong>${totalAssets}</strong> asset(s) owned by this team:</p>
+      <p style="margin-bottom: 0.5rem;"><strong>${totalAssets}</strong> asset(s) owned by this user:</p>
       <table>
         <thead>
           <tr>
             <th>FQN</th>
+            <th>Team</th>
             <th>Active Contract</th>
             <th>Action</th>
           </tr>
@@ -78,6 +81,7 @@ async function loadTeamAssets() {
           ${assets.results.map(a => `
             <tr>
               <td><a href="/assets/${a.id}">${escapeHtml(a.fqn)}</a></td>
+              <td>${a.owner_team_name ? `<a href="/teams/${a.owner_team_id}">${escapeHtml(a.owner_team_name)}</a>` : '<span style="color: var(--gray);">-</span>'}</td>
               <td>${a.active_contract_version || '<span style="color: var(--gray);">None</span>'}</td>
               <td><a href="/assets/${a.id}">View</a></td>
             </tr>
@@ -99,9 +103,9 @@ async function loadTeamAssets() {
 
 function goToAssetsPage(page) {
   assetsOffset = (page - 1) * assetsLimit;
-  loadTeamAssets();
+  loadUserAssets();
 }
 
-loadTeamDetail();
+loadUserDetail();
 </script>
 {% endblock %}

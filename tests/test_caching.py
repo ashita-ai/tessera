@@ -1,24 +1,24 @@
 """Tests for caching logic."""
 
-import pytest
-from unittest.mock import MagicMock, patch, AsyncMock
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
-from datetime import datetime, UTC
+
+import pytest
 from fastapi import Request
 
+from tessera.api.assets import get_asset
+from tessera.db.models import AssetDB
 from tessera.services.cache import (
     CacheService,
-    asset_cache,
     cache_asset,
-    get_cached_asset,
     cache_contract,
-    get_cached_contract,
     cache_schema_diff,
+    get_cached_asset,
+    get_cached_contract,
     get_cached_schema_diff,
     invalidate_asset,
 )
-from tessera.api.assets import get_asset
-from tessera.db.models import AssetDB, TeamDB
 
 
 @pytest.fixture
@@ -96,21 +96,18 @@ class TestCaching:
         mock_auth = MagicMock()
 
         # 1. Cache hit
-        cached_data = {
-            "id": str(asset_id),
-            "fqn": "cached.asset",
-            "owner_team_id": str(uuid4()),
-            "metadata": {},
-            "created_at": "2023-01-01T00:00:00Z",
-            "environment": "production",
-        }
-        mock_redis.get.return_value = b'{"id": "' + str(asset_id).encode() + b'", "fqn": "cached.asset", "owner_team_id": "' + str(uuid4()).encode() + b'", "metadata": {}, "created_at": "2023-01-01T00:00:00Z", "environment": "production"}'
+        team_id = str(uuid4())
+        mock_redis.get.return_value = (
+            b'{"id": "'
+            + str(asset_id).encode()
+            + b'", "fqn": "cached.asset", "owner_team_id": "'
+            + team_id.encode()
+            + b'", "metadata": {}, "created_at": "2023-01-01T00:00:00Z", '
+            + b'"environment": "production"}'
+        )
 
         res = await get_asset(
-            request=mock_request,
-            asset_id=asset_id,
-            auth=mock_auth,
-            session=mock_session
+            request=mock_request, asset_id=asset_id, auth=mock_auth, session=mock_session
         )
 
         assert res["fqn"] == "cached.asset"
@@ -124,20 +121,18 @@ class TestCaching:
             owner_team_id=uuid4(),
             environment="production",
             metadata_={},
-            created_at=datetime.now(UTC)
+            created_at=datetime.now(UTC),
         )
+        # The query returns a 4-tuple: (asset, team_name, user_name, user_email)
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_asset
+        mock_result.one_or_none.return_value = (mock_asset, "Test Team", None, None)
         mock_session.execute.return_value = mock_result
 
         res = await get_asset(
-            request=mock_request,
-            asset_id=asset_id,
-            auth=mock_auth,
-            session=mock_session
+            request=mock_request, asset_id=asset_id, auth=mock_auth, session=mock_session
         )
 
-        assert res.fqn == "db.asset"
+        assert res["fqn"] == "db.asset"
         mock_session.execute.assert_called_once()
         mock_redis.set.assert_called()
 
@@ -156,21 +151,19 @@ class TestCaching:
             owner_team_id=uuid4(),
             environment="production",
             metadata_={},
-            created_at=datetime.now(UTC)
+            created_at=datetime.now(UTC),
         )
+        # The query returns a 4-tuple: (asset, team_name, user_name, user_email)
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_asset
+        mock_result.one_or_none.return_value = (mock_asset, "Test Team", None, None)
         mock_session.execute.return_value = mock_result
 
         res = await get_asset(
-            request=mock_request,
-            asset_id=asset_id,
-            auth=mock_auth,
-            session=mock_session
+            request=mock_request, asset_id=asset_id, auth=mock_auth, session=mock_session
         )
 
         # Should still work, just without caching
-        assert res.fqn == "db.asset"
+        assert res["fqn"] == "db.asset"
         mock_session.execute.assert_called_once()
 
     @pytest.mark.asyncio
@@ -253,7 +246,10 @@ class TestCachingIntegration:
 
         contract_resp = await client.post(
             f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
-            json={"version": "1.0.0", "schema": {"type": "object", "properties": {"foo": {"type": "string"}}}},
+            json={
+                "version": "1.0.0",
+                "schema": {"type": "object", "properties": {"foo": {"type": "string"}}},
+            },
         )
         assert contract_resp.status_code == 201
         contract_id = contract_resp.json()["contract"]["id"]
@@ -279,14 +275,23 @@ class TestCachingIntegration:
         # Publish first contract
         contract1_resp = await client.post(
             f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
-            json={"version": "1.0.0", "schema": {"type": "object", "properties": {"foo": {"type": "string"}}}},
+            json={
+                "version": "1.0.0",
+                "schema": {"type": "object", "properties": {"foo": {"type": "string"}}},
+            },
         )
         contract1_id = contract1_resp.json()["contract"]["id"]
 
         # Publish second contract (compatible change - adds optional field)
         contract2_resp = await client.post(
             f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
-            json={"version": "2.0.0", "schema": {"type": "object", "properties": {"foo": {"type": "string"}, "bar": {"type": "string"}}}},
+            json={
+                "version": "2.0.0",
+                "schema": {
+                    "type": "object",
+                    "properties": {"foo": {"type": "string"}, "bar": {"type": "string"}},
+                },
+            },
         )
         assert contract2_resp.status_code == 201
         contract2_data = contract2_resp.json()
@@ -302,4 +307,3 @@ class TestCachingIntegration:
         assert compare_resp.status_code == 200
         assert "change_type" in compare_resp.json()
         assert "is_compatible" in compare_resp.json()
-

@@ -40,8 +40,30 @@ class Base(DeclarativeBase):
     pass
 
 
+class UserDB(Base):
+    """User database model - individual people who own assets."""
+
+    __tablename__ = "users"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    team_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("teams.id"), nullable=True, index=True
+    )
+    metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    deactivated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+
+    # Relationships
+    team: Mapped["TeamDB | None"] = relationship(back_populates="members")
+    owned_assets: Mapped[list["AssetDB"]] = relationship(back_populates="owner_user")
+
+
 class TeamDB(Base):
-    """Team database model."""
+    """Team database model - groups of users for backup notifications."""
 
     __tablename__ = "teams"
 
@@ -54,6 +76,7 @@ class TeamDB(Base):
     )
 
     # Relationships
+    members: Mapped[list["UserDB"]] = relationship(back_populates="team")
     assets: Mapped[list["AssetDB"]] = relationship(back_populates="owner_team")
 
 
@@ -65,6 +88,9 @@ class AssetDB(Base):
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
     fqn: Mapped[str] = mapped_column(String(1000), nullable=False)
     owner_team_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("teams.id"), nullable=False)
+    owner_user_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("users.id"), nullable=True, index=True
+    )
     environment: Mapped[str] = mapped_column(
         String(50), nullable=False, default="production", index=True
     )
@@ -78,6 +104,7 @@ class AssetDB(Base):
 
     # Relationships
     owner_team: Mapped["TeamDB"] = relationship(back_populates="assets")
+    owner_user: Mapped["UserDB | None"] = relationship(back_populates="owned_assets")
     contracts: Mapped[list["ContractDB"]] = relationship(back_populates="asset")
     proposals: Mapped[list["ProposalDB"]] = relationship(back_populates="asset")
 

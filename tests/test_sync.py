@@ -1,13 +1,11 @@
 """Tests for /api/v1/sync endpoints (push, pull, dbt, dbt/impact)."""
 
 import json
-import tempfile
 from pathlib import Path
 
 import pytest
 import yaml
 from httpx import AsyncClient
-
 
 pytestmark = pytest.mark.asyncio
 
@@ -673,3 +671,219 @@ class TestDbtImpact:
         data = resp.json()
         assert data["status"] == "success"
         assert data["breaking_changes_count"] == 0
+
+
+class TestDbtGuaranteesExtraction:
+    """Tests for extracting guarantees from dbt tests during sync."""
+
+    async def test_dbt_sync_extracts_not_null_tests(self, client: AsyncClient, tmp_path: Path):
+        """Sync should extract not_null tests as nullability guarantees."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "guarantees-team-1"})
+        team_id = team_resp.json()["id"]
+
+        manifest = {
+            "nodes": {
+                "model.project.orders": {
+                    "resource_type": "model",
+                    "database": "analytics",
+                    "schema": "public",
+                    "name": "orders_with_tests",
+                    "description": "Orders model",
+                    "tags": [],
+                    "columns": {
+                        "id": {"data_type": "integer"},
+                        "customer_id": {"data_type": "integer"},
+                        "status": {"data_type": "varchar"},
+                    },
+                },
+                "test.project.not_null_orders_id": {
+                    "resource_type": "test",
+                    "depends_on": {"nodes": ["model.project.orders"]},
+                    "test_metadata": {
+                        "name": "not_null",
+                        "kwargs": {"column_name": "id"},
+                    },
+                },
+                "test.project.not_null_orders_customer_id": {
+                    "resource_type": "test",
+                    "depends_on": {"nodes": ["model.project.orders"]},
+                    "test_metadata": {
+                        "name": "not_null",
+                        "kwargs": {"column_name": "customer_id"},
+                    },
+                },
+            },
+            "sources": {},
+        }
+        manifest_file = tmp_path / "manifest.json"
+        manifest_file.write_text(json.dumps(manifest))
+
+        resp = await client.post(
+            f"/api/v1/sync/dbt?manifest_path={manifest_file}&owner_team_id={team_id}"
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["guarantees_extracted"] == 1
+
+        # Verify asset has guarantees in metadata
+        assets_resp = await client.get(f"/api/v1/assets?owner={team_id}")
+        assets = assets_resp.json()["results"]
+        asset = next(a for a in assets if "orders_with_tests" in a["fqn"])
+        asset_detail = await client.get(f"/api/v1/assets/{asset['id']}")
+        metadata = asset_detail.json().get("metadata", {})
+
+        assert "guarantees" in metadata
+        assert "nullability" in metadata["guarantees"]
+        assert metadata["guarantees"]["nullability"]["id"] == "never"
+        assert metadata["guarantees"]["nullability"]["customer_id"] == "never"
+
+    async def test_dbt_sync_extracts_accepted_values_tests(
+        self, client: AsyncClient, tmp_path: Path
+    ):
+        """Sync should extract accepted_values tests as guarantees."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "guarantees-team-2"})
+        team_id = team_resp.json()["id"]
+
+        manifest = {
+            "nodes": {
+                "model.project.users": {
+                    "resource_type": "model",
+                    "database": "analytics",
+                    "schema": "public",
+                    "name": "users_with_values",
+                    "description": "Users model",
+                    "tags": [],
+                    "columns": {
+                        "id": {"data_type": "integer"},
+                        "status": {"data_type": "varchar"},
+                    },
+                },
+                "test.project.accepted_values_users_status": {
+                    "resource_type": "test",
+                    "depends_on": {"nodes": ["model.project.users"]},
+                    "test_metadata": {
+                        "name": "accepted_values",
+                        "kwargs": {
+                            "column_name": "status",
+                            "values": ["active", "inactive", "pending"],
+                        },
+                    },
+                },
+            },
+            "sources": {},
+        }
+        manifest_file = tmp_path / "manifest.json"
+        manifest_file.write_text(json.dumps(manifest))
+
+        resp = await client.post(
+            f"/api/v1/sync/dbt?manifest_path={manifest_file}&owner_team_id={team_id}"
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["guarantees_extracted"] == 1
+
+        # Verify asset has accepted_values guarantees
+        assets_resp = await client.get(f"/api/v1/assets?owner={team_id}")
+        assets = assets_resp.json()["results"]
+        asset = next(a for a in assets if "users_with_values" in a["fqn"])
+        asset_detail = await client.get(f"/api/v1/assets/{asset['id']}")
+        metadata = asset_detail.json().get("metadata", {})
+
+        assert "guarantees" in metadata
+        assert "accepted_values" in metadata["guarantees"]
+        assert metadata["guarantees"]["accepted_values"]["status"] == [
+            "active",
+            "inactive",
+            "pending",
+        ]
+
+    async def test_dbt_sync_extracts_custom_tests(self, client: AsyncClient, tmp_path: Path):
+        """Sync should extract unique and relationship tests as custom guarantees."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "guarantees-team-3"})
+        team_id = team_resp.json()["id"]
+
+        manifest = {
+            "nodes": {
+                "model.project.products": {
+                    "resource_type": "model",
+                    "database": "analytics",
+                    "schema": "public",
+                    "name": "products_custom",
+                    "description": "Products model",
+                    "tags": [],
+                    "columns": {
+                        "id": {"data_type": "integer"},
+                        "sku": {"data_type": "varchar"},
+                    },
+                },
+                "test.project.unique_products_sku": {
+                    "resource_type": "test",
+                    "depends_on": {"nodes": ["model.project.products"]},
+                    "test_metadata": {
+                        "name": "unique",
+                        "kwargs": {"column_name": "sku"},
+                    },
+                },
+            },
+            "sources": {},
+        }
+        manifest_file = tmp_path / "manifest.json"
+        manifest_file.write_text(json.dumps(manifest))
+
+        resp = await client.post(
+            f"/api/v1/sync/dbt?manifest_path={manifest_file}&owner_team_id={team_id}"
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["guarantees_extracted"] == 1
+
+        # Verify asset has custom guarantees
+        assets_resp = await client.get(f"/api/v1/assets?owner={team_id}")
+        assets = assets_resp.json()["results"]
+        asset = next(a for a in assets if "products_custom" in a["fqn"])
+        asset_detail = await client.get(f"/api/v1/assets/{asset['id']}")
+        metadata = asset_detail.json().get("metadata", {})
+
+        assert "guarantees" in metadata
+        assert "custom" in metadata["guarantees"]
+        assert len(metadata["guarantees"]["custom"]) == 1
+        assert metadata["guarantees"]["custom"][0]["type"] == "unique"
+        assert metadata["guarantees"]["custom"][0]["column"] == "sku"
+
+    async def test_dbt_sync_no_tests_no_guarantees(self, client: AsyncClient, tmp_path: Path):
+        """Sync should not add guarantees if no tests are defined."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "guarantees-team-4"})
+        team_id = team_resp.json()["id"]
+
+        manifest = {
+            "nodes": {
+                "model.project.simple": {
+                    "resource_type": "model",
+                    "database": "analytics",
+                    "schema": "public",
+                    "name": "simple_model",
+                    "description": "Simple model without tests",
+                    "tags": [],
+                    "columns": {"id": {"data_type": "integer"}},
+                },
+            },
+            "sources": {},
+        }
+        manifest_file = tmp_path / "manifest.json"
+        manifest_file.write_text(json.dumps(manifest))
+
+        resp = await client.post(
+            f"/api/v1/sync/dbt?manifest_path={manifest_file}&owner_team_id={team_id}"
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["guarantees_extracted"] == 0
+
+        # Verify asset has no guarantees in metadata
+        assets_resp = await client.get(f"/api/v1/assets?owner={team_id}")
+        assets = assets_resp.json()["results"]
+        asset = next(a for a in assets if "simple_model" in a["fqn"])
+        asset_detail = await client.get(f"/api/v1/assets/{asset['id']}")
+        metadata = asset_detail.json().get("metadata", {})
+
+        assert "guarantees" not in metadata

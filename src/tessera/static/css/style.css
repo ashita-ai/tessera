@@ -128,6 +128,30 @@ th {
   background: var(--light-gray);
 }
 
+th.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+th.sortable:hover {
+  background: #e0e0e0;
+}
+
+th.sortable::after {
+  content: ' \2195';
+  opacity: 0.3;
+}
+
+th.sortable.asc::after {
+  content: ' \2191';
+  opacity: 1;
+}
+
+th.sortable.desc::after {
+  content: ' \2193';
+  opacity: 1;
+}
+
 tr:hover {
   background: var(--light-gray);
 }

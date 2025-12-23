@@ -63,9 +63,10 @@ async function loadProposals() {
         <thead>
           <tr>
             <th>Asset</th>
-            <th>Version</th>
+            <th>Change Type</th>
             <th>Status</th>
             <th>Breaking Changes</th>
+            <th>Acknowledgments</th>
             <th>Created</th>
             <th>Actions</th>
           </tr>
@@ -74,10 +75,16 @@ async function loadProposals() {
           ${data.results.map(p => `
             <tr>
               <td><a href="/assets/${p.asset_id}">${escapeHtml(p.asset_fqn || p.asset_id)}</a></td>
-              <td>${escapeHtml(p.proposed_version)}</td>
+              <td><span class="status status-${p.change_type === 'major' ? 'deprecated' : 'active'}">${escapeHtml(p.change_type || 'unknown')}</span></td>
               <td><span class="status status-${p.status}">${p.status}</span></td>
-              <td>${p.breaking_changes ? p.breaking_changes.length : 0}</td>
-              <td>${formatDate(p.created_at)}</td>
+              <td>${p.breaking_changes_count || (p.breaking_changes ? p.breaking_changes.length : 0)}</td>
+              <td>
+                ${p.total_consumers > 0
+                  ? `<span style="color: ${p.acknowledgment_count >= p.total_consumers ? 'green' : 'orange'};">${p.acknowledgment_count || 0}/${p.total_consumers}</span>`
+                  : '<span style="color: var(--gray);">N/A</span>'
+                }
+              </td>
+              <td>${formatDate(p.proposed_at || p.created_at)}</td>
               <td>
                 <a href="/proposals/${p.id}">View</a>
                 ${p.status === 'pending' ? `<button class="secondary" style="margin-left: 0.5rem;" onclick="withdrawProposal('${p.id}')">Withdraw</button>` : ''}

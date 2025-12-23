@@ -25,6 +25,7 @@ from tessera.api import (
     schemas,
     sync,
     teams,
+    users,
     webhooks,
 )
 from tessera.api.errors import (
@@ -87,6 +88,7 @@ app.add_exception_handler(Exception, generic_exception_handler)
 
 # API v1 router
 api_v1 = APIRouter(prefix="/api/v1")
+api_v1.include_router(users.router, prefix="/users", tags=["users"])
 api_v1.include_router(teams.router, prefix="/teams", tags=["teams"])
 api_v1.include_router(assets.router, prefix="/assets", tags=["assets"])
 api_v1.include_router(dependencies.router, prefix="/assets", tags=["dependencies"])

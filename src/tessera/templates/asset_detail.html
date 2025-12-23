@@ -10,46 +10,640 @@
 </section>
 
 <section>
-  <h2>Contracts</h2>
+  <h2>Current Schema</h2>
+  <div id="current-schema">
+    <div class="loading">Loading...</div>
+  </div>
+</section>
+
+<section>
+  <h2>Guarantees (SLAs)</h2>
+  <div id="guarantees">
+    <div class="loading">Loading...</div>
+  </div>
+</section>
+
+<section>
+  <h2>Active Proposals</h2>
+  <div id="active-proposals">
+    <div class="loading">Loading...</div>
+  </div>
+</section>
+
+<section>
+  <h2>Consumers</h2>
+  <div id="consumers">
+    <div class="loading">Loading...</div>
+  </div>
+</section>
+
+<section>
+  <h2>Contract History</h2>
   <div id="asset-contracts">
     <div class="loading">Loading...</div>
   </div>
 </section>
 
 <section>
-  <h2>Dependencies</h2>
+  <h2>Dependencies (Upstream)</h2>
   <div id="asset-dependencies">
     <div class="loading">Loading...</div>
   </div>
 </section>
+
+<!-- Modal Dialogs -->
+<div id="modal-overlay" class="modal-overlay" style="display: none;" onclick="closeModal()"></div>
+
+<div id="schema-modal" class="modal" style="display: none;">
+  <div class="modal-content">
+    <h3>Edit Schema</h3>
+    <form onsubmit="submitSchemaChange(event)">
+      <label for="schema-editor">JSON Schema</label>
+      <textarea id="schema-editor" rows="15" style="font-family: monospace; width: 100%;" required></textarea>
+
+      <label for="schema-team">Publish as Team</label>
+      <select id="schema-team" required></select>
+
+      <div style="margin-top: 1rem; display: flex; gap: 0.5rem;">
+        <button type="submit">Propose Change</button>
+        <button type="button" class="secondary" onclick="closeModal()">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="register-modal" class="modal" style="display: none;">
+  <div class="modal-content">
+    <h3>Register as Consumer</h3>
+    <p>Register a team as a consumer of this asset. When breaking changes are proposed, your team will be notified and must acknowledge before the change is published.</p>
+    <form onsubmit="submitRegistration(event)">
+      <label for="register-team">Team to Register</label>
+      <select id="register-team" required></select>
+
+      <div style="margin-top: 1rem; display: flex; gap: 0.5rem;">
+        <button type="submit">Register</button>
+        <button type="button" class="secondary" onclick="closeModal()">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="guarantees-modal" class="modal" style="display: none;">
+  <div class="modal-content">
+    <h3>Edit Guarantees</h3>
+    <form onsubmit="submitGuarantees(event)">
+      <fieldset>
+        <legend>Freshness SLA</legend>
+        <label for="freshness-minutes">Max Staleness (minutes)</label>
+        <input type="number" id="freshness-minutes" min="1" placeholder="e.g., 60">
+      </fieldset>
+
+      <fieldset>
+        <legend>Volume Requirements</legend>
+        <label for="volume-min-rows">Minimum Rows</label>
+        <input type="number" id="volume-min-rows" min="0" placeholder="e.g., 1">
+
+        <label for="volume-max-delta">Max Row Delta (%)</label>
+        <input type="number" id="volume-max-delta" min="0" max="100" placeholder="e.g., 50">
+      </fieldset>
+
+      <label for="guarantees-team">Publish as Team</label>
+      <select id="guarantees-team" required></select>
+
+      <div style="margin-top: 1rem; display: flex; gap: 0.5rem;">
+        <button type="submit">Update Guarantees</button>
+        <button type="button" class="secondary" onclick="closeModal()">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="publish-modal" class="modal" style="display: none;">
+  <div class="modal-content">
+    <h3>Publish Initial Contract</h3>
+    <form onsubmit="submitInitialContract(event)">
+      <label for="initial-schema">JSON Schema</label>
+      <textarea id="initial-schema" rows="10" style="font-family: monospace; width: 100%;" required placeholder='{"type": "object", "properties": {"id": {"type": "integer"}, "name": {"type": "string"}}}'></textarea>
+
+      <label for="initial-team">Publish as Team</label>
+      <select id="initial-team" required></select>
+
+      <div style="margin-top: 1rem; display: flex; gap: 0.5rem;">
+        <button type="submit">Publish Contract</button>
+        <button type="button" class="secondary" onclick="closeModal()">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<style>
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 1000;
+}
+.modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.5rem;
+  z-index: 1001;
+  max-width: 600px;
+  width: 90%;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+.modal-content h3 {
+  margin-top: 0;
+  margin-bottom: 1rem;
+}
+.modal fieldset {
+  border: 1px solid var(--border);
+  padding: 1rem;
+  margin-bottom: 1rem;
+  border-radius: 4px;
+}
+.modal fieldset legend {
+  padding: 0 0.5rem;
+}
+</style>
 {% endblock %}
 
 {% block scripts %}
 <script>
 const assetId = '{{ asset_id }}';
+let teamsCache = [];
+let activeContractCache = null;
+
+function closeModal() {
+  document.getElementById('modal-overlay').style.display = 'none';
+  document.querySelectorAll('.modal').forEach(m => m.style.display = 'none');
+}
+
+function showModal(id) {
+  document.getElementById('modal-overlay').style.display = 'block';
+  document.getElementById(id).style.display = 'block';
+}
+
+async function loadTeams() {
+  if (teamsCache.length === 0) {
+    const data = await api.listTeams({ limit: 100 });
+    teamsCache = data.results || [];
+  }
+  return teamsCache;
+}
+
+function populateTeamSelect(selectId) {
+  const select = document.getElementById(selectId);
+  select.innerHTML = teamsCache.map(t =>
+    `<option value="${t.id}">${escapeHtml(t.name)}</option>`
+  ).join('');
+}
+
+async function proposeSchemaChange() {
+  const contracts = await api.getAssetContracts(assetId);
+  activeContractCache = contracts.results?.find(c => c.status === 'active');
+
+  if (!activeContractCache) {
+    showError('No active contract to modify. Publish a contract first.');
+    return;
+  }
+
+  await loadTeams();
+  populateTeamSelect('schema-team');
+
+  document.getElementById('schema-editor').value = JSON.stringify(activeContractCache.schema_def, null, 2);
+  showModal('schema-modal');
+}
+
+async function submitSchemaChange(event) {
+  event.preventDefault();
+
+  const schemaStr = document.getElementById('schema-editor').value;
+  const teamId = document.getElementById('schema-team').value;
+
+  let newSchema;
+  try {
+    newSchema = JSON.parse(schemaStr);
+  } catch (e) {
+    showError('Invalid JSON: ' + e.message);
+    return;
+  }
+
+  try {
+    const result = await api.publishContract(assetId, {
+      version: '2.0.0',
+      schema: newSchema,
+      compatibility_mode: activeContractCache.compatibility_mode,
+    }, teamId);
+
+    closeModal();
+
+    if (result.action === 'proposal_created') {
+      showSuccess('Breaking change detected! Proposal created.');
+      window.location.href = `/proposals/${result.proposal.id}`;
+    } else {
+      showSuccess('Schema updated successfully!');
+      loadAssetDetail();
+    }
+  } catch (error) {
+    showError(error.message);
+  }
+}
+
+async function registerAsConsumer() {
+  const contracts = await api.getAssetContracts(assetId);
+  activeContractCache = contracts.results?.find(c => c.status === 'active');
+
+  if (!activeContractCache) {
+    showError('No active contract to register for. Asset needs a published contract first.');
+    return;
+  }
+
+  await loadTeams();
+  populateTeamSelect('register-team');
+  showModal('register-modal');
+}
+
+async function submitRegistration(event) {
+  event.preventDefault();
+
+  const teamId = document.getElementById('register-team').value;
+  const team = teamsCache.find(t => t.id === teamId);
+
+  try {
+    await api.createRegistration(activeContractCache.id, {
+      consumer_team_id: teamId,
+    });
+    closeModal();
+    showSuccess(`${team.name} is now registered as a consumer and will be notified of breaking changes!`);
+    loadAssetDetail();
+  } catch (error) {
+    showError(error.message);
+  }
+}
+
+async function editGuarantees() {
+  const contracts = await api.getAssetContracts(assetId);
+  activeContractCache = contracts.results?.find(c => c.status === 'active');
+
+  if (!activeContractCache) {
+    showError('No active contract. Publish a contract first before adding guarantees.');
+    return;
+  }
+
+  await loadTeams();
+  populateTeamSelect('guarantees-team');
+
+  const g = activeContractCache.guarantees || {};
+  const freshness = g.freshness || {};
+  const volume = g.volume || {};
+
+  document.getElementById('freshness-minutes').value = freshness.max_staleness_minutes || '';
+  document.getElementById('volume-min-rows').value = volume.min_rows || '';
+  document.getElementById('volume-max-delta').value = volume.max_row_delta_pct || '';
+
+  showModal('guarantees-modal');
+}
+
+async function submitGuarantees(event) {
+  event.preventDefault();
+
+  const freshnessMinutes = document.getElementById('freshness-minutes').value;
+  const volumeMinRows = document.getElementById('volume-min-rows').value;
+  const volumeMaxDelta = document.getElementById('volume-max-delta').value;
+  const teamId = document.getElementById('guarantees-team').value;
+
+  const newGuarantees = {};
+  if (freshnessMinutes) {
+    newGuarantees.freshness = { max_staleness_minutes: parseInt(freshnessMinutes, 10) };
+  }
+  if (volumeMinRows || volumeMaxDelta) {
+    newGuarantees.volume = {};
+    if (volumeMinRows) newGuarantees.volume.min_rows = parseInt(volumeMinRows, 10);
+    if (volumeMaxDelta) newGuarantees.volume.max_row_delta_pct = parseInt(volumeMaxDelta, 10);
+  }
+
+  // Increment patch version
+  const versionParts = activeContractCache.version.split('.').map(Number);
+  versionParts[2] = (versionParts[2] || 0) + 1;
+  const newVersion = versionParts.join('.');
+
+  try {
+    await api.publishContract(assetId, {
+      version: newVersion,
+      schema: activeContractCache.schema_def,
+      compatibility_mode: activeContractCache.compatibility_mode,
+      guarantees: newGuarantees,
+    }, teamId);
+    closeModal();
+    showSuccess(`Guarantees updated! New contract version: ${newVersion}`);
+    loadAssetDetail();
+  } catch (error) {
+    showError(error.message);
+  }
+}
+
+async function publishInitialContract() {
+  await loadTeams();
+  populateTeamSelect('initial-team');
+  document.getElementById('initial-schema').value = '';
+  showModal('publish-modal');
+}
+
+async function submitInitialContract(event) {
+  event.preventDefault();
+
+  const schemaStr = document.getElementById('initial-schema').value;
+  const teamId = document.getElementById('initial-team').value;
+
+  let schema;
+  try {
+    schema = JSON.parse(schemaStr);
+  } catch (e) {
+    showError('Invalid JSON: ' + e.message);
+    return;
+  }
+
+  try {
+    await api.publishContract(assetId, {
+      version: '1.0.0',
+      schema: schema,
+      compatibility_mode: 'backward',
+    }, teamId);
+    closeModal();
+    showSuccess('Contract published!');
+    loadAssetDetail();
+  } catch (error) {
+    showError(error.message);
+  }
+}
 
 async function loadAssetDetail() {
   try {
     const asset = await api.getAsset(assetId);
+    const contracts = await api.getAssetContracts(assetId);
+    const activeContract = contracts.results?.find(c => c.status === 'active');
+
+    // Extract metadata
+    const metadata = asset.metadata_ || asset.metadata || {};
+    const tags = metadata.tags || [];
+    const description = metadata.description || asset.description || '';
+    const dbtFqn = metadata.dbt_fqn || [];
+    const path = metadata.path || '';
 
     document.getElementById('asset-detail').innerHTML = `
-      <h2>${escapeHtml(asset.fqn)}</h2>
-      <div class="card">
-        <p><strong>ID:</strong> ${asset.id}</p>
-        <p><strong>Owner:</strong> <a href="/teams/${asset.owner_team_id}">${escapeHtml(asset.owner_team_name || asset.owner_team_id)}</a></p>
-        <p><strong>Active Contract:</strong> ${asset.active_contract_version || 'None'}</p>
-        ${asset.description ? `<p><strong>Description:</strong> ${escapeHtml(asset.description)}</p>` : ''}
-        <p><strong>Created:</strong> ${formatDate(asset.created_at)}</p>
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1rem;">
+        <div>
+          <h2 style="margin-bottom: 0.5rem;">${escapeHtml(asset.fqn)}</h2>
+          <p style="color: var(--gray); margin-top: 0;">
+            Owned by <a href="/teams/${asset.owner_team_id}">${escapeHtml(asset.owner_team_name || asset.owner_team_id)}</a>
+            ${asset.owner_user_name ? ` (${escapeHtml(asset.owner_user_name)})` : ''}
+          </p>
+        </div>
+        <div style="display: flex; gap: 0.5rem;">
+          ${activeContract
+            ? `<button onclick="proposeSchemaChange()">Propose Schema Change</button>`
+            : `<button onclick="publishInitialContract()">Publish First Contract</button>`
+          }
+        </div>
       </div>
+
+      <div class="card">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
+          <div>
+            <strong>Active Version</strong><br>
+            ${activeContract
+              ? `<a href="/contracts/${activeContract.id}">${escapeHtml(activeContract.version)}</a>`
+              : '<span style="color: var(--gray);">No contract</span>'
+            }
+          </div>
+          <div>
+            <strong>Compatibility Mode</strong><br>
+            ${activeContract ? escapeHtml(activeContract.compatibility_mode) : 'N/A'}
+          </div>
+          <div>
+            <strong>Environment</strong><br>
+            ${escapeHtml(asset.environment || 'production')}
+          </div>
+          <div>
+            <strong>Created</strong><br>
+            ${formatDate(asset.created_at)}
+          </div>
+          <div>
+            <strong>Last Modified</strong><br>
+            ${activeContract ? formatDate(activeContract.published_at) : formatDate(asset.created_at)}
+          </div>
+        </div>
+
+        ${description ? `<p style="margin-top: 1rem;"><strong>Description:</strong> ${escapeHtml(description)}</p>` : ''}
+
+        ${tags.length > 0 ? `
+          <div style="margin-top: 1rem;">
+            <strong>Tags:</strong>
+            ${tags.map(t => `<span class="tag" style="background: var(--bg-secondary); padding: 0.2rem 0.5rem; margin: 0.2rem; border-radius: 3px; display: inline-block;">${escapeHtml(t)}</span>`).join('')}
+          </div>
+        ` : ''}
+
+        ${path ? `<p style="margin-top: 0.5rem; color: var(--gray);"><strong>Path:</strong> <code>${escapeHtml(path)}</code></p>` : ''}
+      </div>
+
       <div style="margin-top: 1rem;">
         <a href="/assets">&larr; Back to Assets</a>
       </div>
     `;
 
-    // Load contracts
-    const contracts = await api.getAssetContracts(assetId);
-    const contractsContainer = document.getElementById('asset-contracts');
+    // Current schema
+    const schemaContainer = document.getElementById('current-schema');
+    if (activeContract && activeContract.schema_def) {
+      const props = activeContract.schema_def.properties || {};
+      const required = new Set(activeContract.schema_def.required || []);
+      const columns = Object.entries(props);
 
+      if (columns.length > 0) {
+        schemaContainer.innerHTML = `
+          <table>
+            <thead>
+              <tr>
+                <th>Column</th>
+                <th>Type</th>
+                <th>Required</th>
+                <th>Description</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${columns.map(([name, def]) => `
+                <tr>
+                  <td><code>${escapeHtml(name)}</code></td>
+                  <td><code>${escapeHtml(def.type || 'unknown')}</code></td>
+                  <td>${required.has(name) ? '<span style="color: red;">Yes</span>' : 'No'}</td>
+                  <td>${def.description ? escapeHtml(def.description) : '<em>-</em>'}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        `;
+      } else {
+        schemaContainer.innerHTML = '<div class="empty">No columns defined in schema.</div>';
+      }
+    } else {
+      schemaContainer.innerHTML = '<div class="empty">No active contract. <button class="secondary" onclick="publishInitialContract()">Publish First Contract</button></div>';
+    }
+
+    // Guarantees
+    const guaranteesContainer = document.getElementById('guarantees');
+    if (activeContract && activeContract.guarantees) {
+      const g = activeContract.guarantees;
+      let html = '<div style="margin-bottom: 0.5rem;"><button class="secondary" onclick="editGuarantees()">Edit Guarantees</button></div>';
+      html += '<div class="card"><div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">';
+
+      if (g.freshness) {
+        html += `
+          <div>
+            <strong>Freshness SLA</strong><br>
+            Max staleness: ${g.freshness.max_staleness_minutes || '?'} minutes<br>
+            ${g.freshness.sla ? `SLA: ${g.freshness.sla}` : ''}
+          </div>
+        `;
+      }
+      if (g.volume) {
+        html += `
+          <div>
+            <strong>Volume Requirements</strong><br>
+            Min rows: ${g.volume.min_rows || '?'}<br>
+            Max delta: ${g.volume.max_row_delta_pct || '?'}%
+          </div>
+        `;
+      }
+      if (g.nullability) {
+        html += `
+          <div>
+            <strong>Nullability</strong><br>
+            ${Object.entries(g.nullability).map(([col, val]) => `${col}: ${val}`).join('<br>')}
+          </div>
+        `;
+      }
+      if (g.accepted_values) {
+        html += `
+          <div>
+            <strong>Accepted Values</strong><br>
+            ${Object.entries(g.accepted_values).map(([col, vals]) => `${col}: ${vals.join(', ')}`).join('<br>')}
+          </div>
+        `;
+      }
+      if (g.custom && g.custom.length > 0) {
+        html += `
+          <div>
+            <strong>Custom Tests</strong><br>
+            ${g.custom.map(t => `${t.type}${t.column ? ` (${t.column})` : ''}`).join('<br>')}
+          </div>
+        `;
+      }
+
+      html += '</div></div>';
+      guaranteesContainer.innerHTML = html;
+    } else if (activeContract) {
+      guaranteesContainer.innerHTML = '<div class="empty">No guarantees defined for this contract. <button class="secondary" onclick="editGuarantees()">Add Guarantees</button></div>';
+    } else {
+      guaranteesContainer.innerHTML = '<div class="empty">No active contract. Publish a contract first to add guarantees.</div>';
+    }
+
+    // Active Proposals
+    const proposalsContainer = document.getElementById('active-proposals');
+    try {
+      const proposalsData = await api.listProposals({ asset_id: assetId, status: 'pending' });
+      const proposals = proposalsData.results || [];
+
+      if (proposals.length > 0) {
+        proposalsContainer.innerHTML = `
+          <div class="card" style="background: #fff3cd; border-color: #ffc107;">
+            <p style="margin-bottom: 0.5rem;"><strong>${proposals.length}</strong> pending proposal(s) for this asset:</p>
+            <table>
+              <thead>
+                <tr>
+                  <th>Change Type</th>
+                  <th>Breaking Changes</th>
+                  <th>Acknowledgments</th>
+                  <th>Proposed</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${proposals.map(p => `
+                  <tr>
+                    <td><span class="status status-deprecated">${escapeHtml(p.change_type || 'major')}</span></td>
+                    <td>${p.breaking_changes_count || (p.breaking_changes ? p.breaking_changes.length : 0)}</td>
+                    <td>
+                      ${p.total_consumers > 0
+                        ? `<span style="color: ${p.acknowledgment_count >= p.total_consumers ? 'green' : 'orange'};">${p.acknowledgment_count || 0}/${p.total_consumers}</span>`
+                        : '<span style="color: var(--gray);">N/A</span>'
+                      }
+                    </td>
+                    <td>${formatDate(p.proposed_at)}</td>
+                    <td><a href="/proposals/${p.id}">Review</a></td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        `;
+      } else {
+        proposalsContainer.innerHTML = '<div class="empty">No pending proposals for this asset.</div>';
+      }
+    } catch (e) {
+      proposalsContainer.innerHTML = '<div class="empty">No proposals.</div>';
+    }
+
+    // Consumers (registrations)
+    const consumersContainer = document.getElementById('consumers');
+    if (activeContract) {
+      try {
+        const regs = await api.getContractRegistrations(activeContract.id);
+        if (regs.results && regs.results.length > 0) {
+          consumersContainer.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+              <span><strong>${regs.results.length}</strong> team(s) depend on this asset:</span>
+              <button class="secondary" onclick="registerAsConsumer()">+ Register Team as Consumer</button>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Consumer Team</th>
+                  <th>Registered</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${regs.results.map(r => `
+                  <tr>
+                    <td><a href="/teams/${r.consumer_team_id}">${escapeHtml(r.consumer_team_name || r.consumer_team_id)}</a></td>
+                    <td>${formatDate(r.registered_at)}</td>
+                    <td><span class="status status-${r.status}">${r.status}</span></td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          `;
+        } else {
+          consumersContainer.innerHTML = '<div class="empty">No teams have registered as consumers of this asset. <button class="secondary" onclick="registerAsConsumer()">+ Register Team as Consumer</button></div>';
+        }
+      } catch (e) {
+        consumersContainer.innerHTML = '<div class="empty">No consumers. <button class="secondary" onclick="registerAsConsumer()">+ Register Team as Consumer</button></div>';
+      }
+    } else {
+      consumersContainer.innerHTML = '<div class="empty">No active contract - publish a contract first to enable consumer registration.</div>';
+    }
+
+    // Contract history
+    const contractsContainer = document.getElementById('asset-contracts');
     if (!contracts.results || contracts.results.length === 0) {
       contractsContainer.innerHTML = '<div class="empty">No contracts published for this asset.</div>';
     } else {
@@ -61,16 +655,18 @@ async function loadAssetDetail() {
               <th>Status</th>
               <th>Compatibility</th>
               <th>Published</th>
+              <th>Publisher</th>
               <th>Action</th>
             </tr>
           </thead>
           <tbody>
             ${contracts.results.map(c => `
               <tr>
-                <td>${escapeHtml(c.version)}</td>
+                <td><a href="/contracts/${c.id}">${escapeHtml(c.version)}</a></td>
                 <td><span class="status status-${c.status}">${c.status}</span></td>
                 <td>${escapeHtml(c.compatibility_mode)}</td>
                 <td>${formatDate(c.published_at)}</td>
+                <td><a href="/teams/${c.published_by}">${c.published_by.slice(0, 8)}...</a></td>
                 <td><a href="/contracts/${c.id}">View</a></td>
               </tr>
             `).join('')}
@@ -79,34 +675,60 @@ async function loadAssetDetail() {
       `;
     }
 
-    // Load dependencies
-    const depsData = await api.getAssetDependencies(assetId);
+    // Dependencies
     const depsContainer = document.getElementById('asset-dependencies');
-    const deps = depsData.results || [];
+    try {
+      const depsData = await api.getAssetDependencies(assetId);
+      const deps = depsData.results || [];
 
-    if (deps.length === 0) {
-      depsContainer.innerHTML = '<div class="empty">No dependencies defined.</div>';
-    } else {
-      depsContainer.innerHTML = `
-        <table>
-          <thead>
-            <tr>
-              <th>Depends On</th>
-              <th>Type</th>
-              <th>Created</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${deps.map(d => `
+      if (deps.length === 0) {
+        // Try to get dependencies from metadata
+        const metaDeps = metadata.depends_on || [];
+        if (metaDeps.length > 0) {
+          // Search for assets by FQN to make them clickable
+          const depLinks = await Promise.all(metaDeps.map(async (fqn) => {
+            try {
+              const searchResult = await api.listAssets({ fqn: fqn, limit: 1 });
+              if (searchResult.results && searchResult.results.length > 0) {
+                const depAsset = searchResult.results[0];
+                return `<li><a href="/assets/${depAsset.id}"><code>${escapeHtml(fqn)}</code></a></li>`;
+              }
+            } catch (e) { /* ignore */ }
+            return `<li><code>${escapeHtml(fqn)}</code> <span style="color: var(--gray);">(not in Tessera)</span></li>`;
+          }));
+          depsContainer.innerHTML = `
+            <p>From dbt manifest:</p>
+            <ul>
+              ${depLinks.join('')}
+            </ul>
+          `;
+        } else {
+          depsContainer.innerHTML = '<div class="empty">No upstream dependencies.</div>';
+        }
+      } else {
+        depsContainer.innerHTML = `
+          <table>
+            <thead>
               <tr>
-                <td><a href="/assets/${d.depends_on_asset_id}">${escapeHtml(d.depends_on_fqn || d.depends_on_asset_id)}</a></td>
-                <td>${escapeHtml(d.dependency_type)}</td>
-                <td>${formatDate(d.created_at)}</td>
+                <th>Depends On</th>
+                <th>Type</th>
+                <th>Created</th>
               </tr>
-            `).join('')}
-          </tbody>
-        </table>
-      `;
+            </thead>
+            <tbody>
+              ${deps.map(d => `
+                <tr>
+                  <td><a href="/assets/${d.depends_on_asset_id}">${escapeHtml(d.depends_on_fqn || d.depends_on_asset_id)}</a></td>
+                  <td>${escapeHtml(d.dependency_type)}</td>
+                  <td>${formatDate(d.created_at)}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        `;
+      }
+    } catch (e) {
+      depsContainer.innerHTML = '<div class="empty">No dependencies.</div>';
     }
   } catch (error) {
     showError(error.message);
