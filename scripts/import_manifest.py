@@ -690,6 +690,139 @@ def import_manifest() -> bool:
     return True
 
 
+# Sample users to create - 2 per team
+SAMPLE_USERS = [
+    {"name": "Alice Chen", "email": "alice@example.com", "team": "data-engineering"},
+    {"name": "Bob Martinez", "email": "bob@example.com", "team": "data-engineering"},
+    {"name": "Carol Johnson", "email": "carol@example.com", "team": "analytics-team"},
+    {"name": "David Kim", "email": "david@example.com", "team": "analytics-team"},
+    {"name": "Eva Williams", "email": "eva@example.com", "team": "marketing-analytics"},
+    {"name": "Frank Brown", "email": "frank@example.com", "team": "marketing-analytics"},
+    {"name": "Grace Lee", "email": "grace@example.com", "team": "sales-ops"},
+    {"name": "Henry Davis", "email": "henry@example.com", "team": "sales-ops"},
+    {"name": "Iris Taylor", "email": "iris@example.com", "team": "platform-team"},
+    {"name": "Jack Wilson", "email": "jack@example.com", "team": "platform-team"},
+]
+
+
+def get_or_create_user(name: str, email: str, team_id: str | None) -> str | None:
+    """Get or create a user by email, return user ID."""
+    # Try to create user
+    try:
+        resp = httpx.post(
+            f"{API_URL}/api/v1/users",
+            json={"name": name, "email": email, "team_id": team_id},
+            timeout=10,
+        )
+        if resp.status_code == 201:
+            return resp.json()["id"]
+    except Exception:
+        pass
+
+    # User might already exist, try to find it
+    try:
+        resp = httpx.get(
+            f"{API_URL}/api/v1/users",
+            params={"email": email},
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            results = resp.json().get("results", [])
+            for user in results:
+                if user.get("email") == email:
+                    return user["id"]
+    except Exception:
+        pass
+
+    return None
+
+
+def create_sample_users(team_name_to_id: dict[str, str]) -> list[str]:
+    """Create sample users and assign to teams. Returns list of user IDs."""
+    print("\n--- Creating sample users ---")
+    user_ids = []
+
+    for user_data in SAMPLE_USERS:
+        team_id = team_name_to_id.get(user_data["team"])
+        user_id = get_or_create_user(
+            name=user_data["name"],
+            email=user_data["email"],
+            team_id=team_id,
+        )
+        if user_id:
+            user_ids.append(user_id)
+            print(f"  Created/found user: {user_data['name']} ({user_data['email']})")
+        else:
+            print(f"  Failed to create user: {user_data['name']}")
+
+    print(f"Total users: {len(user_ids)}")
+    return user_ids
+
+
+def get_all_assets() -> list[dict[str, Any]]:
+    """Fetch all assets with pagination."""
+    assets: list[dict[str, Any]] = []
+    offset = 0
+    limit = 100
+
+    while True:
+        try:
+            resp = httpx.get(
+                f"{API_URL}/api/v1/assets",
+                params={"limit": limit, "offset": offset},
+                timeout=30,
+            )
+            if resp.status_code != 200:
+                break
+            data = resp.json()
+            batch = data.get("results", [])
+            assets.extend(batch)
+
+            if len(batch) < limit:
+                break
+            offset += limit
+        except Exception:
+            break
+
+    return assets
+
+
+def assign_random_owners(user_ids: list[str]) -> int:
+    """Assign random users as owners to assets. Returns count of assignments."""
+    import random
+
+    if not user_ids:
+        print("No users to assign as owners")
+        return 0
+
+    print("\n--- Assigning random asset owners ---")
+
+    assets = get_all_assets()
+    if not assets:
+        print("Failed to fetch assets")
+        return 0
+
+    print(f"  Found {len(assets)} assets")
+    assigned = 0
+    for asset in assets:
+        # Randomly assign an owner (70% chance to have an owner)
+        if random.random() < 0.7:
+            owner_id = random.choice(user_ids)
+            try:
+                resp = httpx.patch(
+                    f"{API_URL}/api/v1/assets/{asset['id']}",
+                    json={"owner_user_id": owner_id},
+                    timeout=10,
+                )
+                if resp.status_code == 200:
+                    assigned += 1
+            except Exception:
+                pass
+
+    print(f"Assigned owners to {assigned}/{len(assets)} assets")
+    return assigned
+
+
 def main():
     """Main entry point."""
     print("=" * 50)
@@ -700,11 +833,27 @@ def main():
         print("Warning: API did not become ready, exiting")
         sys.exit(1)
 
-    if import_manifest():
-        print("\nInit complete! Sample data imported successfully.")
-    else:
+    if not import_manifest():
         print("Warning: Manifest import failed")
         sys.exit(1)
+
+    # Get team name to ID mapping
+    team_name_to_id = {}
+    try:
+        resp = httpx.get(f"{API_URL}/api/v1/teams", params={"limit": 100}, timeout=10)
+        if resp.status_code == 200:
+            for team in resp.json().get("results", []):
+                team_name_to_id[team["name"]] = team["id"]
+    except Exception:
+        pass
+
+    # Create users and assign to teams
+    user_ids = create_sample_users(team_name_to_id)
+
+    # Assign random owners to assets
+    assign_random_owners(user_ids)
+
+    print("\nInit complete! Sample data imported successfully.")
 
 
 if __name__ == "__main__":
