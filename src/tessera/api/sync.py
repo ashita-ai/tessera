@@ -1007,9 +1007,7 @@ async def upload_dbt_manifest(
         # Convert depends_on node IDs to FQNs for UI lookup
         depends_on_node_ids = node.get("depends_on", {}).get("nodes", [])
         depends_on_fqns = [
-            node_id_to_fqn[dep_id]
-            for dep_id in depends_on_node_ids
-            if dep_id in node_id_to_fqn
+            node_id_to_fqn[dep_id] for dep_id in depends_on_node_ids if dep_id in node_id_to_fqn
         ]
         metadata = {
             "dbt_node_id": node_id,
