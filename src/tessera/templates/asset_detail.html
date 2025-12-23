@@ -905,7 +905,6 @@ async function loadAssetDetail() {
             return `<li><code>${escapeHtml(fqn)}</code> <span style="color: var(--gray);">(not in Tessera)</span></li>`;
           }));
           depsContainer.innerHTML = `
-            <p>From dbt manifest:</p>
             <ul>
               ${depLinks.join('')}
             </ul>
