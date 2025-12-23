@@ -9,12 +9,13 @@ from typing import Any
 from uuid import UUID
 
 import yaml
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.api.auth import Auth, RequireAdmin
+from tessera.api.errors import BadRequestError, ErrorCode, NotFoundError
 from tessera.api.rate_limit import limit_admin
 from tessera.config import settings
 from tessera.db import AssetDB, ContractDB, RegistrationDB, TeamDB, get_session
@@ -27,9 +28,9 @@ router = APIRouter()
 def _require_git_sync_path() -> Path:
     """Require git_sync_path to be configured, raise 400 if not."""
     if settings.git_sync_path is None:
-        raise HTTPException(
-            status_code=400,
-            detail="GIT_SYNC_PATH not configured. Set the GIT_SYNC_PATH environment variable.",
+        raise BadRequestError(
+            "GIT_SYNC_PATH not configured. Set the GIT_SYNC_PATH environment variable.",
+            code=ErrorCode.BAD_REQUEST,
         )
     return settings.git_sync_path
 
@@ -254,7 +255,10 @@ async def sync_pull(
     """
     sync_path = _require_git_sync_path()
     if not sync_path.exists():
-        raise HTTPException(status_code=404, detail=f"Sync path not found: {sync_path}")
+        raise NotFoundError(
+            ErrorCode.SYNC_PATH_NOT_FOUND,
+            f"Sync path not found: {sync_path}",
+        )
 
     teams_imported = 0
     assets_imported = 0
@@ -390,7 +394,10 @@ async def sync_from_dbt(
     """
     manifest_file = Path(manifest_path)
     if not manifest_file.exists():
-        raise HTTPException(status_code=404, detail=f"Manifest not found: {manifest_path}")
+        raise NotFoundError(
+            ErrorCode.MANIFEST_NOT_FOUND,
+            f"Manifest not found: {manifest_path}",
+        )
 
     import json
 

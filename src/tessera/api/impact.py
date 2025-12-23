@@ -3,11 +3,12 @@
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.api.auth import Auth, RequireRead
+from tessera.api.errors import BadRequestError, ErrorCode, NotFoundError
 from tessera.api.rate_limit import limit_read
 from tessera.config import settings
 from tessera.db import (
@@ -42,19 +43,14 @@ async def analyze_impact(
     """Analyze the impact of a proposed schema change."""
     is_valid, errors = validate_json_schema(proposed_schema)
     if not is_valid:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "code": "INVALID_SCHEMA",
-                "message": "Invalid JSON Schema",
-                "errors": errors,
-            },
+        raise BadRequestError(
+            f"Invalid JSON Schema: {'; '.join(errors) if errors else 'Schema validation failed'}"
         )
 
     asset_result = await session.execute(select(AssetDB).where(AssetDB.id == asset_id))
     asset = asset_result.scalar_one_or_none()
     if not asset:
-        raise HTTPException(status_code=404, detail="Asset not found")
+        raise NotFoundError(ErrorCode.ASSET_NOT_FOUND, "Asset not found")
 
     contract_result = await session.execute(
         select(ContractDB)

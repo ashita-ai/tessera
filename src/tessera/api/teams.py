@@ -4,13 +4,20 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Security
+from fastapi import APIRouter, Depends, Query, Request, Security
 from fastapi.security import APIKeyHeader
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.api.auth import Auth, RequireAdmin, RequireRead
+from tessera.api.errors import (
+    DuplicateError,
+    ErrorCode,
+    ForbiddenError,
+    NotFoundError,
+    UnauthorizedError,
+)
 from tessera.api.pagination import PaginationParams, paginate, pagination_params
 from tessera.api.rate_limit import limit_read, limit_write
 from tessera.config import settings
@@ -43,16 +50,10 @@ async def _verify_can_create_team(
         return
 
     if not authorization:
-        raise HTTPException(
-            status_code=401,
-            detail={"code": "MISSING_API_KEY", "message": "Authorization required"},
-        )
+        raise UnauthorizedError("Authorization required", code=ErrorCode.UNAUTHORIZED)
 
     if not authorization.startswith("Bearer "):
-        raise HTTPException(
-            status_code=401,
-            detail={"code": "INVALID_AUTH_HEADER", "message": "Use 'Bearer <key>' format"},
-        )
+        raise UnauthorizedError("Use 'Bearer <key>' format", code=ErrorCode.UNAUTHORIZED)
 
     key = authorization[7:]
 
@@ -65,18 +66,12 @@ async def _verify_can_create_team(
 
     result = await validate_api_key(session, key)
     if not result:
-        raise HTTPException(
-            status_code=401,
-            detail={"code": "INVALID_API_KEY", "message": "Invalid or expired API key"},
-        )
+        raise UnauthorizedError("Invalid or expired API key", code=ErrorCode.INVALID_API_KEY)
 
     api_key_db, _ = result
     scopes = [APIKeyScope(s) for s in api_key_db.scopes]
     if APIKeyScope.ADMIN not in scopes:
-        raise HTTPException(
-            status_code=403,
-            detail={"code": "INSUFFICIENT_SCOPE", "message": "Admin scope required"},
-        )
+        raise ForbiddenError("Admin scope required", code=ErrorCode.INSUFFICIENT_SCOPE)
 
 
 @router.post("", response_model=Team, status_code=201)
@@ -97,7 +92,10 @@ async def create_team(
         await session.flush()
     except IntegrityError:
         await session.rollback()
-        raise HTTPException(status_code=409, detail=f"Team with name '{team.name}' already exists")
+        raise DuplicateError(
+            ErrorCode.DUPLICATE_TEAM,
+            f"Team with name '{team.name}' already exists",
+        )
     await session.refresh(db_team)
     return db_team
 
@@ -142,7 +140,7 @@ async def get_team(
     )
     team = result.scalar_one_or_none()
     if not team:
-        raise HTTPException(status_code=404, detail="Team not found")
+        raise NotFoundError(ErrorCode.TEAM_NOT_FOUND, "Team not found")
     return team
 
 
@@ -166,7 +164,7 @@ async def update_team(
     )
     team = result.scalar_one_or_none()
     if not team:
-        raise HTTPException(status_code=404, detail="Team not found")
+        raise NotFoundError(ErrorCode.TEAM_NOT_FOUND, "Team not found")
 
     if update.name is not None:
         team.name = update.name
@@ -198,7 +196,7 @@ async def delete_team(
     )
     team = result.scalar_one_or_none()
     if not team:
-        raise HTTPException(status_code=404, detail="Team not found")
+        raise NotFoundError(ErrorCode.TEAM_NOT_FOUND, "Team not found")
 
     team.deleted_at = datetime.now(UTC)
     await session.flush()
@@ -223,7 +221,7 @@ async def restore_team(
     result = await session.execute(select(TeamDB).where(TeamDB.id == team_id))
     team = result.scalar_one_or_none()
     if not team:
-        raise HTTPException(status_code=404, detail="Team not found")
+        raise NotFoundError(ErrorCode.TEAM_NOT_FOUND, "Team not found")
 
     if team.deleted_at is None:
         return team

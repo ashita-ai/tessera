@@ -2,10 +2,15 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.api.auth import Auth, RequireAdmin
+from tessera.api.errors import (
+    ErrorCode,
+    ForbiddenError,
+    NotFoundError,
+)
 from tessera.api.rate_limit import limit_admin
 from tessera.db.database import get_session
 from tessera.models.api_key import APIKey, APIKeyCreate, APIKeyCreated, APIKeyList
@@ -55,7 +60,7 @@ async def create_key(
 
         return api_key
     except ValueError as e:
-        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": str(e)})
+        raise NotFoundError(ErrorCode.TEAM_NOT_FOUND, str(e))
 
 
 @router.get("", response_model=APIKeyList)
@@ -94,17 +99,11 @@ async def get_key(
     """
     api_key = await get_api_key(session, key_id)
     if not api_key:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "NOT_FOUND", "message": f"API key {key_id} not found"},
-        )
+        raise NotFoundError(ErrorCode.API_KEY_NOT_FOUND, f"API key {key_id} not found")
 
     # Non-admins can only see their own team's keys
     if not auth.has_scope(APIKeyScope.ADMIN) and api_key.team_id != auth.team_id:
-        raise HTTPException(
-            status_code=403,
-            detail={"code": "FORBIDDEN", "message": "Cannot view keys for other teams"},
-        )
+        raise ForbiddenError("Cannot view keys for other teams")
 
     return api_key
 
@@ -124,10 +123,7 @@ async def revoke_key(
     """
     api_key = await revoke_api_key(session, key_id)
     if not api_key:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "NOT_FOUND", "message": f"API key {key_id} not found"},
-        )
+        raise NotFoundError(ErrorCode.API_KEY_NOT_FOUND, f"API key {key_id} not found")
 
     # Audit log
     await audit.log_event(

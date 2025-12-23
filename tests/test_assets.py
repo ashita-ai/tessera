@@ -3,7 +3,6 @@
 import pytest
 from httpx import AsyncClient
 
-
 pytestmark = pytest.mark.asyncio
 
 
@@ -236,7 +235,7 @@ class TestImpactAnalysis:
             f"/api/v1/assets/{asset_id}/impact",
             json={"type": "invalid_type"},
         )
-        assert resp.status_code == 422
+        assert resp.status_code == 400  # BadRequestError for invalid schema
 
     async def test_impact_analysis_asset_not_found(self, client: AsyncClient):
         """Impact analysis on nonexistent asset should 404."""
@@ -417,7 +416,7 @@ class TestAssetDependencies:
             f"/api/v1/assets/{downstream_id}/dependencies",
             json={"depends_on_asset_id": upstream_id, "dependency_type": "transforms"},
         )
-        assert resp.status_code == 400
+        assert resp.status_code == 409  # DuplicateError for conflicts
         data = resp.json()
         error_msg = data.get("detail") or data.get("error", {}).get("message", "")
         assert "already exists" in error_msg

@@ -8,6 +8,7 @@ from fastapi import Depends, HTTPException, Request, Security
 from fastapi.security import APIKeyHeader
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tessera.api.errors import ErrorCode, ForbiddenError, UnauthorizedError
 from tessera.config import settings
 from tessera.db.database import get_session
 from tessera.db.models import APIKeyDB, TeamDB
@@ -44,15 +45,12 @@ class AuthContext:
         return scope in self.scopes
 
     def require_scope(self, scope: APIKeyScope) -> None:
-        """Raise HTTPException if the key doesn't have the required scope."""
+        """Raise ForbiddenError if the key doesn't have the required scope."""
         if not self.has_scope(scope):
-            raise HTTPException(
-                status_code=403,
-                detail={
-                    "code": "INSUFFICIENT_SCOPE",
-                    "message": f"This operation requires the '{scope}' scope",
-                    "required_scope": scope,
-                },
+            raise ForbiddenError(
+                f"This operation requires the '{scope}' scope",
+                code=ErrorCode.INSUFFICIENT_SCOPE,
+                extra={"required_scope": scope},
             )
 
 
@@ -103,23 +101,17 @@ async def get_auth_context(
 
     # Check for Authorization header
     if not authorization:
-        raise HTTPException(
-            status_code=401,
-            detail={
-                "code": "MISSING_API_KEY",
-                "message": "Missing Authorization header. Use 'Authorization: Bearer <api_key>'",
-            },
+        raise UnauthorizedError(
+            "Missing Authorization header. Use 'Authorization: Bearer <api_key>'",
+            code=ErrorCode.MISSING_API_KEY,
             headers={"WWW-Authenticate": "Bearer"},
         )
 
     # Parse Bearer token
     if not authorization.startswith("Bearer "):
-        raise HTTPException(
-            status_code=401,
-            detail={
-                "code": "INVALID_AUTH_HEADER",
-                "message": "Invalid format. Use 'Authorization: Bearer <api_key>'",
-            },
+        raise UnauthorizedError(
+            "Invalid format. Use 'Authorization: Bearer <api_key>'",
+            code=ErrorCode.INVALID_AUTH_HEADER,
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -158,12 +150,9 @@ async def get_auth_context(
     # Validate the API key
     validated = await validate_api_key(session, api_key)
     if not validated:
-        raise HTTPException(
-            status_code=401,
-            detail={
-                "code": "INVALID_API_KEY",
-                "message": "Invalid or expired API key",
-            },
+        raise UnauthorizedError(
+            "Invalid or expired API key",
+            code=ErrorCode.INVALID_API_KEY,
             headers={"WWW-Authenticate": "Bearer"},
         )
 

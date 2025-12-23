@@ -3,7 +3,6 @@
 import pytest
 from httpx import AsyncClient
 
-
 pytestmark = pytest.mark.asyncio
 
 
@@ -65,7 +64,7 @@ class TestContractEdgeCases:
                 "compatibility_mode": "backward",
             },
         )
-        assert resp.status_code == 422
+        assert resp.status_code == 400  # BadRequestError for invalid schema
 
 
 class TestRegistrationEdgeCases:
@@ -118,8 +117,7 @@ class TestProposalEdgeCases:
         team_id = team_resp.json()["id"]
 
         resp = await client.post(
-            "/api/v1/proposals/00000000-0000-0000-0000-000000000000/force"
-            f"?actor_id={team_id}"
+            "/api/v1/proposals/00000000-0000-0000-0000-000000000000/force" f"?actor_id={team_id}"
         )
         assert resp.status_code == 404
 
@@ -166,16 +164,12 @@ class TestProposalEdgeCases:
 
     async def test_withdraw_nonexistent_proposal(self, client: AsyncClient):
         """Withdrawing nonexistent proposal should 404."""
-        resp = await client.post(
-            "/api/v1/proposals/00000000-0000-0000-0000-000000000000/withdraw"
-        )
+        resp = await client.post("/api/v1/proposals/00000000-0000-0000-0000-000000000000/withdraw")
         assert resp.status_code == 404
 
     async def test_get_status_nonexistent_proposal(self, client: AsyncClient):
         """Getting status of nonexistent proposal should 404."""
-        resp = await client.get(
-            "/api/v1/proposals/00000000-0000-0000-0000-000000000000/status"
-        )
+        resp = await client.get("/api/v1/proposals/00000000-0000-0000-0000-000000000000/status")
         assert resp.status_code == 404
 
 
@@ -184,9 +178,7 @@ class TestDependencyEdgeCases:
 
     async def test_list_dependencies_asset_not_found(self, client: AsyncClient):
         """Listing dependencies for nonexistent asset should 404."""
-        resp = await client.get(
-            "/api/v1/assets/00000000-0000-0000-0000-000000000000/dependencies"
-        )
+        resp = await client.get("/api/v1/assets/00000000-0000-0000-0000-000000000000/dependencies")
         assert resp.status_code == 404
 
     async def test_create_dependency_with_different_types(self, client: AsyncClient):

@@ -4,12 +4,19 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.api.auth import Auth, RequireAdmin, RequireRead, RequireWrite
+from tessera.api.errors import (
+    BadRequestError,
+    DuplicateError,
+    ErrorCode,
+    ForbiddenError,
+    NotFoundError,
+)
 from tessera.api.pagination import PaginationParams, paginate, pagination_params
 from tessera.api.rate_limit import limit_read, limit_write
 from tessera.config import settings
@@ -71,18 +78,15 @@ async def create_asset(
     """
     # Resource-level auth: must own the team or be admin
     if asset.owner_team_id != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": "INSUFFICIENT_PERMISSIONS",
-                "message": "You can only create assets for teams you belong to",
-            },
+        raise ForbiddenError(
+            "You can only create assets for teams you belong to",
+            code=ErrorCode.UNAUTHORIZED_TEAM,
         )
 
     # Validate owner team exists
     result = await session.execute(select(TeamDB).where(TeamDB.id == asset.owner_team_id))
     if not result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Owner team not found")
+        raise NotFoundError(ErrorCode.TEAM_NOT_FOUND, "Owner team not found")
 
     # Check for duplicate FQN
     existing = await session.execute(
@@ -92,9 +96,9 @@ async def create_asset(
         .where(AssetDB.deleted_at.is_(None))
     )
     if existing.scalar_one_or_none():
-        raise HTTPException(
-            status_code=409,
-            detail=f"Asset '{asset.fqn}' already exists in environment '{asset.environment}'",
+        raise DuplicateError(
+            ErrorCode.DUPLICATE_ASSET,
+            f"Asset '{asset.fqn}' already exists in environment '{asset.environment}'",
         )
 
     db_asset = AssetDB(
@@ -107,7 +111,9 @@ async def create_asset(
     try:
         await session.flush()
     except IntegrityError:
-        raise HTTPException(status_code=409, detail=f"Asset with FQN '{asset.fqn}' already exists")
+        raise DuplicateError(
+            ErrorCode.DUPLICATE_ASSET, f"Asset with FQN '{asset.fqn}' already exists"
+        )
     await session.refresh(db_asset)
     return db_asset
 
@@ -254,7 +260,7 @@ async def get_asset(
     )
     asset = result.scalar_one_or_none()
     if not asset:
-        raise HTTPException(status_code=404, detail="Asset not found")
+        raise NotFoundError(ErrorCode.ASSET_NOT_FOUND, "Asset not found")
 
     # Cache result
     await cache_asset(str(asset_id), Asset.model_validate(asset).model_dump())
@@ -281,16 +287,13 @@ async def update_asset(
     )
     asset = result.scalar_one_or_none()
     if not asset:
-        raise HTTPException(status_code=404, detail="Asset not found")
+        raise NotFoundError(ErrorCode.ASSET_NOT_FOUND, "Asset not found")
 
     # Resource-level auth: must own the asset's team or be admin
     if asset.owner_team_id != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": "INSUFFICIENT_PERMISSIONS",
-                "message": "You can only update assets belonging to your team",
-            },
+        raise ForbiddenError(
+            "You can only update assets belonging to your team",
+            code=ErrorCode.UNAUTHORIZED_TEAM,
         )
 
     if update.fqn is not None:
@@ -329,16 +332,13 @@ async def delete_asset(
     )
     asset = result.scalar_one_or_none()
     if not asset:
-        raise HTTPException(status_code=404, detail="Asset not found")
+        raise NotFoundError(ErrorCode.ASSET_NOT_FOUND, "Asset not found")
 
     # Resource-level auth
     if asset.owner_team_id != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": "INSUFFICIENT_PERMISSIONS",
-                "message": "You can only delete assets belonging to your team",
-            },
+        raise ForbiddenError(
+            "You can only delete assets belonging to your team",
+            code=ErrorCode.UNAUTHORIZED_TEAM,
         )
 
     asset.deleted_at = datetime.now(UTC)
@@ -364,7 +364,7 @@ async def restore_asset(
     result = await session.execute(select(AssetDB).where(AssetDB.id == asset_id))
     asset = result.scalar_one_or_none()
     if not asset:
-        raise HTTPException(status_code=404, detail="Asset not found")
+        raise NotFoundError(ErrorCode.ASSET_NOT_FOUND, "Asset not found")
 
     if asset.deleted_at is None:
         return asset
@@ -407,44 +407,35 @@ async def create_contract(
     asset_result = await session.execute(select(AssetDB).where(AssetDB.id == asset_id))
     asset = asset_result.scalar_one_or_none()
     if not asset:
-        raise HTTPException(status_code=404, detail="Asset not found")
+        raise NotFoundError(ErrorCode.ASSET_NOT_FOUND, "Asset not found")
 
     # Resource-level auth: must own the asset's team or be admin
     if asset.owner_team_id != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": "INSUFFICIENT_PERMISSIONS",
-                "message": "You can only publish contracts for assets belonging to your team",
-            },
+        raise ForbiddenError(
+            "You can only publish contracts for assets belonging to your team",
+            code=ErrorCode.UNAUTHORIZED_TEAM,
         )
 
     # Verify publisher team exists
     team_result = await session.execute(select(TeamDB).where(TeamDB.id == published_by))
     publisher_team = team_result.scalar_one_or_none()
     if not publisher_team:
-        raise HTTPException(status_code=404, detail="Publisher team not found")
+        raise NotFoundError(ErrorCode.TEAM_NOT_FOUND, "Publisher team not found")
 
     # Resource-level auth: published_by must match auth.team_id or be admin
     if published_by != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": "INSUFFICIENT_PERMISSIONS",
-                "message": "You can only publish contracts on behalf of your own team",
-            },
+        raise ForbiddenError(
+            "You can only publish contracts on behalf of your own team",
+            code=ErrorCode.UNAUTHORIZED_TEAM,
         )
 
     # Validate schema is valid JSON Schema
     is_valid, errors = validate_json_schema(contract.schema_def)
     if not is_valid:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "code": "INVALID_SCHEMA",
-                "message": "Invalid JSON Schema",
-                "errors": errors,
-            },
+        raise BadRequestError(
+            "Invalid JSON Schema",
+            code=ErrorCode.INVALID_SCHEMA,
+            details={"errors": errors},
         )
 
     # Get current active contract
@@ -669,7 +660,7 @@ async def get_contract_history(
     asset_result = await session.execute(select(AssetDB).where(AssetDB.id == asset_id))
     asset = asset_result.scalar_one_or_none()
     if not asset:
-        raise HTTPException(status_code=404, detail="Asset not found")
+        raise NotFoundError(ErrorCode.ASSET_NOT_FOUND, "Asset not found")
 
     # Get all contracts ordered by published_at
     contracts_result = await session.execute(
@@ -732,7 +723,7 @@ async def diff_contract_versions(
     asset_result = await session.execute(select(AssetDB).where(AssetDB.id == asset_id))
     asset = asset_result.scalar_one_or_none()
     if not asset:
-        raise HTTPException(status_code=404, detail="Asset not found")
+        raise NotFoundError(ErrorCode.ASSET_NOT_FOUND, "Asset not found")
 
     # Get the from_version contract
     from_result = await session.execute(
@@ -742,9 +733,9 @@ async def diff_contract_versions(
     )
     from_contract = from_result.scalar_one_or_none()
     if not from_contract:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Contract version '{from_version}' not found for this asset",
+        raise NotFoundError(
+            ErrorCode.CONTRACT_NOT_FOUND,
+            f"Contract version '{from_version}' not found for this asset",
         )
 
     # Get the to_version contract
@@ -755,9 +746,9 @@ async def diff_contract_versions(
     )
     to_contract = to_result.scalar_one_or_none()
     if not to_contract:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Contract version '{to_version}' not found for this asset",
+        raise NotFoundError(
+            ErrorCode.CONTRACT_NOT_FOUND,
+            f"Contract version '{to_version}' not found for this asset",
         )
 
     # Perform diff

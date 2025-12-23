@@ -8,6 +8,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.api.auth import Auth, RequireRead, RequireWrite
+from tessera.api.errors import (
+    ErrorCode,
+    NotFoundError,
+)
 from tessera.api.pagination import PaginationParams, paginate, pagination_params
 from tessera.api.rate_limit import limit_read, limit_write
 from tessera.db import ContractDB, RegistrationDB, get_session
@@ -45,7 +49,7 @@ async def create_registration(
     result = await session.execute(select(ContractDB).where(ContractDB.id == contract_id))
     contract = result.scalar_one_or_none()
     if not contract:
-        raise HTTPException(status_code=404, detail="Contract not found")
+        raise NotFoundError(ErrorCode.CONTRACT_NOT_FOUND, "Contract not found")
 
     db_registration = RegistrationDB(
         contract_id=contract_id,
@@ -104,7 +108,7 @@ async def get_registration(
     )
     registration = result.scalar_one_or_none()
     if not registration:
-        raise HTTPException(status_code=404, detail="Registration not found")
+        raise NotFoundError(ErrorCode.REGISTRATION_NOT_FOUND, "Registration not found")
     return registration
 
 
@@ -127,7 +131,7 @@ async def update_registration(
     )
     registration = result.scalar_one_or_none()
     if not registration:
-        raise HTTPException(status_code=404, detail="Registration not found")
+        raise NotFoundError(ErrorCode.REGISTRATION_NOT_FOUND, "Registration not found")
 
     # Resource-level auth: must own the registration's consumer team or be admin
     if registration.consumer_team_id != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):
@@ -167,7 +171,7 @@ async def delete_registration(
     )
     registration = result.scalar_one_or_none()
     if not registration:
-        raise HTTPException(status_code=404, detail="Registration not found")
+        raise NotFoundError(ErrorCode.REGISTRATION_NOT_FOUND, "Registration not found")
 
     # Resource-level auth: must own the registration's consumer team or be admin
     if registration.consumer_team_id != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):

@@ -4,12 +4,19 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.api.auth import Auth, RequireRead, RequireWrite
+from tessera.api.errors import (
+    BadRequestError,
+    DuplicateError,
+    ErrorCode,
+    ForbiddenError,
+    NotFoundError,
+)
 from tessera.api.rate_limit import limit_read, limit_write
 from tessera.db import (
     AcknowledgmentDB,
@@ -236,7 +243,7 @@ async def get_proposal(
     result = await session.execute(select(ProposalDB).where(ProposalDB.id == proposal_id))
     proposal = result.scalar_one_or_none()
     if not proposal:
-        raise HTTPException(status_code=404, detail="Proposal not found")
+        raise NotFoundError(ErrorCode.PROPOSAL_NOT_FOUND, "Proposal not found")
     return proposal
 
 
@@ -261,7 +268,7 @@ async def get_proposal_status(
     )
     row = result.one_or_none()
     if not row:
-        raise HTTPException(status_code=404, detail="Proposal not found")
+        raise NotFoundError(ErrorCode.PROPOSAL_NOT_FOUND, "Proposal not found")
     proposal, asset = row
 
     # Get all acknowledgments
@@ -373,12 +380,10 @@ async def acknowledge_proposal(
     """
     # Resource-level auth: must own the consumer team or be admin
     if ack.consumer_team_id != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": "INSUFFICIENT_PERMISSIONS",
-                "message": "You can only acknowledge proposals on behalf of your own team",
-            },
+        raise ForbiddenError(
+            "You can only acknowledge proposals on behalf of your own team",
+            code=ErrorCode.FORBIDDEN,
+            extra={"code": "INSUFFICIENT_PERMISSIONS"},
         )
 
     # Verify proposal exists and get asset info
@@ -389,18 +394,18 @@ async def acknowledge_proposal(
     )
     row = result.one_or_none()
     if not row:
-        raise HTTPException(status_code=404, detail="Proposal not found")
+        raise NotFoundError(ErrorCode.PROPOSAL_NOT_FOUND, "Proposal not found")
     proposal: ProposalDB = row[0]
     asset: AssetDB = row[1]
 
     if proposal.status != ProposalStatus.PENDING:
-        raise HTTPException(status_code=400, detail="Proposal is not pending")
+        raise BadRequestError("Proposal is not pending", code=ErrorCode.PROPOSAL_NOT_PENDING)
 
     # Get consumer team info
     team_result = await session.execute(select(TeamDB).where(TeamDB.id == ack.consumer_team_id))
     consumer_team = team_result.scalar_one_or_none()
     if not consumer_team:
-        raise HTTPException(status_code=404, detail="Consumer team not found")
+        raise NotFoundError(ErrorCode.TEAM_NOT_FOUND, "Consumer team not found")
 
     # Check for duplicate acknowledgment from same team
     result = await session.execute(
@@ -409,8 +414,8 @@ async def acknowledge_proposal(
         .where(AcknowledgmentDB.consumer_team_id == ack.consumer_team_id)
     )
     if result.scalar_one_or_none():
-        raise HTTPException(
-            status_code=400, detail="This team has already acknowledged this proposal"
+        raise DuplicateError(
+            ErrorCode.DUPLICATE_ACKNOWLEDGMENT, "Already acknowledged by this team"
         )
 
     db_ack = AcknowledgmentDB(
@@ -536,22 +541,20 @@ async def withdraw_proposal(
     )
     row = result.one_or_none()
     if not row:
-        raise HTTPException(status_code=404, detail="Proposal not found")
+        raise NotFoundError(ErrorCode.PROPOSAL_NOT_FOUND, "Proposal not found")
     proposal: ProposalDB = row[0]
     asset: AssetDB = row[1]
 
     # Resource-level auth: must own the proposer team or be admin
     if proposal.proposed_by != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": "INSUFFICIENT_PERMISSIONS",
-                "message": "You can only withdraw your own proposals",
-            },
+        raise ForbiddenError(
+            "You can only withdraw your own proposals",
+            code=ErrorCode.FORBIDDEN,
+            extra={"code": "INSUFFICIENT_PERMISSIONS"},
         )
 
     if proposal.status != ProposalStatus.PENDING:
-        raise HTTPException(status_code=400, detail="Proposal is not pending")
+        raise BadRequestError("Proposal is not pending", code=ErrorCode.PROPOSAL_NOT_PENDING)
 
     proposal.status = ProposalStatus.WITHDRAWN
     proposal.resolved_at = datetime.now(UTC)
@@ -586,12 +589,10 @@ async def force_proposal(
     """
     # Resource-level auth: actor_id must match auth.team_id or be admin
     if actor_id != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": "INSUFFICIENT_PERMISSIONS",
-                "message": "You can only force approve on behalf of your own team",
-            },
+        raise ForbiddenError(
+            "You can only force approve on behalf of your own team",
+            code=ErrorCode.FORBIDDEN,
+            extra={"code": "INSUFFICIENT_PERMISSIONS"},
         )
 
     result = await session.execute(
@@ -601,12 +602,12 @@ async def force_proposal(
     )
     row = result.one_or_none()
     if not row:
-        raise HTTPException(status_code=404, detail="Proposal not found")
+        raise NotFoundError(ErrorCode.PROPOSAL_NOT_FOUND, "Proposal not found")
     proposal: ProposalDB = row[0]
     asset: AssetDB = row[1]
 
     if proposal.status != ProposalStatus.PENDING:
-        raise HTTPException(status_code=400, detail="Proposal is not pending")
+        raise BadRequestError("Proposal is not pending", code=ErrorCode.PROPOSAL_NOT_PENDING)
 
     # Get actor team info
     team_result = await session.execute(select(TeamDB).where(TeamDB.id == actor_id))
@@ -655,38 +656,38 @@ async def publish_from_proposal(
     """
     # Resource-level auth: publish_request.published_by must match auth.team_id or be admin
     if publish_request.published_by != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": "INSUFFICIENT_PERMISSIONS",
-                "message": "You can only publish on behalf of your own team",
-            },
+        raise ForbiddenError(
+            "You can only publish on behalf of your own team",
+            code=ErrorCode.FORBIDDEN,
+            extra={"code": "INSUFFICIENT_PERMISSIONS"},
         )
 
     # Get the proposal
     result = await session.execute(select(ProposalDB).where(ProposalDB.id == proposal_id))
     proposal = result.scalar_one_or_none()
     if not proposal:
-        raise HTTPException(status_code=404, detail="Proposal not found")
+        raise NotFoundError(ErrorCode.PROPOSAL_NOT_FOUND, "Proposal not found")
 
     if proposal.status != ProposalStatus.APPROVED:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Cannot publish from proposal with status '{proposal.status}'. "
+        raise BadRequestError(
+            f"Cannot publish from proposal with status '{proposal.status}'. "
             "Proposal must be approved first.",
+            code=ErrorCode.PROPOSAL_NOT_PENDING,
         )
 
     # Validate the proposed schema before publishing
     try:
         validate_schema_or_raise(proposal.proposed_schema)
     except SchemaValidationError as e:
-        raise HTTPException(status_code=400, detail=f"Invalid schema in proposal: {e.message}")
+        raise BadRequestError(
+            f"Invalid schema in proposal: {e.message}", code=ErrorCode.INVALID_SCHEMA
+        )
 
     # Get the asset
     asset_result = await session.execute(select(AssetDB).where(AssetDB.id == proposal.asset_id))
     asset = asset_result.scalar_one_or_none()
     if not asset:
-        raise HTTPException(status_code=404, detail="Asset not found")
+        raise NotFoundError(ErrorCode.ASSET_NOT_FOUND, "Asset not found")
 
     # Get the current active contract to deprecate
     current_contract_result = await session.execute(

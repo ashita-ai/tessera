@@ -21,6 +21,10 @@ class ErrorCode(StrEnum):
     CONTRACT_NOT_FOUND = "CONTRACT_NOT_FOUND"
     PROPOSAL_NOT_FOUND = "PROPOSAL_NOT_FOUND"
     REGISTRATION_NOT_FOUND = "REGISTRATION_NOT_FOUND"
+    DEPENDENCY_NOT_FOUND = "DEPENDENCY_NOT_FOUND"
+    API_KEY_NOT_FOUND = "API_KEY_NOT_FOUND"
+    SYNC_PATH_NOT_FOUND = "SYNC_PATH_NOT_FOUND"
+    MANIFEST_NOT_FOUND = "MANIFEST_NOT_FOUND"
 
     # Duplicate errors
     DUPLICATE_ASSET = "DUPLICATE_ASSET"
@@ -28,17 +32,30 @@ class ErrorCode(StrEnum):
     DUPLICATE_CONTRACT_VERSION = "DUPLICATE_CONTRACT_VERSION"
     DUPLICATE_REGISTRATION = "DUPLICATE_REGISTRATION"
     DUPLICATE_ACKNOWLEDGMENT = "DUPLICATE_ACKNOWLEDGMENT"
+    DUPLICATE_DEPENDENCY = "DUPLICATE_DEPENDENCY"
 
     # Validation errors
     VALIDATION_ERROR = "VALIDATION_ERROR"
     INVALID_SCHEMA = "INVALID_SCHEMA"
     INVALID_VERSION = "INVALID_VERSION"
     INVALID_FQN = "INVALID_FQN"
+    INVALID_MANIFEST = "INVALID_MANIFEST"
 
     # Business logic errors
     PROPOSAL_NOT_PENDING = "PROPOSAL_NOT_PENDING"
     BREAKING_CHANGE_REQUIRES_PROPOSAL = "BREAKING_CHANGE_REQUIRES_PROPOSAL"
     INCOMPATIBLE_SCHEMA = "INCOMPATIBLE_SCHEMA"
+    SELF_DEPENDENCY = "SELF_DEPENDENCY"
+    CONTRACT_REQUIRED = "CONTRACT_REQUIRED"
+    UNAUTHORIZED_TEAM = "UNAUTHORIZED_TEAM"
+
+    # Auth errors
+    UNAUTHORIZED = "UNAUTHORIZED"
+    FORBIDDEN = "FORBIDDEN"
+    MISSING_API_KEY = "MISSING_API_KEY"
+    INVALID_AUTH_HEADER = "INVALID_AUTH_HEADER"
+    INVALID_API_KEY = "INVALID_API_KEY"
+    INSUFFICIENT_SCOPE = "INSUFFICIENT_SCOPE"
 
     # Generic errors
     INTERNAL_ERROR = "INTERNAL_ERROR"
@@ -87,6 +104,47 @@ class DuplicateError(APIError):
         super().__init__(code, message, status_code=409, details=details)
 
 
+class BadRequestError(APIError):
+    """Bad request error."""
+
+    def __init__(
+        self,
+        message: str,
+        code: ErrorCode = ErrorCode.BAD_REQUEST,
+        details: dict[str, Any] | None = None,
+    ):
+        super().__init__(code, message, status_code=400, details=details)
+
+
+class UnauthorizedError(APIError):
+    """Unauthorized error."""
+
+    def __init__(
+        self,
+        message: str = "Authentication required",
+        code: ErrorCode = ErrorCode.UNAUTHORIZED,
+        details: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+    ):
+        super().__init__(code, message, status_code=401, details=details)
+        self.headers = headers
+
+
+class ForbiddenError(APIError):
+    """Forbidden error."""
+
+    def __init__(
+        self,
+        message: str = "Access denied",
+        code: ErrorCode = ErrorCode.FORBIDDEN,
+        details: dict[str, Any] | None = None,
+        extra: dict[str, Any] | None = None,
+    ):
+        super().__init__(code, message, status_code=403, details=details)
+        if extra:
+            self.details.update(extra)
+
+
 class RequestIDMiddleware(BaseHTTPMiddleware):
     """Middleware that adds a unique request ID to each request."""
 
@@ -125,6 +183,7 @@ def build_error_response(
 async def api_error_handler(request: Request, exc: APIError) -> JSONResponse:
     """Handle APIError exceptions."""
     request_id = get_request_id(request)
+    headers = getattr(exc, "headers", None)
     return JSONResponse(
         status_code=exc.status_code,
         content=build_error_response(
@@ -134,6 +193,7 @@ async def api_error_handler(request: Request, exc: APIError) -> JSONResponse:
             status_code=exc.status_code,
             details=exc.details,
         ),
+        headers=headers,
     )
 
 

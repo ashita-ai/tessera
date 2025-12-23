@@ -9,6 +9,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.api.auth import Auth, RequireRead, RequireWrite
+from tessera.api.errors import (
+    BadRequestError,
+    DuplicateError,
+    ErrorCode,
+    NotFoundError,
+)
 from tessera.api.pagination import PaginationParams, paginate, pagination_params
 from tessera.api.rate_limit import limit_read, limit_write
 from tessera.db import (
@@ -40,7 +46,7 @@ async def create_dependency(
     result = await session.execute(select(AssetDB).where(AssetDB.id == asset_id))
     asset = result.scalar_one_or_none()
     if not asset:
-        raise HTTPException(status_code=404, detail="Asset not found")
+        raise NotFoundError(ErrorCode.ASSET_NOT_FOUND, "Asset not found")
 
     if asset.owner_team_id != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):
         raise HTTPException(
@@ -55,10 +61,10 @@ async def create_dependency(
         select(AssetDB).where(AssetDB.id == dependency.depends_on_asset_id)
     )
     if not result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Dependency asset not found")
+        raise NotFoundError(ErrorCode.ASSET_NOT_FOUND, "Dependency asset not found")
 
     if asset_id == dependency.depends_on_asset_id:
-        raise HTTPException(status_code=400, detail="Asset cannot depend on itself")
+        raise BadRequestError("Asset cannot depend on itself", code=ErrorCode.SELF_DEPENDENCY)
 
     result = await session.execute(
         select(AssetDependencyDB)
@@ -66,7 +72,7 @@ async def create_dependency(
         .where(AssetDependencyDB.dependency_asset_id == dependency.depends_on_asset_id)
     )
     if result.scalar_one_or_none():
-        raise HTTPException(status_code=400, detail="Dependency already exists")
+        raise DuplicateError(ErrorCode.DUPLICATE_DEPENDENCY, "Dependency already exists")
 
     db_dependency = AssetDependencyDB(
         dependent_asset_id=asset_id,
@@ -92,7 +98,7 @@ async def list_dependencies(
     """List all upstream dependencies for an asset."""
     asset_result = await session.execute(select(AssetDB).where(AssetDB.id == asset_id))
     if not asset_result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Asset not found")
+        raise NotFoundError(ErrorCode.ASSET_NOT_FOUND, "Asset not found")
 
     query = select(AssetDependencyDB).where(AssetDependencyDB.dependent_asset_id == asset_id)
     return await paginate(session, query, params, response_model=Dependency)
@@ -116,7 +122,7 @@ async def delete_dependency(
     )
     dependency = result.scalar_one_or_none()
     if not dependency:
-        raise HTTPException(status_code=404, detail="Dependency not found")
+        raise NotFoundError(ErrorCode.DEPENDENCY_NOT_FOUND, "Dependency not found")
 
     await session.delete(dependency)
     await session.flush()
@@ -144,7 +150,7 @@ async def get_lineage(
     )
     row = result.first()
     if not row:
-        raise HTTPException(status_code=404, detail="Asset not found")
+        raise NotFoundError(ErrorCode.ASSET_NOT_FOUND, "Asset not found")
     asset, owner_team = row
 
     dep_asset = AssetDB.__table__.alias("dep_asset")
