@@ -11,12 +11,74 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from tessera.api.errors import ErrorCode, ForbiddenError, UnauthorizedError
 from tessera.config import settings
 from tessera.db.database import get_session
-from tessera.db.models import APIKeyDB, TeamDB
+from tessera.db.models import APIKeyDB, TeamDB, UserDB
 from tessera.models.enums import APIKeyScope
 from tessera.services.auth import validate_api_key
 
 # API key header scheme
 api_key_header = APIKeyHeader(name="Authorization", auto_error=False)
+
+
+async def _get_session_auth_context(
+    request: Request,
+    session: AsyncSession,
+) -> "AuthContext | None":
+    """Get auth context from session cookie (for web UI users).
+
+    Returns None if no valid session exists.
+    """
+    from sqlalchemy import select
+
+    # Check if request has a session with user_id
+    if not hasattr(request, "session"):
+        return None
+
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return None
+
+    try:
+        # Look up the user
+        result = await session.execute(
+            select(UserDB).where(UserDB.id == UUID(user_id)).where(UserDB.deactivated_at.is_(None))
+        )
+        user = result.scalar_one_or_none()
+        if not user:
+            return None
+
+        # Get the user's team
+        if not user.team_id:
+            return None
+
+        team_result = await session.execute(select(TeamDB).where(TeamDB.id == user.team_id))
+        team = team_result.scalar_one_or_none()
+        if not team:
+            return None
+
+        # Determine scopes based on user role
+        if user.role.value == "admin":
+            scopes = list(APIKeyScope)
+        elif user.role.value == "team_admin":
+            scopes = [APIKeyScope.READ, APIKeyScope.WRITE]
+        else:
+            scopes = [APIKeyScope.READ]
+
+        # Create a mock API key for session auth
+        mock_key = APIKeyDB(
+            key_hash="session",
+            key_prefix="session",
+            name=f"Session: {user.email}",
+            team_id=team.id,
+            scopes=[s.value for s in scopes],
+        )
+
+        return AuthContext(
+            team=team,
+            api_key=mock_key,
+            scopes=scopes,
+        )
+    except Exception:
+        return None
 
 
 class AuthContext:
@@ -101,6 +163,12 @@ async def get_auth_context(
 
     # Check for Authorization header
     if not authorization:
+        # Try session-based authentication for web UI
+        session_auth = await _get_session_auth_context(request, session)
+        if session_auth:
+            request.state.auth = session_auth
+            return session_auth
+
         raise UnauthorizedError(
             "Missing Authorization header. Use 'Authorization: Bearer <api_key>'",
             code=ErrorCode.MISSING_API_KEY,
