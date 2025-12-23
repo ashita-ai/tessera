@@ -1004,6 +1004,13 @@ async def upload_dbt_manifest(
                 guarantees["volume"] = tessera_meta.volume
 
         # Build metadata from dbt
+        # Convert depends_on node IDs to FQNs for UI lookup
+        depends_on_node_ids = node.get("depends_on", {}).get("nodes", [])
+        depends_on_fqns = [
+            node_id_to_fqn[dep_id]
+            for dep_id in depends_on_node_ids
+            if dep_id in node_id_to_fqn
+        ]
         metadata = {
             "dbt_node_id": node_id,
             "resource_type": resource_type,
@@ -1011,7 +1018,7 @@ async def upload_dbt_manifest(
             "tags": node.get("tags", []),
             "dbt_fqn": node.get("fqn", []),
             "path": node.get("path", ""),
-            "depends_on": node.get("depends_on", {}).get("nodes", []),
+            "depends_on": depends_on_fqns,
             "columns": {
                 col_name: {
                     "description": col_info.get("description", ""),
@@ -1073,11 +1080,10 @@ async def upload_dbt_manifest(
 
             # Track for consumer registration
             if upload_req.auto_register_consumers:
-                depends_on_nodes = node.get("depends_on", {}).get("nodes", [])
                 asset_consumer_map[fqn] = (
                     new_asset,
                     resolved_team_id,
-                    depends_on_nodes if upload_req.infer_consumers_from_refs else [],
+                    depends_on_node_ids if upload_req.infer_consumers_from_refs else [],
                     tessera_meta.consumers,
                 )
 
