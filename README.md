@@ -4,182 +4,65 @@
 
 <h3 align="center">Data contract coordination for warehouses</h3>
 
-## The Problem
+<p align="center">
+  <a href="https://tessera.readthedocs.io">Docs</a> |
+  <a href="#quick-start">Quick Start</a> |
+  <a href="https://github.com/ashita-ai/tessera/issues">Issues</a>
+</p>
 
-Data contracts tell you something is wrong. They don't tell you what to do about it.
+---
 
-The Kafka ecosystem solved producer/consumer coordination with schema registries. Warehouses have nothing equivalent. When a producer wants to drop a column, the workflow is tribal knowledge: Slack threads, Confluence pages, and hope.
+**Tessera coordinates breaking changes between data producers and consumers.**
 
-## How It Works
+When a producer wants to drop a column, Tessera notifies affected consumers and blocks the change until they acknowledge. No more 3am pages from broken pipelines.
 
-**Without Tessera** — breaking changes break things:
-
-```mermaid
-%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#dc2626', 'primaryTextColor': '#fff', 'primaryBorderColor': '#b91c1c', 'lineColor': '#6b7280', 'noteBkgColor': '#fef2f2', 'noteTextColor': '#7f1d1d', 'noteBorderColor': '#fca5a5', 'actorBkg': '#6b7280', 'actorTextColor': '#f9fafb', 'actorBorder': '#4b5563', 'signalColor': '#6b7280', 'signalTextColor': '#1f2937'}}}%%
-sequenceDiagram
-    participant P as 📦 Producer
-    participant C as 👥 Consumer
-
-    P->>P: Drop column from table
-    P--xC: 💥 Pipeline fails at 3am
-    Note over C: ❌ No warning<br/>❌ No migration time<br/>❌ Broken dashboards
-    C->>P: 😡 Slack: "Who broke prod?"
 ```
-
-**With Tessera** — coordinate before you ship:
-
-```mermaid
-%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#6366f1', 'primaryTextColor': '#fff', 'primaryBorderColor': '#4f46e5', 'lineColor': '#475569', 'noteBkgColor': '#f0fdf4', 'noteTextColor': '#14532d', 'noteBorderColor': '#86efac', 'actorBkg': '#1e293b', 'actorTextColor': '#f8fafc', 'actorBorder': '#475569', 'signalColor': '#475569', 'signalTextColor': '#0f172a'}}}%%
-sequenceDiagram
-    participant P as 📦 Producer
-    participant T as ⚡ Tessera
-    participant C as 👥 Consumer
-
-    P->>T: Propose: drop column
-    T-->>T: Detect breaking change
-    T->>C: ⚠️ "Producer wants to drop user_id"
-    C->>T: ✅ Approve (migrated)
-    T->>P: All consumers ready
-    P->>T: Ship v2.0.0
-    Note over P,C: ✓ Zero downtime, no one paged
+Producer: "I want to drop user_email"
+    ↓
+Tessera: "3 teams depend on this. Notifying them."
+    ↓
+Consumers: "We've migrated. Approved."
+    ↓
+Producer: Ships v2.0.0 safely
 ```
-
-**Producers** own assets and publish versioned contracts (JSON Schema + guarantees).
-
-**Consumers** register dependencies on contracts they use.
-
-**Breaking changes** create proposals that block until affected consumers acknowledge.
 
 ## Quick Start
 
 ```bash
-# Install
+# Docker (recommended)
+docker compose up -d
+open http://localhost:8000
+
+# Or from source
 uv sync --all-extras
-
-# Configure
-cp .env.example .env
-# Edit DATABASE_URL
-
-# Run migrations
-alembic upgrade head
-
-# Start server
+docker compose up -d db  # PostgreSQL
 uv run uvicorn tessera.main:app --reload
-
-# Test
-DATABASE_URL=sqlite+aiosqlite:///:memory: uv run pytest
 ```
 
-## CLI
+## Key Features
 
-```bash
-tessera team create "Analytics"
-tessera asset create warehouse.core.users --team <team-id>
-tessera contract publish --asset <id> --team <id> --version 1.0.0 --schema schema.json
-tessera register --asset <id> --team <consumer-id>
-tessera proposal acknowledge <id> --team <id> --response approved
-```
+- **Schema contracts** - JSON Schema definitions with semantic versioning
+- **Breaking change detection** - Auto-detect incompatible changes
+- **Consumer registration** - Track who depends on what
+- **Proposal workflow** - Coordinate changes across teams
+- **dbt integration** - Sync contracts from your dbt manifest
+- **Web UI** - Visual interface for managing contracts
 
-Full reference: [docs/cli.md](docs/cli.md)
+## How It Works
 
-## API
+1. **Producers** publish contracts (schema + guarantees) for their data assets
+2. **Consumers** register dependencies on contracts they use
+3. **Breaking changes** create proposals requiring consumer acknowledgment
+4. **Non-breaking changes** auto-publish with version bumps
 
-All endpoints under `/api/v1`. Interactive docs at `/docs`.
+## Documentation
 
-| Resource | Endpoints |
-|----------|-----------|
-| Teams | CRUD + restore |
-| Assets | CRUD + restore, dependencies, lineage |
-| Contracts | Publish, list, diff, compare, impact analysis |
-| Registrations | CRUD (consumer dependencies) |
-| Proposals | List, acknowledge, withdraw, force, publish |
-| Sync | Push/pull state, dbt manifest sync |
-| Admin | API keys, webhooks, audit trail |
+Full documentation at [tessera.readthedocs.io](https://tessera.readthedocs.io):
 
-Full reference: [docs/api.md](docs/api.md)
+- [Quickstart Guide](https://tessera.readthedocs.io/getting-started/quickstart/)
+- [dbt Integration](https://tessera.readthedocs.io/guides/dbt-integration/)
+- [API Reference](https://tessera.readthedocs.io/api/overview/)
 
-## dbt Integration
+## License
 
-Tessera extracts contract guarantees directly from dbt tests:
-
-| dbt Test | Tessera Guarantee |
-|----------|-------------------|
-| `not_null` | `nullability: {column: "never"}` |
-| `accepted_values` | `accepted_values: {column: [...]}` |
-| `unique` | `custom: {type: "unique", ...}` |
-| `relationships` | `custom: {type: "relationships", ...}` |
-| `dbt_expectations.*` | `custom: {type: "test_name", ...}` |
-| Singular tests (SQL) | `custom: {type: "singular", sql: "..."}` |
-
-**Singular tests** are SQL files in your `tests/` directory that express business logic assertions. Tessera captures these as contract guarantees — removing them is a breaking change.
-
-```sql
--- tests/assert_revenue_positive.sql
-SELECT revenue_id, amount
-FROM {{ ref('fct_revenue') }}
-WHERE status = 'completed' AND amount <= 0
-```
-
-### WAP (Write-Audit-Publish) Integration
-
-Tessera tracks data quality audit results for visibility into runtime enforcement:
-
-```yaml
-# dbt_project.yml
-on-run-end:
-  - "python scripts/report_to_tessera.py"
-```
-
-The script parses `target/run_results.json` and reports to Tessera:
-
-```bash
-# Environment setup
-export TESSERA_URL=http://localhost:8000
-export TESSERA_API_KEY=your-api-key
-
-# After dbt test
-python scripts/report_to_tessera.py
-```
-
-Query audit history and trends via API:
-```bash
-# Get audit history (paginated)
-curl $TESSERA_URL/api/v1/assets/{asset_id}/audit-history
-
-# Get trends and alerts (failure rates, patterns, alerts)
-curl $TESSERA_URL/api/v1/assets/{asset_id}/audit-trends?days=30
-```
-
-## Deployment
-
-Docker Compose, Kubernetes, and Helm deployment options: [docs/deployment.md](docs/deployment.md)
-
-## Compatibility Modes
-
-| Mode | Breaking if... |
-|------|----------------|
-| `backward` | Remove field, add required, narrow type |
-| `forward` | Add field, remove required, widen type |
-| `full` | Any schema change |
-| `none` | Nothing (notify only) |
-
-## Configuration
-
-| Variable | Description |
-|----------|-------------|
-| `DATABASE_URL` | PostgreSQL or SQLite connection string |
-| `AUTH_DISABLED` | Skip auth for development (`true`/`false`) |
-| `BOOTSTRAP_API_KEY` | Initial admin key for setup |
-| `ENVIRONMENT` | `development` or `production` |
-| `CORS_ORIGINS` | Allowed origins (comma-separated) |
-| `REDIS_URL` | Redis for caching (optional) |
-
-## Database
-
-**PostgreSQL** (production): Full support with migrations via Alembic.
-
-**SQLite** (development): `DATABASE_URL=sqlite+aiosqlite:///:memory:`
-
-## Status
-
-Early development.
+MIT
