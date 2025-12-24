@@ -3,13 +3,14 @@
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.api.auth import Auth, RequireRead, RequireWrite
 from tessera.api.errors import (
     ErrorCode,
+    ForbiddenError,
     NotFoundError,
 )
 from tessera.api.pagination import PaginationParams, paginate, pagination_params
@@ -37,12 +38,9 @@ async def create_registration(
     """
     # Resource-level auth: consumer_team_id must match auth.team_id or be admin
     if registration.consumer_team_id != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": "INSUFFICIENT_PERMISSIONS",
-                "message": "You can only register for contracts on behalf of your own team",
-            },
+        raise ForbiddenError(
+            "You can only register for contracts on behalf of your own team",
+            code=ErrorCode.UNAUTHORIZED_TEAM,
         )
 
     # Verify contract exists
@@ -135,12 +133,9 @@ async def update_registration(
 
     # Resource-level auth: must own the registration's consumer team or be admin
     if registration.consumer_team_id != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": "INSUFFICIENT_PERMISSIONS",
-                "message": "You can only update registrations belonging to your team",
-            },
+        raise ForbiddenError(
+            "You can only update registrations belonging to your team",
+            code=ErrorCode.UNAUTHORIZED_TEAM,
         )
 
     if update.pinned_version is not None:
@@ -175,12 +170,9 @@ async def delete_registration(
 
     # Resource-level auth: must own the registration's consumer team or be admin
     if registration.consumer_team_id != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": "INSUFFICIENT_PERMISSIONS",
-                "message": "You can only delete registrations belonging to your team",
-            },
+        raise ForbiddenError(
+            "You can only delete registrations belonging to your team",
+            code=ErrorCode.UNAUTHORIZED_TEAM,
         )
 
     await session.delete(registration)
