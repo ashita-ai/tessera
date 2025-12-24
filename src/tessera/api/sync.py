@@ -22,6 +22,8 @@ from tessera.db import AssetDB, ContractDB, ProposalDB, RegistrationDB, TeamDB, 
 from tessera.models.enums import CompatibilityMode, ContractStatus, RegistrationStatus, ResourceType
 from tessera.services import validate_json_schema
 from tessera.services.audit import log_contract_published, log_proposal_created
+from tessera.services.graphql import operations_to_assets as graphql_operations_to_assets
+from tessera.services.graphql import parse_graphql_introspection
 from tessera.services.openapi import endpoints_to_assets, parse_openapi
 from tessera.services.schema_diff import check_compatibility, diff_schemas
 
@@ -2085,5 +2087,268 @@ async def import_openapi(
         assets_skipped=assets_skipped,
         contracts_published=contracts_published,
         endpoints=endpoints_results,
+        parse_errors=parse_result.errors,
+    )
+
+
+# =============================================================================
+# GraphQL Import
+# =============================================================================
+
+
+class GraphQLImportRequest(BaseModel):
+    """Request body for GraphQL schema import."""
+
+    introspection: dict[str, Any] = Field(
+        ..., description="GraphQL introspection response (__schema or data.__schema)"
+    )
+    schema_name: str = Field(
+        default="GraphQL API",
+        min_length=1,
+        max_length=100,
+        description="Name for the GraphQL schema (used in FQN generation)",
+    )
+    owner_team_id: UUID = Field(..., description="Team that will own the imported assets")
+    environment: str = Field(
+        default="production", min_length=1, max_length=50, description="Environment for assets"
+    )
+    auto_publish_contracts: bool = Field(
+        default=True, description="Automatically publish contracts for new assets"
+    )
+    dry_run: bool = Field(default=False, description="Preview changes without creating assets")
+
+
+class GraphQLOperationResult(BaseModel):
+    """Result for a single GraphQL operation import."""
+
+    fqn: str
+    operation_name: str
+    operation_type: str  # "query" or "mutation"
+    action: str  # "created", "updated", "skipped", "error"
+    asset_id: str | None = None
+    contract_id: str | None = None
+    error: str | None = None
+
+
+class GraphQLImportResponse(BaseModel):
+    """Response from GraphQL schema import."""
+
+    schema_name: str
+    operations_found: int
+    assets_created: int
+    assets_updated: int
+    assets_skipped: int
+    contracts_published: int
+    operations: list[GraphQLOperationResult]
+    parse_errors: list[str]
+
+
+@router.post("/graphql", response_model=GraphQLImportResponse)
+@limit_admin
+async def import_graphql(
+    request: Request,
+    import_req: GraphQLImportRequest,
+    auth: Auth,
+    _: None = RequireAdmin,
+    session: AsyncSession = Depends(get_session),
+) -> GraphQLImportResponse:
+    """Import assets and contracts from a GraphQL introspection response.
+
+    Parses a GraphQL schema introspection and creates assets for each query/mutation.
+    Each operation becomes an asset with resource_type=graphql_query.
+    The argument and return types are combined into a contract.
+
+    To get an introspection response, run the standard introspection query against
+    your GraphQL endpoint:
+
+    ```graphql
+    query IntrospectionQuery {
+      __schema {
+        queryType { name }
+        mutationType { name }
+        types {
+          kind name description
+          fields { name description args { name type { ...TypeRef } } type { ...TypeRef } }
+          inputFields { name type { ...TypeRef } }
+          enumValues { name description }
+          possibleTypes { name }
+        }
+      }
+    }
+
+    fragment TypeRef on __Type {
+      kind name
+      ofType { kind name ofType { kind name ofType { kind name } } }
+    }
+    ```
+
+    Requires admin scope.
+
+    Behavior:
+    - New operations: Create asset and optionally publish contract
+    - Existing operations: Update metadata, check for schema changes
+    - dry_run=True: Preview changes without persisting
+
+    Returns a summary of what was created/updated.
+    """
+    # Validate owner team exists
+    team_result = await session.execute(select(TeamDB).where(TeamDB.id == import_req.owner_team_id))
+    owner_team = team_result.scalar_one_or_none()
+    if not owner_team:
+        raise NotFoundError(ErrorCode.TEAM_NOT_FOUND, "Owner team not found")
+
+    # Parse the GraphQL introspection
+    parse_result = parse_graphql_introspection(import_req.introspection)
+
+    if not parse_result.operations and parse_result.errors:
+        raise BadRequestError(
+            "Failed to parse GraphQL introspection",
+            code=ErrorCode.INVALID_OPENAPI_SPEC,  # Reuse error code
+            details={"errors": parse_result.errors},
+        )
+
+    # Convert operations to asset definitions
+    asset_defs = graphql_operations_to_assets(
+        parse_result,
+        import_req.owner_team_id,
+        import_req.environment,
+        schema_name_override=import_req.schema_name,
+    )
+
+    # Track results
+    operations_results: list[GraphQLOperationResult] = []
+    assets_created = 0
+    assets_updated = 0
+    assets_skipped = 0
+    contracts_published = 0
+
+    for i, asset_def in enumerate(asset_defs):
+        operation = parse_result.operations[i]
+
+        try:
+            # Check if asset already exists
+            existing_result = await session.execute(
+                select(AssetDB)
+                .where(AssetDB.fqn == asset_def.fqn)
+                .where(AssetDB.environment == import_req.environment)
+                .where(AssetDB.deleted_at.is_(None))
+            )
+            existing_asset = existing_result.scalar_one_or_none()
+
+            if import_req.dry_run:
+                # Dry run - just report what would happen
+                if existing_asset:
+                    operations_results.append(
+                        GraphQLOperationResult(
+                            fqn=asset_def.fqn,
+                            operation_name=operation.name,
+                            operation_type=operation.operation_type,
+                            action="would_update",
+                            asset_id=str(existing_asset.id),
+                        )
+                    )
+                    assets_updated += 1
+                else:
+                    operations_results.append(
+                        GraphQLOperationResult(
+                            fqn=asset_def.fqn,
+                            operation_name=operation.name,
+                            operation_type=operation.operation_type,
+                            action="would_create",
+                        )
+                    )
+                    assets_created += 1
+                    if import_req.auto_publish_contracts:
+                        contracts_published += 1
+                continue
+
+            if existing_asset:
+                # Update existing asset metadata
+                existing_asset.metadata_ = {
+                    **existing_asset.metadata_,
+                    **asset_def.metadata,
+                }
+                existing_asset.resource_type = ResourceType.GRAPHQL_QUERY
+                await session.flush()
+
+                operations_results.append(
+                    GraphQLOperationResult(
+                        fqn=asset_def.fqn,
+                        operation_name=operation.name,
+                        operation_type=operation.operation_type,
+                        action="updated",
+                        asset_id=str(existing_asset.id),
+                    )
+                )
+                assets_updated += 1
+            else:
+                # Create new asset
+                new_asset = AssetDB(
+                    fqn=asset_def.fqn,
+                    owner_team_id=import_req.owner_team_id,
+                    environment=import_req.environment,
+                    resource_type=ResourceType.GRAPHQL_QUERY,
+                    metadata_=asset_def.metadata,
+                )
+                session.add(new_asset)
+                await session.flush()
+                await session.refresh(new_asset)
+
+                contract_id: str | None = None
+
+                # Auto-publish contract if enabled
+                if import_req.auto_publish_contracts:
+                    new_contract = ContractDB(
+                        asset_id=new_asset.id,
+                        version="1.0.0",
+                        schema_def=asset_def.schema_def,
+                        compatibility_mode=CompatibilityMode.BACKWARD,
+                        published_by=import_req.owner_team_id,
+                    )
+                    session.add(new_contract)
+                    await session.flush()
+                    await session.refresh(new_contract)
+
+                    await log_contract_published(
+                        session=session,
+                        contract_id=new_contract.id,
+                        publisher_id=import_req.owner_team_id,
+                        version="1.0.0",
+                    )
+                    contract_id = str(new_contract.id)
+                    contracts_published += 1
+
+                operations_results.append(
+                    GraphQLOperationResult(
+                        fqn=asset_def.fqn,
+                        operation_name=operation.name,
+                        operation_type=operation.operation_type,
+                        action="created",
+                        asset_id=str(new_asset.id),
+                        contract_id=contract_id,
+                    )
+                )
+                assets_created += 1
+
+        except Exception as e:
+            operations_results.append(
+                GraphQLOperationResult(
+                    fqn=asset_def.fqn,
+                    operation_name=operation.name,
+                    operation_type=operation.operation_type,
+                    action="error",
+                    error=str(e),
+                )
+            )
+            assets_skipped += 1
+
+    return GraphQLImportResponse(
+        schema_name=import_req.schema_name,
+        operations_found=len(parse_result.operations),
+        assets_created=assets_created,
+        assets_updated=assets_updated,
+        assets_skipped=assets_skipped,
+        contracts_published=contracts_published,
+        operations=operations_results,
         parse_errors=parse_result.errors,
     )

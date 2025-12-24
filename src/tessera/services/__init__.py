@@ -10,6 +10,16 @@ from tessera.services.audit import (
     log_proposal_force_approved,
     log_proposal_rejected,
 )
+from tessera.services.graphql import (
+    AssetFromGraphQL,
+    GraphQLOperation,
+    GraphQLParseResult,
+    operations_to_assets,
+    parse_graphql_introspection,
+)
+from tessera.services.graphql import (
+    generate_fqn as generate_graphql_fqn,
+)
 from tessera.services.openapi import (
     AssetFromOpenAPI,
     OpenAPIEndpoint,
@@ -60,4 +70,11 @@ __all__ = [
     "endpoints_to_assets",
     "generate_fqn",
     "parse_openapi",
+    # GraphQL parsing
+    "AssetFromGraphQL",
+    "GraphQLOperation",
+    "GraphQLParseResult",
+    "generate_graphql_fqn",
+    "operations_to_assets",
+    "parse_graphql_introspection",
 ]
