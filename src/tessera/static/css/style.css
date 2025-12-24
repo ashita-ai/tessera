@@ -50,8 +50,8 @@ header h1 a {
 }
 
 .logo {
-  height: 24px;
-  max-width: 120px;
+  height: 32px;
+  max-width: 160px;
   object-fit: contain;
   display: block;
 }
