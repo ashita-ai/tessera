@@ -35,7 +35,8 @@ jobs:
               - 'alembic/**'
               - 'docker-compose.yml'
               - 'Dockerfile'
-              - '.github/workflows/**'
+              - 'Dockerfile.prod'
+              - '.github/workflows/ci.yml'
             docs:
               - 'docs/**'
               - 'README.md'
