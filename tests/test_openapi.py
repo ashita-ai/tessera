@@ -395,21 +395,18 @@ class TestOpenAPIImportEndpoint:
             },
         }
 
-    async def test_import_openapi_dry_run(self, client, test_session, sample_openapi_spec) -> None:
+    async def test_import_openapi_dry_run(self, client, sample_openapi_spec) -> None:
         """Test dry run import of OpenAPI spec."""
-        from tessera.db import TeamDB
-
-        # Create a team first
-        team = TeamDB(name="API Team")
-        test_session.add(team)
-        await test_session.flush()
-        await test_session.refresh(team)
+        # Create a team first using the API
+        team_resp = await client.post("/api/v1/teams", json={"name": "API Team"})
+        assert team_resp.status_code == 201
+        team_id = team_resp.json()["id"]
 
         response = await client.post(
             "/api/v1/sync/openapi",
             json={
                 "spec": sample_openapi_spec,
-                "owner_team_id": str(team.id),
+                "owner_team_id": team_id,
                 "dry_run": True,
             },
         )
@@ -427,23 +424,18 @@ class TestOpenAPIImportEndpoint:
         for endpoint in data["endpoints"]:
             assert endpoint["action"] == "would_create"
 
-    async def test_import_openapi_creates_assets(
-        self, client, test_session, sample_openapi_spec
-    ) -> None:
+    async def test_import_openapi_creates_assets(self, client, sample_openapi_spec) -> None:
         """Test that OpenAPI import creates assets and contracts."""
-        from tessera.db import AssetDB, ContractDB, TeamDB
-
-        # Create a team first
-        team = TeamDB(name="API Team 2")
-        test_session.add(team)
-        await test_session.flush()
-        await test_session.refresh(team)
+        # Create a team first using the API
+        team_resp = await client.post("/api/v1/teams", json={"name": "API Team 2"})
+        assert team_resp.status_code == 201
+        team_id = team_resp.json()["id"]
 
         response = await client.post(
             "/api/v1/sync/openapi",
             json={
                 "spec": sample_openapi_spec,
-                "owner_team_id": str(team.id),
+                "owner_team_id": team_id,
                 "auto_publish_contracts": True,
             },
         )
@@ -454,42 +446,33 @@ class TestOpenAPIImportEndpoint:
         assert data["assets_created"] == 2
         assert data["contracts_published"] == 2
 
-        # Verify assets were created in DB
-        from sqlalchemy import select
-
-        assets_result = await test_session.execute(
-            select(AssetDB).where(AssetDB.owner_team_id == team.id)
-        )
-        assets = list(assets_result.scalars().all())
+        # Verify assets via API
+        assets_resp = await client.get(f"/api/v1/assets?owner={team_id}")
+        assert assets_resp.status_code == 200
+        assets = assets_resp.json()["results"]
         assert len(assets) == 2
 
-        # Verify contracts were created
+        # Verify contracts via API
         for asset in assets:
-            assert asset.resource_type == ResourceType.API_ENDPOINT
-            contracts_result = await test_session.execute(
-                select(ContractDB).where(ContractDB.asset_id == asset.id)
-            )
-            contracts = list(contracts_result.scalars().all())
+            assert asset["resource_type"] == "api_endpoint"
+            contracts_resp = await client.get(f"/api/v1/assets/{asset['id']}/contracts")
+            assert contracts_resp.status_code == 200
+            contracts = contracts_resp.json()["results"]
             assert len(contracts) == 1
-            assert contracts[0].version == "1.0.0"
+            assert contracts[0]["version"] == "1.0.0"
 
-    async def test_import_openapi_without_contracts(
-        self, client, test_session, sample_openapi_spec
-    ) -> None:
+    async def test_import_openapi_without_contracts(self, client, sample_openapi_spec) -> None:
         """Test OpenAPI import without auto-publishing contracts."""
-        from tessera.db import AssetDB, ContractDB, TeamDB
-
-        # Create a team first
-        team = TeamDB(name="API Team 3")
-        test_session.add(team)
-        await test_session.flush()
-        await test_session.refresh(team)
+        # Create a team first using the API
+        team_resp = await client.post("/api/v1/teams", json={"name": "API Team 3"})
+        assert team_resp.status_code == 201
+        team_id = team_resp.json()["id"]
 
         response = await client.post(
             "/api/v1/sync/openapi",
             json={
                 "spec": sample_openapi_spec,
-                "owner_team_id": str(team.id),
+                "owner_team_id": team_id,
                 "auto_publish_contracts": False,
             },
         )
@@ -500,19 +483,16 @@ class TestOpenAPIImportEndpoint:
         assert data["assets_created"] == 2
         assert data["contracts_published"] == 0
 
-        # Verify no contracts were created
-        from sqlalchemy import select
-
-        assets_result = await test_session.execute(
-            select(AssetDB).where(AssetDB.owner_team_id == team.id)
-        )
-        assets = list(assets_result.scalars().all())
+        # Verify assets were created but no contracts
+        assets_resp = await client.get(f"/api/v1/assets?owner={team_id}")
+        assert assets_resp.status_code == 200
+        assets = assets_resp.json()["results"]
+        assert len(assets) == 2
 
         for asset in assets:
-            contracts_result = await test_session.execute(
-                select(ContractDB).where(ContractDB.asset_id == asset.id)
-            )
-            contracts = list(contracts_result.scalars().all())
+            contracts_resp = await client.get(f"/api/v1/assets/{asset['id']}/contracts")
+            assert contracts_resp.status_code == 200
+            contracts = contracts_resp.json()["results"]
             assert len(contracts) == 0
 
     async def test_import_openapi_team_not_found(self, client, sample_openapi_spec) -> None:
@@ -527,14 +507,12 @@ class TestOpenAPIImportEndpoint:
 
         assert response.status_code == 404
 
-    async def test_import_openapi_invalid_spec(self, client, test_session) -> None:
+    async def test_import_openapi_invalid_spec(self, client) -> None:
         """Test that import fails with invalid OpenAPI spec."""
-        from tessera.db import TeamDB
-
-        team = TeamDB(name="API Team 4")
-        test_session.add(team)
-        await test_session.flush()
-        await test_session.refresh(team)
+        # Create a team first using the API
+        team_resp = await client.post("/api/v1/teams", json={"name": "API Team 4"})
+        assert team_resp.status_code == 201
+        team_id = team_resp.json()["id"]
 
         response = await client.post(
             "/api/v1/sync/openapi",
@@ -544,7 +522,7 @@ class TestOpenAPIImportEndpoint:
                     "info": {"title": "Old", "version": "1.0"},
                     "paths": {},
                 },
-                "owner_team_id": str(team.id),
+                "owner_team_id": team_id,
             },
         )
 

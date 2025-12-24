@@ -78,26 +78,20 @@
   <div id="owner-filter-banner" style="display: none; margin-bottom: 1rem; padding: 0.75rem; background: var(--bg-secondary); border-radius: 4px;"></div>
 
   <!-- Filters -->
-  <div class="filters" style="margin-bottom: 1rem; display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; padding: 1rem; background: var(--bg-secondary); border-radius: 4px;">
-    <div style="display: flex; align-items: center; gap: 0.5rem;">
-      <label for="search-fqn" style="margin: 0; white-space: nowrap;">FQN:</label>
-      <input type="text" id="search-fqn" placeholder="Search..." style="width: 200px;">
-    </div>
-    <div style="display: flex; align-items: center; gap: 0.5rem;">
-      <label for="filter-team" style="margin: 0; white-space: nowrap;">Team:</label>
-      <select id="filter-team" style="width: 150px;" onchange="onTeamFilterChange()">
-        <option value="">All teams</option>
-      </select>
-    </div>
-    <div style="display: flex; align-items: center; gap: 0.5rem;">
-      <label for="filter-owner" style="margin: 0; white-space: nowrap;">Owner:</label>
-      <select id="filter-owner" style="width: 150px;">
-        <option value="">All owners</option>
-        <option value="unassigned">Unassigned</option>
-      </select>
-    </div>
-    <button onclick="loadAssets()">Filter</button>
-    <button class="secondary" onclick="clearFilters()">Clear</button>
+  <div class="filters" style="margin-bottom: 1rem; display: flex; gap: 0.5rem; align-items: center; padding: 0.5rem 0.75rem; background: var(--bg-secondary); border-radius: 4px;">
+    <label for="search-fqn" style="margin: 0; font-size: 0.9em;">FQN:</label>
+    <input type="text" id="search-fqn" placeholder="Search..." style="width: 180px; padding: 0.3rem 0.5rem;">
+    <label for="filter-team" style="margin: 0 0 0 0.5rem; font-size: 0.9em;">Team:</label>
+    <select id="filter-team" style="width: 140px; padding: 0.3rem;" onchange="onTeamFilterChange()">
+      <option value="">All teams</option>
+    </select>
+    <label for="filter-owner" style="margin: 0 0 0 0.5rem; font-size: 0.9em;">Owner:</label>
+    <select id="filter-owner" style="width: 140px; padding: 0.3rem;">
+      <option value="">All owners</option>
+      <option value="unassigned">Unassigned</option>
+    </select>
+    <button onclick="loadAssets()" style="padding: 0.3rem 0.75rem;">Filter</button>
+    <button class="secondary" onclick="clearFilters()" style="padding: 0.3rem 0.75rem;">Clear</button>
   </div>
 
   <!-- Bulk actions -->
