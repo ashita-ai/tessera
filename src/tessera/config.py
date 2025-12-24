@@ -7,7 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 DEFAULT_SESSION_SECRET = "tessera-dev-secret-key-change-in-production"
 
 
-class Settings(BaseSettings):
+class Settings(BaseSettings):  # type: ignore[misc]
     """Application settings loaded from environment variables."""
 
     model_config = SettingsConfigDict(

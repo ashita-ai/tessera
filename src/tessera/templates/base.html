@@ -29,8 +29,8 @@
         <a href="/assets" {% if active_page == 'assets' %}class="active"{% endif %}>Assets</a>
         <a href="/contracts" {% if active_page == 'contracts' %}class="active"{% endif %}>Contracts</a>
         <a href="/proposals" {% if active_page == 'proposals' %}class="active"{% endif %}>Proposals</a>
-        <a href="/import" {% if active_page == 'import' %}class="active"{% endif %}>Import</a>
         {% if current_user and current_user.role == 'admin' %}
+        <a href="/import" {% if active_page == 'import' %}class="active"{% endif %}>Import</a>
         <a href="/admin/audit" {% if active_page == 'audit' %}class="active"{% endif %}>Audit Log</a>
         {% endif %}
       </nav>

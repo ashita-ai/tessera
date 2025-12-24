@@ -49,6 +49,20 @@
         </label>
       </div>
 
+      <label style="margin-top: 1rem;">Contract Options</label>
+      <div class="checkbox-group" style="margin-top: 0.5rem;">
+        <label class="checkbox-option" style="display: flex; align-items: flex-start; gap: 0.5rem; cursor: pointer;">
+          <input type="checkbox" id="auto-publish" style="margin-top: 0.25rem;">
+          <div>
+            <strong>Auto-publish contracts</strong>
+            <p style="color: var(--gray); font-size: 0.9em; margin: 0.25rem 0 0 0;">
+              Automatically create v1.0.0 contracts from column definitions in the manifest.
+              Without this, only assets are created (no schemas).
+            </p>
+          </div>
+        </label>
+      </div>
+
       <div style="margin-top: 1.5rem; display: flex; gap: 0.5rem;">
         <button type="submit" id="import-btn">Import Manifest</button>
         <a href="/assets" class="secondary" style="padding: 0.6rem 1rem; text-decoration: none;">Cancel</a>
@@ -119,13 +133,14 @@ async function handleImport(event) {
   }
 
   const conflictMode = document.querySelector('input[name="conflict-mode"]:checked').value;
+  const autoPublish = document.getElementById('auto-publish').checked;
 
   const btn = document.getElementById('import-btn');
   btn.disabled = true;
   btn.textContent = 'Importing...';
 
   try {
-    const result = await api.uploadDbtManifest(manifestData, ownerTeamId, conflictMode);
+    const result = await api.uploadDbtManifest(manifestData, ownerTeamId, conflictMode, autoPublish);
 
     const resultDiv = document.getElementById('import-result');
     resultDiv.style.display = 'block';
@@ -136,6 +151,7 @@ async function handleImport(event) {
           <tr><td style="padding: 0.25rem 1rem 0.25rem 0;"><strong>Assets Created:</strong></td><td>${result.assets.created}</td></tr>
           <tr><td style="padding: 0.25rem 1rem 0.25rem 0;"><strong>Assets Updated:</strong></td><td>${result.assets.updated}</td></tr>
           <tr><td style="padding: 0.25rem 1rem 0.25rem 0;"><strong>Assets Skipped:</strong></td><td>${result.assets.skipped}</td></tr>
+          ${result.contracts ? `<tr><td style="padding: 0.25rem 1rem 0.25rem 0;"><strong>Contracts Published:</strong></td><td>${result.contracts.published}</td></tr>` : ''}
           <tr><td style="padding: 0.25rem 1rem 0.25rem 0;"><strong>Guarantees Extracted:</strong></td><td>${result.guarantees_extracted}</td></tr>
         </table>
         <p style="margin-bottom: 0; margin-top: 1rem;">

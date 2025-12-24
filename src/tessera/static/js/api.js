@@ -284,13 +284,14 @@ class TesseraAPI {
   }
 
   // Sync / Import
-  async uploadDbtManifest(manifest, ownerTeamId, conflictMode = 'ignore') {
+  async uploadDbtManifest(manifest, ownerTeamId, conflictMode = 'ignore', autoPublishContracts = false) {
     return this.request('/sync/dbt/upload', {
       method: 'POST',
       body: JSON.stringify({
         manifest: manifest,
         owner_team_id: ownerTeamId,
         conflict_mode: conflictMode,
+        auto_publish_contracts: autoPublishContracts,
       }),
     });
   }

@@ -288,12 +288,14 @@ async def proposal_detail(
     )
 
 
-@router.get("/import", response_class=HTMLResponse)
+@router.get("/import", response_class=HTMLResponse, response_model=None)
 async def import_page(
     request: Request,
     current_user: dict[str, Any] = Depends(require_current_user),
-) -> HTMLResponse:
-    """Import manifest page."""
+) -> Response:
+    """Import manifest page (admin only)."""
+    if current_user.get("role") != "admin":
+        return RedirectResponse(url="/", status_code=302)
     return templates.TemplateResponse(
         "import.html",
         make_context(request, "import", current_user),

@@ -40,10 +40,12 @@
       <span class="quick-action-icon">+</span>
       <span>Create Asset</span>
     </a>
+    {% if current_user and current_user.role == 'admin' %}
     <a href="/import" class="quick-action">
       <span class="quick-action-icon">&#8593;</span>
       <span>Import dbt Manifest</span>
     </a>
+    {% endif %}
   </div>
 </section>
 
