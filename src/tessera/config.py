@@ -1,7 +1,5 @@
 """Application configuration."""
 
-from pathlib import Path
-
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -45,9 +43,6 @@ class Settings(BaseSettings):
         if isinstance(v, str):
             return [origin.strip() for origin in v.split(",") if origin.strip()]
         return v
-
-    # Git sync (optional - must be explicitly configured for sync endpoints)
-    git_sync_path: Path | None = None
 
     # Webhooks
     webhook_url: str | None = None
