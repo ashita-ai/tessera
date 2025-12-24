@@ -6,75 +6,6 @@
 <section>
   <h2>Assets</h2>
 
-  <div style="margin-bottom: 1rem;">
-    <button onclick="showCreateForm()">+ New Asset</button>
-  </div>
-
-  <div id="create-form" style="display: none; margin-bottom: 2rem;">
-    <div class="card">
-      <h3>Create Asset with Initial Contract</h3>
-      <form onsubmit="createAsset(event)">
-        <label for="asset-fqn">Fully Qualified Name</label>
-        <input type="text" id="asset-fqn" name="fqn" required placeholder="e.g., warehouse.schema.table">
-
-        <label for="asset-owner">Owner Team</label>
-        <select id="asset-owner" name="owner_team_id" required>
-          <option value="">Select team...</option>
-        </select>
-
-        <label for="asset-description">Description (optional)</label>
-        <textarea id="asset-description" name="description" rows="2" placeholder="Describe this asset..."></textarea>
-
-        <fieldset style="border: 1px solid var(--gray); padding: 1rem; margin: 1rem 0; border-radius: 4px;">
-          <legend><strong>Initial Schema</strong></legend>
-
-          <label for="schema-template">Start from template</label>
-          <select id="schema-template" onchange="applySchemaTemplate()">
-            <option value="">Custom schema...</option>
-            <option value="basic-table">Basic Table (id, name, created_at)</option>
-            <option value="user-table">User Table (id, email, name, role)</option>
-            <option value="event-table">Event Table (id, event_type, user_id, timestamp, payload)</option>
-            <option value="fact-table">Fact Table (id, dimensions, metrics, date)</option>
-            <option value="dimension-table">Dimension Table (id, name, description, is_active)</option>
-          </select>
-
-          <div id="schema-builder" style="margin-top: 1rem;">
-            <p style="color: var(--gray); margin-bottom: 0.5rem;">Define columns:</p>
-            <div id="columns-container">
-              <div class="column-row" style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
-                <input type="text" class="col-name" placeholder="Column name" style="flex: 2;" required>
-                <select class="col-type" style="flex: 1;" required>
-                  <option value="string">string</option>
-                  <option value="integer">integer</option>
-                  <option value="number">number</option>
-                  <option value="boolean">boolean</option>
-                  <option value="object">object</option>
-                  <option value="array">array</option>
-                </select>
-                <label style="display: flex; align-items: center; gap: 0.25rem;">
-                  <input type="checkbox" class="col-required" checked> Required
-                </label>
-                <button type="button" class="secondary" onclick="removeColumn(this)" style="padding: 0.25rem 0.5rem;">X</button>
-              </div>
-            </div>
-            <button type="button" class="secondary" onclick="addColumn()" style="margin-top: 0.5rem;">+ Add Column</button>
-          </div>
-
-          <label for="compatibility-mode" style="margin-top: 1rem;">Compatibility Mode</label>
-          <select id="compatibility-mode" required>
-            <option value="backward" selected>Backward (consumers safe from breaking changes)</option>
-            <option value="forward">Forward (producers can add fields)</option>
-            <option value="full">Full (strictest - any change breaks)</option>
-            <option value="none">None (no compatibility checks)</option>
-          </select>
-        </fieldset>
-
-        <button type="submit">Create Asset & Publish Contract</button>
-        <button type="button" class="secondary" onclick="hideCreateForm()">Cancel</button>
-      </form>
-    </div>
-  </div>
-
   <div id="owner-filter-banner" style="display: none; margin-bottom: 1rem; padding: 0.75rem; background: var(--bg-secondary); border-radius: 4px;"></div>
 
   <!-- Filters -->
@@ -89,6 +20,18 @@
     <select id="filter-owner" style="width: 140px; padding: 0.3rem;">
       <option value="">All owners</option>
       <option value="unassigned">Unassigned</option>
+    </select>
+    <label for="filter-type" style="margin: 0 0 0 0.5rem; font-size: 0.9em;">Type:</label>
+    <select id="filter-type" style="width: 120px; padding: 0.3rem;">
+      <option value="">All types</option>
+      <option value="model">Model</option>
+      <option value="source">Source</option>
+      <option value="seed">Seed</option>
+      <option value="snapshot">Snapshot</option>
+      <option value="api_endpoint">API Endpoint</option>
+      <option value="grpc_service">gRPC Service</option>
+      <option value="graphql_query">GraphQL</option>
+      <option value="external">External</option>
     </select>
     <button onclick="loadAssets()" style="padding: 0.3rem 0.75rem;">Filter</button>
     <button class="secondary" onclick="clearFilters()" style="padding: 0.3rem 0.75rem;">Clear</button>
@@ -132,201 +75,24 @@ let allUsers = [];  // Store all users with team_id for intelligent filtering
 
 // Resource type badge styling
 const typeColors = {
-  'model': { bg: '#e3f2fd', color: '#1565c0', icon: '📊' },
-  'seed': { bg: '#fff3e0', color: '#e65100', icon: '📁' },
-  'source': { bg: '#f3e5f5', color: '#7b1fa2', icon: '🔌' },
-  'snapshot': { bg: '#e8f5e9', color: '#2e7d32', icon: '📸' },
+  // dbt types
+  'model': { bg: '#e3f2fd', color: '#1565c0', label: 'model' },
+  'seed': { bg: '#fff3e0', color: '#e65100', label: 'seed' },
+  'source': { bg: '#f3e5f5', color: '#7b1fa2', label: 'source' },
+  'snapshot': { bg: '#e8f5e9', color: '#2e7d32', label: 'snapshot' },
+  // API types
+  'api_endpoint': { bg: '#e8eaf6', color: '#3949ab', label: 'api' },
+  'grpc_service': { bg: '#fce4ec', color: '#c2185b', label: 'grpc' },
+  'graphql_query': { bg: '#ede7f6', color: '#7b1fa2', label: 'graphql' },
+  // Other
+  'external': { bg: '#eceff1', color: '#546e7a', label: 'external' },
+  'unknown': { bg: '#f5f5f5', color: '#616161', label: 'unknown' },
 };
 
-function getTypeBadge(metadata) {
-  const resourceType = (metadata && metadata.resource_type) || 'model';
-  const style = typeColors[resourceType] || { bg: '#f5f5f5', color: '#616161', icon: '📦' };
-  return `<span style="display: inline-block; padding: 0.15rem 0.4rem; font-size: 0.75em; background: ${style.bg}; color: ${style.color}; border-radius: 3px; margin-left: 0.5rem; vertical-align: middle;">${style.icon} ${resourceType}</span>`;
-}
-
-const schemaTemplates = {
-  'basic-table': [
-    { name: 'id', type: 'integer', required: true },
-    { name: 'name', type: 'string', required: true },
-    { name: 'created_at', type: 'string', required: true },
-  ],
-  'user-table': [
-    { name: 'id', type: 'integer', required: true },
-    { name: 'email', type: 'string', required: true },
-    { name: 'name', type: 'string', required: true },
-    { name: 'role', type: 'string', required: false },
-    { name: 'created_at', type: 'string', required: true },
-    { name: 'updated_at', type: 'string', required: false },
-  ],
-  'event-table': [
-    { name: 'id', type: 'integer', required: true },
-    { name: 'event_type', type: 'string', required: true },
-    { name: 'user_id', type: 'integer', required: false },
-    { name: 'timestamp', type: 'string', required: true },
-    { name: 'payload', type: 'object', required: false },
-  ],
-  'fact-table': [
-    { name: 'id', type: 'integer', required: true },
-    { name: 'date_key', type: 'integer', required: true },
-    { name: 'dimension_key', type: 'integer', required: true },
-    { name: 'metric_value', type: 'number', required: true },
-    { name: 'metric_count', type: 'integer', required: true },
-  ],
-  'dimension-table': [
-    { name: 'id', type: 'integer', required: true },
-    { name: 'name', type: 'string', required: true },
-    { name: 'description', type: 'string', required: false },
-    { name: 'is_active', type: 'boolean', required: true },
-    { name: 'created_at', type: 'string', required: true },
-  ],
-};
-
-function showCreateForm() {
-  document.getElementById('create-form').style.display = 'block';
-  loadTeamsForSelect();
-}
-
-function hideCreateForm() {
-  document.getElementById('create-form').style.display = 'none';
-  document.getElementById('asset-fqn').value = '';
-  document.getElementById('asset-description').value = '';
-  document.getElementById('schema-template').value = '';
-  document.getElementById('columns-container').innerHTML = `
-    <div class="column-row" style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
-      <input type="text" class="col-name" placeholder="Column name" style="flex: 2;" required>
-      <select class="col-type" style="flex: 1;" required>
-        <option value="string">string</option>
-        <option value="integer">integer</option>
-        <option value="number">number</option>
-        <option value="boolean">boolean</option>
-        <option value="object">object</option>
-        <option value="array">array</option>
-      </select>
-      <label style="display: flex; align-items: center; gap: 0.25rem;">
-        <input type="checkbox" class="col-required" checked> Required
-      </label>
-      <button type="button" class="secondary" onclick="removeColumn(this)" style="padding: 0.25rem 0.5rem;">X</button>
-    </div>
-  `;
-}
-
-function addColumn(name = '', type = 'string', required = true) {
-  const container = document.getElementById('columns-container');
-  const row = document.createElement('div');
-  row.className = 'column-row';
-  row.style = 'display: flex; gap: 0.5rem; margin-bottom: 0.5rem;';
-  row.innerHTML = `
-    <input type="text" class="col-name" placeholder="Column name" style="flex: 2;" value="${escapeHtml(name)}" required>
-    <select class="col-type" style="flex: 1;" required>
-      <option value="string" ${type === 'string' ? 'selected' : ''}>string</option>
-      <option value="integer" ${type === 'integer' ? 'selected' : ''}>integer</option>
-      <option value="number" ${type === 'number' ? 'selected' : ''}>number</option>
-      <option value="boolean" ${type === 'boolean' ? 'selected' : ''}>boolean</option>
-      <option value="object" ${type === 'object' ? 'selected' : ''}>object</option>
-      <option value="array" ${type === 'array' ? 'selected' : ''}>array</option>
-    </select>
-    <label style="display: flex; align-items: center; gap: 0.25rem;">
-      <input type="checkbox" class="col-required" ${required ? 'checked' : ''}> Required
-    </label>
-    <button type="button" class="secondary" onclick="removeColumn(this)" style="padding: 0.25rem 0.5rem;">X</button>
-  `;
-  container.appendChild(row);
-}
-
-function removeColumn(button) {
-  const container = document.getElementById('columns-container');
-  if (container.children.length > 1) {
-    button.closest('.column-row').remove();
-  } else {
-    showError('Must have at least one column');
-  }
-}
-
-function applySchemaTemplate() {
-  const template = document.getElementById('schema-template').value;
-  if (!template || !schemaTemplates[template]) return;
-
-  const container = document.getElementById('columns-container');
-  container.innerHTML = '';
-
-  schemaTemplates[template].forEach(col => {
-    addColumn(col.name, col.type, col.required);
-  });
-}
-
-function buildSchemaFromForm() {
-  const rows = document.querySelectorAll('#columns-container .column-row');
-  const properties = {};
-  const required = [];
-
-  rows.forEach(row => {
-    const name = row.querySelector('.col-name').value.trim();
-    const type = row.querySelector('.col-type').value;
-    const isRequired = row.querySelector('.col-required').checked;
-
-    if (name) {
-      properties[name] = { type };
-      if (isRequired) {
-        required.push(name);
-      }
-    }
-  });
-
-  return {
-    type: 'object',
-    properties,
-    required: required.length > 0 ? required : undefined,
-  };
-}
-
-async function loadTeamsForSelect() {
-  try {
-    const data = await api.listTeams({ limit: 100 });
-    const select = document.getElementById('asset-owner');
-    select.innerHTML = '<option value="">Select team...</option>' +
-      data.results.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
-  } catch (error) {
-    showError('Failed to load teams');
-  }
-}
-
-async function createAsset(event) {
-  event.preventDefault();
-  const fqn = document.getElementById('asset-fqn').value.trim();
-  const owner_team_id = document.getElementById('asset-owner').value;
-  const description = document.getElementById('asset-description').value.trim();
-  const compatibilityMode = document.getElementById('compatibility-mode').value;
-
-  if (!fqn || !owner_team_id) return;
-
-  // Build schema from form
-  const schema = buildSchemaFromForm();
-  if (Object.keys(schema.properties).length === 0) {
-    showError('Please define at least one column in the schema');
-    return;
-  }
-
-  try {
-    // Create asset first
-    const asset = await api.createAsset({
-      fqn,
-      owner_team_id,
-      description: description || undefined,
-    });
-
-    // Then publish the initial contract
-    await api.publishContract(asset.id, {
-      version: '1.0.0',
-      schema: schema,
-      compatibility_mode: compatibilityMode,
-    }, owner_team_id);
-
-    hideCreateForm();
-    showSuccess(`Asset "${fqn}" created with initial contract v1.0.0`);
-    loadAssets();
-  } catch (error) {
-    showError(error.message);
-  }
+function getTypeBadge(asset) {
+  const resourceType = asset.resource_type || 'model';
+  const style = typeColors[resourceType] || { bg: '#f5f5f5', color: '#616161', label: resourceType };
+  return `<span style="display: inline-block; padding: 0.15rem 0.4rem; font-size: 0.75em; background: ${style.bg}; color: ${style.color}; border-radius: 3px; margin-left: 0.5rem; vertical-align: middle;">${style.label}</span>`;
 }
 
 async function deleteAsset(id, fqn) {
@@ -363,6 +129,7 @@ async function loadAssets() {
   const searchFqn = document.getElementById('search-fqn').value.trim();
   const filterTeam = document.getElementById('filter-team').value;
   const filterOwner = document.getElementById('filter-owner').value;
+  const filterType = document.getElementById('filter-type').value;
 
   // Get filter from URL query params (for links from other pages)
   const urlParams = new URLSearchParams(window.location.search);
@@ -404,6 +171,7 @@ async function loadAssets() {
     if (ownerTeamFilter) params.owner = ownerTeamFilter;
     if (ownerUserFilter) params.owner_user = ownerUserFilter;
     if (showUnowned) params.unowned = true;
+    if (filterType) params.resource_type = filterType;
 
     const data = await api.listAssets(params);
 
@@ -429,7 +197,7 @@ async function loadAssets() {
           ${data.results.map(asset => `
             <tr>
               <td><input type="checkbox" class="asset-checkbox" data-id="${asset.id}" ${selectedAssets.has(asset.id) ? 'checked' : ''} onchange="toggleAssetSelection('${asset.id}', this.checked)"></td>
-              <td><a href="/assets/${asset.id}">${escapeHtml(asset.fqn)}</a>${getTypeBadge(asset.metadata || asset.metadata_)}</td>
+              <td><a href="/assets/${asset.id}">${escapeHtml(asset.fqn)}</a>${getTypeBadge(asset)}</td>
               <td>${asset.owner_user_name ? `<a href="/users/${asset.owner_user_id}">${escapeHtml(asset.owner_user_name)}</a>` : '<span style="color: var(--gray);">-</span>'}</td>
               <td><a href="/teams/${asset.owner_team_id}">${escapeHtml(asset.owner_team_name || asset.owner_team_id)}</a></td>
               <td>${asset.active_contract_version || '<span style="color: var(--gray);">-</span>'}</td>
@@ -599,6 +367,7 @@ function clearFilters() {
   document.getElementById('search-fqn').value = '';
   document.getElementById('filter-team').value = '';
   document.getElementById('filter-owner').value = '';
+  document.getElementById('filter-type').value = '';
   window.history.replaceState({}, '', '/assets');
   loadAssets();
 }

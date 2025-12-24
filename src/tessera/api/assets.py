@@ -39,7 +39,13 @@ from tessera.models import (
     ContractCreate,
     Proposal,
 )
-from tessera.models.enums import APIKeyScope, AuditRunStatus, ContractStatus, RegistrationStatus
+from tessera.models.enums import (
+    APIKeyScope,
+    AuditRunStatus,
+    ContractStatus,
+    RegistrationStatus,
+    ResourceType,
+)
 from tessera.services import (
     check_compatibility,
     diff_schemas,
@@ -169,6 +175,7 @@ async def list_assets(
     unowned: bool = Query(False, description="Filter to assets without a user owner"),
     fqn: str | None = Query(None, description="Filter by FQN pattern (case-insensitive)"),
     environment: str | None = Query(None, description="Filter by environment"),
+    resource_type: ResourceType | None = Query(None, description="Filter by resource type"),
     sort_by: str | None = Query(None, description="Sort by field (fqn, owner, created_at)"),
     sort_order: str = Query("asc", description="Sort order (asc, desc)"),
     params: PaginationParams = Depends(pagination_params),
@@ -215,6 +222,9 @@ async def list_assets(
     if environment:
         query = query.where(AssetDB.environment == environment)
         count_base = count_base.where(AssetDB.environment == environment)
+    if resource_type:
+        query = query.where(AssetDB.resource_type == resource_type)
+        count_base = count_base.where(AssetDB.resource_type == resource_type)
 
     # Apply sorting
     sort_column: Any = AssetDB.fqn  # default
