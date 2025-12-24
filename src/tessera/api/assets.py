@@ -123,7 +123,8 @@ async def create_asset(
         user_team_name = await _get_team_name(session, auth.team_id)
         raise ForbiddenError(
             f"Cannot create asset for team '{target_team.name}'. "
-            f"Your team is '{user_team_name}'. Use an admin API key to create assets for other teams.",
+            f"Your team is '{user_team_name}'. "
+            "Use an admin API key to create assets for other teams.",
             code=ErrorCode.UNAUTHORIZED_TEAM,
         )
 
@@ -461,7 +462,8 @@ async def update_asset(
         asset_team_name = await _get_team_name(session, asset.owner_team_id)
         raise ForbiddenError(
             f"Cannot update asset '{asset.fqn}' owned by team '{asset_team_name}'. "
-            f"Your team is '{user_team_name}'. Use an admin API key to update assets for other teams.",
+            f"Your team is '{user_team_name}'. "
+            "Use an admin API key to update assets for other teams.",
             code=ErrorCode.UNAUTHORIZED_TEAM,
         )
 
@@ -532,7 +534,8 @@ async def delete_asset(
         asset_team_name = await _get_team_name(session, asset.owner_team_id)
         raise ForbiddenError(
             f"Cannot delete asset '{asset.fqn}' owned by team '{asset_team_name}'. "
-            f"Your team is '{user_team_name}'. Use an admin API key to delete assets for other teams.",
+            f"Your team is '{user_team_name}'. "
+            "Use an admin API key to delete assets for other teams.",
             code=ErrorCode.UNAUTHORIZED_TEAM,
         )
 
@@ -677,8 +680,9 @@ async def create_contract(
         user_team_name = await _get_team_name(session, auth.team_id)
         asset_team_name = await _get_team_name(session, asset.owner_team_id)
         raise ForbiddenError(
-            f"Cannot publish contract for asset '{asset.fqn}' owned by team '{asset_team_name}'. "
-            f"Your team is '{user_team_name}'. Use an admin API key to publish contracts for other teams.",
+            f"Cannot publish contract for asset '{asset.fqn}' owned by '{asset_team_name}'. "
+            f"Your team is '{user_team_name}'. "
+            "Use an admin API key to publish contracts for other teams.",
             code=ErrorCode.UNAUTHORIZED_TEAM,
         )
 
@@ -693,7 +697,8 @@ async def create_contract(
         user_team_name = await _get_team_name(session, auth.team_id)
         raise ForbiddenError(
             f"Cannot publish contract on behalf of team '{publisher_team.name}'. "
-            f"Your team is '{user_team_name}'. Use an admin API key to publish on behalf of other teams.",
+            f"Your team is '{user_team_name}'. "
+            "Use an admin API key to publish on behalf of other teams.",
             code=ErrorCode.UNAUTHORIZED_TEAM,
         )
 
