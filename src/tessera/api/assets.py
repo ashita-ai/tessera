@@ -92,6 +92,13 @@ def bump_version(current: str, bump_type: str) -> str:
         return f"{major}.{minor + 1}.0"
 
 
+async def _get_team_name(session: AsyncSession, team_id: UUID) -> str:
+    """Get team name by ID, returns 'unknown' if not found."""
+    result = await session.execute(select(TeamDB.name).where(TeamDB.id == team_id))
+    name = result.scalar_one_or_none()
+    return name if name else "unknown"
+
+
 @router.post("", response_model=Asset, status_code=201)
 @limit_write
 async def create_asset(
@@ -105,17 +112,20 @@ async def create_asset(
 
     Requires write scope.
     """
+    # Validate owner team exists first (needed for better error messages)
+    result = await session.execute(select(TeamDB).where(TeamDB.id == asset.owner_team_id))
+    target_team = result.scalar_one_or_none()
+    if not target_team:
+        raise NotFoundError(ErrorCode.TEAM_NOT_FOUND, "Owner team not found")
+
     # Resource-level auth: must own the team or be admin
     if asset.owner_team_id != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):
+        user_team_name = await _get_team_name(session, auth.team_id)
         raise ForbiddenError(
-            "You can only create assets for teams you belong to",
+            f"Cannot create asset for team '{target_team.name}'. "
+            f"Your team is '{user_team_name}'. Use an admin API key to create assets for other teams.",
             code=ErrorCode.UNAUTHORIZED_TEAM,
         )
-
-    # Validate owner team exists
-    result = await session.execute(select(TeamDB).where(TeamDB.id == asset.owner_team_id))
-    if not result.scalar_one_or_none():
-        raise NotFoundError(ErrorCode.TEAM_NOT_FOUND, "Owner team not found")
 
     # Validate owner user exists and belongs to owner team if provided
     if asset.owner_user_id:
@@ -447,8 +457,11 @@ async def update_asset(
 
     # Resource-level auth: must own the asset's team or be admin
     if asset.owner_team_id != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):
+        user_team_name = await _get_team_name(session, auth.team_id)
+        asset_team_name = await _get_team_name(session, asset.owner_team_id)
         raise ForbiddenError(
-            "You can only update assets belonging to your team",
+            f"Cannot update asset '{asset.fqn}' owned by team '{asset_team_name}'. "
+            f"Your team is '{user_team_name}'. Use an admin API key to update assets for other teams.",
             code=ErrorCode.UNAUTHORIZED_TEAM,
         )
 
@@ -515,8 +528,11 @@ async def delete_asset(
 
     # Resource-level auth
     if asset.owner_team_id != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):
+        user_team_name = await _get_team_name(session, auth.team_id)
+        asset_team_name = await _get_team_name(session, asset.owner_team_id)
         raise ForbiddenError(
-            "You can only delete assets belonging to your team",
+            f"Cannot delete asset '{asset.fqn}' owned by team '{asset_team_name}'. "
+            f"Your team is '{user_team_name}'. Use an admin API key to delete assets for other teams.",
             code=ErrorCode.UNAUTHORIZED_TEAM,
         )
 
@@ -658,8 +674,11 @@ async def create_contract(
 
     # Resource-level auth: must own the asset's team or be admin
     if asset.owner_team_id != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):
+        user_team_name = await _get_team_name(session, auth.team_id)
+        asset_team_name = await _get_team_name(session, asset.owner_team_id)
         raise ForbiddenError(
-            "You can only publish contracts for assets belonging to your team",
+            f"Cannot publish contract for asset '{asset.fqn}' owned by team '{asset_team_name}'. "
+            f"Your team is '{user_team_name}'. Use an admin API key to publish contracts for other teams.",
             code=ErrorCode.UNAUTHORIZED_TEAM,
         )
 
@@ -671,8 +690,10 @@ async def create_contract(
 
     # Resource-level auth: published_by must match auth.team_id or be admin
     if published_by != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):
+        user_team_name = await _get_team_name(session, auth.team_id)
         raise ForbiddenError(
-            "You can only publish contracts on behalf of your own team",
+            f"Cannot publish contract on behalf of team '{publisher_team.name}'. "
+            f"Your team is '{user_team_name}'. Use an admin API key to publish on behalf of other teams.",
             code=ErrorCode.UNAUTHORIZED_TEAM,
         )
 

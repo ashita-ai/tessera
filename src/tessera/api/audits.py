@@ -9,14 +9,15 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.api.auth import Auth
+from tessera.api.errors import ErrorCode, ForbiddenError, NotFoundError
 from tessera.db import AssetDB, AuditRunDB, ContractDB, get_session
-from tessera.models.enums import AuditRunStatus, ContractStatus
+from tessera.models.enums import APIKeyScope, AuditRunStatus, ContractStatus
 
 # Size limits for JSON fields (in bytes when serialized)
 MAX_METADATA_SIZE = 10 * 1024  # 10KB per guarantee metadata
@@ -207,7 +208,14 @@ async def report_audit_result(
     )
     asset = asset_result.scalar_one_or_none()
     if not asset:
-        raise HTTPException(status_code=404, detail=f"Asset {asset_id} not found")
+        raise NotFoundError(ErrorCode.ASSET_NOT_FOUND, f"Asset {asset_id} not found")
+
+    # Resource-level auth: must own the asset's team or be admin
+    if asset.owner_team_id != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):
+        raise ForbiddenError(
+            "Cannot report audit results for assets owned by other teams",
+            code=ErrorCode.UNAUTHORIZED_TEAM,
+        )
 
     # Get active contract if one exists
     contract_result = await session.execute(
@@ -284,7 +292,14 @@ async def get_audit_history(
     )
     asset = asset_result.scalar_one_or_none()
     if not asset:
-        raise HTTPException(status_code=404, detail=f"Asset {asset_id} not found")
+        raise NotFoundError(ErrorCode.ASSET_NOT_FOUND, f"Asset {asset_id} not found")
+
+    # Resource-level auth: must own the asset's team or be admin
+    if asset.owner_team_id != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):
+        raise ForbiddenError(
+            "Cannot view audit history for assets owned by other teams",
+            code=ErrorCode.UNAUTHORIZED_TEAM,
+        )
 
     # Build query with filters
     query = select(AuditRunDB).where(AuditRunDB.asset_id == asset_id)
@@ -403,7 +418,14 @@ async def get_audit_trends(
     )
     asset = asset_result.scalar_one_or_none()
     if not asset:
-        raise HTTPException(status_code=404, detail=f"Asset {asset_id} not found")
+        raise NotFoundError(ErrorCode.ASSET_NOT_FOUND, f"Asset {asset_id} not found")
+
+    # Resource-level auth: must own the asset's team or be admin
+    if asset.owner_team_id != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):
+        raise ForbiddenError(
+            "Cannot view audit trends for assets owned by other teams",
+            code=ErrorCode.UNAUTHORIZED_TEAM,
+        )
 
     # Get all runs from the last 30 days
     cutoff_30d = datetime.now(UTC) - timedelta(days=30)

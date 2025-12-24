@@ -13,6 +13,7 @@ from tessera.api.errors import (
     BadRequestError,
     DuplicateError,
     ErrorCode,
+    ForbiddenError,
     NotFoundError,
 )
 from tessera.api.pagination import PaginationParams, paginate, pagination_params
@@ -115,6 +116,21 @@ async def delete_dependency(
     session: AsyncSession = Depends(get_session),
 ) -> None:
     """Remove an upstream dependency."""
+    # First fetch the asset to check ownership
+    asset_result = await session.execute(
+        select(AssetDB).where(AssetDB.id == asset_id).where(AssetDB.deleted_at.is_(None))
+    )
+    asset = asset_result.scalar_one_or_none()
+    if not asset:
+        raise NotFoundError(ErrorCode.ASSET_NOT_FOUND, "Asset not found")
+
+    # Resource-level auth: must own the asset's team or be admin
+    if asset.owner_team_id != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):
+        raise ForbiddenError(
+            "Cannot delete dependencies for assets owned by other teams",
+            code=ErrorCode.UNAUTHORIZED_TEAM,
+        )
+
     result = await session.execute(
         select(AssetDependencyDB)
         .where(AssetDependencyDB.id == dependency_id)

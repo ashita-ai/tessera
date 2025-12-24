@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.api.auth import Auth, RequireRead
-from tessera.api.errors import BadRequestError, ErrorCode, NotFoundError
+from tessera.api.errors import BadRequestError, ErrorCode, ForbiddenError, NotFoundError
 from tessera.api.rate_limit import limit_read
 from tessera.config import settings
 from tessera.db import (
@@ -19,7 +19,7 @@ from tessera.db import (
     TeamDB,
     get_session,
 )
-from tessera.models.enums import ContractStatus, RegistrationStatus
+from tessera.models.enums import APIKeyScope, ContractStatus, RegistrationStatus
 from tessera.services import diff_schemas, validate_json_schema
 
 router = APIRouter()
@@ -47,10 +47,19 @@ async def analyze_impact(
             f"Invalid JSON Schema: {'; '.join(errors) if errors else 'Schema validation failed'}"
         )
 
-    asset_result = await session.execute(select(AssetDB).where(AssetDB.id == asset_id))
+    asset_result = await session.execute(
+        select(AssetDB).where(AssetDB.id == asset_id).where(AssetDB.deleted_at.is_(None))
+    )
     asset = asset_result.scalar_one_or_none()
     if not asset:
         raise NotFoundError(ErrorCode.ASSET_NOT_FOUND, "Asset not found")
+
+    # Resource-level auth: must own the asset's team or be admin
+    if asset.owner_team_id != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):
+        raise ForbiddenError(
+            "Cannot analyze impact for assets owned by other teams",
+            code=ErrorCode.UNAUTHORIZED_TEAM,
+        )
 
     contract_result = await session.execute(
         select(ContractDB)
