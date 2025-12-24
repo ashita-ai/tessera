@@ -9,7 +9,7 @@ from fastapi import Request
 
 from tessera.api.assets import get_asset
 from tessera.db.models import AssetDB
-from tessera.models.enums import GuaranteeMode
+from tessera.models.enums import GuaranteeMode, ResourceType
 from tessera.services.cache import (
     CacheService,
     cache_asset,
@@ -104,7 +104,7 @@ class TestCaching:
             + b'", "fqn": "cached.asset", "owner_team_id": "'
             + team_id.encode()
             + b'", "metadata": {}, "created_at": "2023-01-01T00:00:00Z", '
-            + b'"environment": "production", "guarantee_mode": "notify"}'
+            + b'"environment": "production", "guarantee_mode": "notify", "resource_type": "model"}'
         )
 
         res = await get_asset(
@@ -124,6 +124,7 @@ class TestCaching:
             metadata_={},
             created_at=datetime.now(UTC),
             guarantee_mode=GuaranteeMode.NOTIFY,
+            resource_type=ResourceType.MODEL,
         )
         # The query returns a 4-tuple: (asset, team_name, user_name, user_email)
         mock_result = MagicMock()
@@ -155,6 +156,7 @@ class TestCaching:
             metadata_={},
             created_at=datetime.now(UTC),
             guarantee_mode=GuaranteeMode.NOTIFY,
+            resource_type=ResourceType.MODEL,
         )
         # The query returns a 4-tuple: (asset, team_name, user_name, user_email)
         mock_result = MagicMock()

@@ -107,3 +107,25 @@ class AuditRunStatus(StrEnum):
     PASSED = "passed"  # All guarantees passed
     FAILED = "failed"  # One or more guarantees failed
     PARTIAL = "partial"  # Some guarantees skipped or errored
+
+
+class ResourceType(StrEnum):
+    """Type of asset resource.
+
+    Supports both data warehouse assets (dbt) and external services (APIs).
+    """
+
+    # Data warehouse types (dbt)
+    MODEL = "model"  # dbt model
+    SOURCE = "source"  # dbt source
+    SEED = "seed"  # dbt seed
+    SNAPSHOT = "snapshot"  # dbt snapshot
+
+    # API types
+    API_ENDPOINT = "api_endpoint"  # REST API endpoint
+    GRPC_SERVICE = "grpc_service"  # gRPC service
+    GRAPHQL_QUERY = "graphql_query"  # GraphQL query/mutation
+
+    # Other
+    EXTERNAL = "external"  # Generic external asset
+    UNKNOWN = "unknown"  # Unclassified

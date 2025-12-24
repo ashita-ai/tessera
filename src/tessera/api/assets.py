@@ -145,6 +145,7 @@ async def create_asset(
         owner_team_id=asset.owner_team_id,
         owner_user_id=asset.owner_user_id,
         environment=asset.environment,
+        resource_type=asset.resource_type,
         metadata_=asset.metadata,
     )
     session.add(db_asset)
@@ -445,6 +446,8 @@ async def update_asset(
         asset.fqn = update.fqn
     if update.environment is not None:
         asset.environment = update.environment
+    if update.resource_type is not None:
+        asset.resource_type = update.resource_type
     if update.metadata is not None:
         asset.metadata_ = update.metadata
 

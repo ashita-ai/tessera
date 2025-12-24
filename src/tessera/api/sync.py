@@ -19,9 +19,10 @@ from tessera.api.errors import BadRequestError, ErrorCode, NotFoundError
 from tessera.api.rate_limit import limit_admin
 from tessera.config import settings
 from tessera.db import AssetDB, ContractDB, ProposalDB, RegistrationDB, TeamDB, UserDB, get_session
-from tessera.models.enums import CompatibilityMode, ContractStatus, RegistrationStatus
+from tessera.models.enums import CompatibilityMode, ContractStatus, RegistrationStatus, ResourceType
 from tessera.services import validate_json_schema
-from tessera.services.audit import log_proposal_created
+from tessera.services.audit import log_contract_published, log_proposal_created
+from tessera.services.openapi import endpoints_to_assets, parse_openapi
 from tessera.services.schema_diff import check_compatibility, diff_schemas
 
 router = APIRouter()
@@ -1857,4 +1858,232 @@ async def diff_dbt_manifest(
         models=models,
         warnings=warnings,
         meta_errors=meta_errors,
+    )
+
+
+# =============================================================================
+# OpenAPI Import
+# =============================================================================
+
+
+class OpenAPIImportRequest(BaseModel):
+    """Request body for OpenAPI spec import."""
+
+    spec: dict[str, Any] = Field(..., description="OpenAPI 3.x specification as JSON")
+    owner_team_id: UUID = Field(..., description="Team that will own the imported assets")
+    environment: str = Field(
+        default="production", min_length=1, max_length=50, description="Environment for assets"
+    )
+    auto_publish_contracts: bool = Field(
+        default=True, description="Automatically publish contracts for new assets"
+    )
+    dry_run: bool = Field(default=False, description="Preview changes without creating assets")
+
+
+class OpenAPIEndpointResult(BaseModel):
+    """Result for a single endpoint import."""
+
+    fqn: str
+    path: str
+    method: str
+    action: str  # "created", "updated", "skipped", "error"
+    asset_id: str | None = None
+    contract_id: str | None = None
+    error: str | None = None
+
+
+class OpenAPIImportResponse(BaseModel):
+    """Response from OpenAPI spec import."""
+
+    api_title: str
+    api_version: str
+    endpoints_found: int
+    assets_created: int
+    assets_updated: int
+    assets_skipped: int
+    contracts_published: int
+    endpoints: list[OpenAPIEndpointResult]
+    parse_errors: list[str]
+
+
+@router.post("/openapi", response_model=OpenAPIImportResponse)
+@limit_admin
+async def import_openapi(
+    request: Request,
+    import_req: OpenAPIImportRequest,
+    auth: Auth,
+    _: None = RequireAdmin,
+    session: AsyncSession = Depends(get_session),
+) -> OpenAPIImportResponse:
+    """Import assets and contracts from an OpenAPI specification.
+
+    Parses an OpenAPI 3.x spec and creates assets for each endpoint.
+    Each endpoint becomes an asset with resource_type=api_endpoint.
+    The request/response schemas are combined into a contract.
+
+    Requires admin scope.
+
+    Behavior:
+    - New endpoints: Create asset and optionally publish contract
+    - Existing endpoints: Update metadata, check for schema changes
+    - dry_run=True: Preview changes without persisting
+
+    Returns a summary of what was created/updated.
+    """
+    # Validate owner team exists
+    team_result = await session.execute(select(TeamDB).where(TeamDB.id == import_req.owner_team_id))
+    owner_team = team_result.scalar_one_or_none()
+    if not owner_team:
+        raise NotFoundError(ErrorCode.TEAM_NOT_FOUND, "Owner team not found")
+
+    # Parse the OpenAPI spec
+    parse_result = parse_openapi(import_req.spec)
+
+    if not parse_result.endpoints and parse_result.errors:
+        raise BadRequestError(
+            "Failed to parse OpenAPI spec",
+            code=ErrorCode.INVALID_OPENAPI_SPEC,
+            details={"errors": parse_result.errors},
+        )
+
+    # Convert endpoints to asset definitions
+    asset_defs = endpoints_to_assets(parse_result, import_req.owner_team_id, import_req.environment)
+
+    # Track results
+    endpoints_results: list[OpenAPIEndpointResult] = []
+    assets_created = 0
+    assets_updated = 0
+    assets_skipped = 0
+    contracts_published = 0
+
+    for i, asset_def in enumerate(asset_defs):
+        endpoint = parse_result.endpoints[i]
+
+        try:
+            # Check if asset already exists
+            existing_result = await session.execute(
+                select(AssetDB)
+                .where(AssetDB.fqn == asset_def.fqn)
+                .where(AssetDB.environment == import_req.environment)
+                .where(AssetDB.deleted_at.is_(None))
+            )
+            existing_asset = existing_result.scalar_one_or_none()
+
+            if import_req.dry_run:
+                # Dry run - just report what would happen
+                if existing_asset:
+                    endpoints_results.append(
+                        OpenAPIEndpointResult(
+                            fqn=asset_def.fqn,
+                            path=endpoint.path,
+                            method=endpoint.method,
+                            action="would_update",
+                            asset_id=str(existing_asset.id),
+                        )
+                    )
+                    assets_updated += 1
+                else:
+                    endpoints_results.append(
+                        OpenAPIEndpointResult(
+                            fqn=asset_def.fqn,
+                            path=endpoint.path,
+                            method=endpoint.method,
+                            action="would_create",
+                        )
+                    )
+                    assets_created += 1
+                    if import_req.auto_publish_contracts:
+                        contracts_published += 1
+                continue
+
+            if existing_asset:
+                # Update existing asset metadata
+                existing_asset.metadata_ = {
+                    **existing_asset.metadata_,
+                    **asset_def.metadata,
+                }
+                existing_asset.resource_type = ResourceType.API_ENDPOINT
+                await session.flush()
+
+                endpoints_results.append(
+                    OpenAPIEndpointResult(
+                        fqn=asset_def.fqn,
+                        path=endpoint.path,
+                        method=endpoint.method,
+                        action="updated",
+                        asset_id=str(existing_asset.id),
+                    )
+                )
+                assets_updated += 1
+            else:
+                # Create new asset
+                new_asset = AssetDB(
+                    fqn=asset_def.fqn,
+                    owner_team_id=import_req.owner_team_id,
+                    environment=import_req.environment,
+                    resource_type=ResourceType.API_ENDPOINT,
+                    metadata_=asset_def.metadata,
+                )
+                session.add(new_asset)
+                await session.flush()
+                await session.refresh(new_asset)
+
+                contract_id: str | None = None
+
+                # Auto-publish contract if enabled
+                if import_req.auto_publish_contracts:
+                    new_contract = ContractDB(
+                        asset_id=new_asset.id,
+                        version="1.0.0",
+                        schema_def=asset_def.schema_def,
+                        compatibility_mode=CompatibilityMode.BACKWARD,
+                        published_by=import_req.owner_team_id,
+                    )
+                    session.add(new_contract)
+                    await session.flush()
+                    await session.refresh(new_contract)
+
+                    await log_contract_published(
+                        session=session,
+                        contract_id=new_contract.id,
+                        publisher_id=import_req.owner_team_id,
+                        version="1.0.0",
+                    )
+                    contract_id = str(new_contract.id)
+                    contracts_published += 1
+
+                endpoints_results.append(
+                    OpenAPIEndpointResult(
+                        fqn=asset_def.fqn,
+                        path=endpoint.path,
+                        method=endpoint.method,
+                        action="created",
+                        asset_id=str(new_asset.id),
+                        contract_id=contract_id,
+                    )
+                )
+                assets_created += 1
+
+        except Exception as e:
+            endpoints_results.append(
+                OpenAPIEndpointResult(
+                    fqn=asset_def.fqn,
+                    path=endpoint.path,
+                    method=endpoint.method,
+                    action="error",
+                    error=str(e),
+                )
+            )
+            assets_skipped += 1
+
+    return OpenAPIImportResponse(
+        api_title=parse_result.title,
+        api_version=parse_result.version,
+        endpoints_found=len(parse_result.endpoints),
+        assets_created=assets_created,
+        assets_updated=assets_updated,
+        assets_skipped=assets_skipped,
+        contracts_published=contracts_published,
+        endpoints=endpoints_results,
+        parse_errors=parse_result.errors,
     )

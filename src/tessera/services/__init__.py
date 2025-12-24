@@ -10,6 +10,14 @@ from tessera.services.audit import (
     log_proposal_force_approved,
     log_proposal_rejected,
 )
+from tessera.services.openapi import (
+    AssetFromOpenAPI,
+    OpenAPIEndpoint,
+    OpenAPIParseResult,
+    endpoints_to_assets,
+    generate_fqn,
+    parse_openapi,
+)
 from tessera.services.schema_diff import (
     BreakingChange,
     SchemaDiff,
@@ -45,4 +53,11 @@ __all__ = [
     "log_proposal_approved",
     "log_proposal_force_approved",
     "log_proposal_rejected",
+    # OpenAPI parsing
+    "AssetFromOpenAPI",
+    "OpenAPIEndpoint",
+    "OpenAPIParseResult",
+    "endpoints_to_assets",
+    "generate_fqn",
+    "parse_openapi",
 ]

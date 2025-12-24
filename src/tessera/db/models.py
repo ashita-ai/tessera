@@ -27,6 +27,7 @@ from tessera.models.enums import (
     GuaranteeMode,
     ProposalStatus,
     RegistrationStatus,
+    ResourceType,
     UserRole,
     WebhookDeliveryStatus,
 )
@@ -101,6 +102,9 @@ class AssetDB(Base):
     )
     environment: Mapped[str] = mapped_column(
         String(50), nullable=False, default="production", index=True
+    )
+    resource_type: Mapped[ResourceType] = mapped_column(
+        Enum(ResourceType), default=ResourceType.UNKNOWN, nullable=False, index=True
     )
     guarantee_mode: Mapped[GuaranteeMode] = mapped_column(
         Enum(GuaranteeMode), default=GuaranteeMode.NOTIFY
