@@ -5,7 +5,7 @@
 <h3 align="center">Data contract coordination for warehouses</h3>
 
 <p align="center">
-  <a href="https://tessera.readthedocs.io">Docs</a> |
+  <a href="https://ashita-ai.github.io/tessera">Docs</a> |
   <a href="#quick-start">Quick Start</a> |
   <a href="https://github.com/ashita-ai/tessera/issues">Issues</a>
 </p>
@@ -57,11 +57,11 @@ uv run uvicorn tessera.main:app --reload
 
 ## Documentation
 
-Full documentation at [tessera.readthedocs.io](https://tessera.readthedocs.io):
+Full documentation at [ashita-ai.github.io/tessera](https://ashita-ai.github.io/tessera):
 
-- [Quickstart Guide](https://tessera.readthedocs.io/getting-started/quickstart/)
-- [dbt Integration](https://tessera.readthedocs.io/guides/dbt-integration/)
-- [API Reference](https://tessera.readthedocs.io/api/overview/)
+- [Quickstart Guide](https://ashita-ai.github.io/tessera/getting-started/quickstart/)
+- [dbt Integration](https://ashita-ai.github.io/tessera/guides/dbt-integration/)
+- [API Reference](https://ashita-ai.github.io/tessera/api/overview/)
 
 ## License
 

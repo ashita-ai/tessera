@@ -1,24 +1,26 @@
 site_name: Tessera
 site_description: Data contract coordination for data warehouses
-site_url: https://tessera.readthedocs.io
+site_url: https://ashita-ai.github.io/tessera
 repo_url: https://github.com/ashita-ai/tessera
 repo_name: ashita-ai/tessera
 edit_uri: edit/main/docs/
 
 theme:
   name: material
+  logo: assets/logo.png
+  favicon: assets/logo.png
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
-      primary: indigo
-      accent: indigo
+      primary: black
+      accent: grey
       toggle:
         icon: material/brightness-7
         name: Switch to dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
-      primary: indigo
-      accent: indigo
+      primary: black
+      accent: grey
       toggle:
         icon: material/brightness-4
         name: Switch to light mode
