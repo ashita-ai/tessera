@@ -219,8 +219,10 @@ class TestScopeRestrictions:
             session, "writer", [APIKeyScope.READ, APIKeyScope.WRITE]
         )
 
+        # /sync/dbt requires admin scope
         response = await client.post(
-            "/api/v1/sync/push", headers={"Authorization": f"Bearer {key}"}
+            f"/api/v1/sync/dbt?manifest_path=/tmp/test.json&owner_team_id={team.id}",
+            headers={"Authorization": f"Bearer {key}"},
         )
         assert response.status_code == 403
         assert "requires the 'admin' scope" in response.json()["error"]["message"]
