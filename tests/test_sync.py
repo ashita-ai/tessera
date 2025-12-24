@@ -1165,3 +1165,199 @@ class TestDbtAutoCreateProposals:
 
         # No proposal should be created when flag is not set
         assert result["proposals"]["created"] == 0
+
+
+class TestDbtAutoPublishContractsExisting:
+    """Tests for auto_publish_contracts with existing assets."""
+
+    async def test_auto_publish_contracts_existing_asset_no_contract(self, client: AsyncClient):
+        """auto_publish_contracts should publish v1.0.0 for existing assets without contracts."""
+        # Create team and asset (no contract)
+        team_resp = await client.post("/api/v1/teams", json={"name": "auto-pub-existing-team"})
+        team_id = team_resp.json()["id"]
+
+        asset_resp = await client.post(
+            "/api/v1/assets",
+            json={"fqn": "test.main.no_contract_asset", "owner_team_id": team_id},
+        )
+        asset_id = asset_resp.json()["id"]
+
+        # Upload manifest with columns - should auto-publish v1.0.0
+        manifest = {
+            "nodes": {
+                "model.project.no_contract_asset": {
+                    "resource_type": "model",
+                    "database": "test",
+                    "schema": "main",
+                    "name": "no_contract_asset",
+                    "columns": {
+                        "id": {"data_type": "integer"},
+                        "name": {"data_type": "string"},
+                    },
+                }
+            },
+            "sources": {},
+        }
+
+        upload_resp = await client.post(
+            "/api/v1/sync/dbt/upload",
+            json={
+                "manifest": manifest,
+                "owner_team_id": team_id,
+                "conflict_mode": "overwrite",
+                "auto_publish_contracts": True,
+            },
+        )
+        assert upload_resp.status_code == 200
+        result = upload_resp.json()
+
+        # Contract should be published
+        assert result["contracts"]["published"] == 1
+
+        # Verify contract exists via API
+        contracts_resp = await client.get(f"/api/v1/assets/{asset_id}/contracts")
+        contracts = contracts_resp.json()["results"]
+        assert len(contracts) == 1
+        assert contracts[0]["version"] == "1.0.0"
+        assert contracts[0]["status"] == "active"
+
+    async def test_auto_publish_contracts_existing_asset_compatible_change(
+        self, client: AsyncClient
+    ):
+        """auto_publish_contracts should bump version for compatible changes."""
+        # Create team and asset with existing contract
+        team_resp = await client.post("/api/v1/teams", json={"name": "auto-pub-compat-team"})
+        team_id = team_resp.json()["id"]
+
+        asset_resp = await client.post(
+            "/api/v1/assets",
+            json={"fqn": "test.main.compat_asset", "owner_team_id": team_id},
+        )
+        asset_id = asset_resp.json()["id"]
+
+        # Publish initial contract v1.0.0
+        await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            json={
+                "version": "1.0.0",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "integer"},
+                    },
+                    "required": [],
+                },
+                "compatibility_mode": "backward",
+            },
+        )
+
+        # Upload manifest with compatible change (add column)
+        manifest = {
+            "nodes": {
+                "model.project.compat_asset": {
+                    "resource_type": "model",
+                    "database": "test",
+                    "schema": "main",
+                    "name": "compat_asset",
+                    "columns": {
+                        "id": {"data_type": "integer"},
+                        "name": {"data_type": "string"},  # New column
+                    },
+                }
+            },
+            "sources": {},
+        }
+
+        upload_resp = await client.post(
+            "/api/v1/sync/dbt/upload",
+            json={
+                "manifest": manifest,
+                "owner_team_id": team_id,
+                "conflict_mode": "overwrite",
+                "auto_publish_contracts": True,
+            },
+        )
+        assert upload_resp.status_code == 200
+        result = upload_resp.json()
+
+        # New version should be published
+        assert result["contracts"]["published"] == 1
+
+        # Verify new contract version exists
+        contracts_resp = await client.get(f"/api/v1/assets/{asset_id}/contracts")
+        contracts = contracts_resp.json()["results"]
+        versions = [c["version"] for c in contracts]
+        assert "1.1.0" in versions  # Minor version bump
+
+
+class TestDbtAutoRegisterConsumersExisting:
+    """Tests for auto_register_consumers with existing assets."""
+
+    async def test_auto_register_consumers_existing_asset_from_refs(self, client: AsyncClient):
+        """auto_register_consumers should register consumers for existing assets from refs."""
+        # Create teams
+        producer_resp = await client.post("/api/v1/teams", json={"name": "producer-team"})
+        producer_team_id = producer_resp.json()["id"]
+
+        consumer_resp = await client.post("/api/v1/teams", json={"name": "consumer-team"})
+        consumer_team_id = consumer_resp.json()["id"]
+
+        # Create upstream asset with contract
+        upstream_resp = await client.post(
+            "/api/v1/assets",
+            json={"fqn": "test.main.upstream_model", "owner_team_id": producer_team_id},
+        )
+        upstream_id = upstream_resp.json()["id"]
+
+        await client.post(
+            f"/api/v1/assets/{upstream_id}/contracts?published_by={producer_team_id}",
+            json={
+                "version": "1.0.0",
+                "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
+                "compatibility_mode": "backward",
+            },
+        )
+
+        # Create downstream asset (already exists)
+        await client.post(
+            "/api/v1/assets",
+            json={"fqn": "test.main.downstream_model", "owner_team_id": consumer_team_id},
+        )
+
+        # Upload manifest with ref dependency
+        manifest = {
+            "nodes": {
+                "model.project.upstream_model": {
+                    "resource_type": "model",
+                    "database": "test",
+                    "schema": "main",
+                    "name": "upstream_model",
+                    "columns": {"id": {"data_type": "integer"}},
+                },
+                "model.project.downstream_model": {
+                    "resource_type": "model",
+                    "database": "test",
+                    "schema": "main",
+                    "name": "downstream_model",
+                    "columns": {"id": {"data_type": "integer"}},
+                    "depends_on": {"nodes": ["model.project.upstream_model"]},
+                },
+            },
+            "sources": {},
+        }
+
+        upload_resp = await client.post(
+            "/api/v1/sync/dbt/upload",
+            json={
+                "manifest": manifest,
+                "owner_team_id": consumer_team_id,
+                "conflict_mode": "overwrite",
+                "auto_register_consumers": True,
+                "infer_consumers_from_refs": True,
+            },
+        )
+        assert upload_resp.status_code == 200
+        result = upload_resp.json()
+
+        # Registration should be created
+        assert result["registrations"]["created"] >= 1

@@ -885,6 +885,11 @@ async def upload_dbt_manifest(
         tuple[AssetDB, dict[str, Any], dict[str, Any] | None, str | None]
     ] = []
 
+    # Track existing assets for auto-publish (compatible changes or no contract yet)
+    existing_assets_for_contracts: list[
+        tuple[AssetDB, dict[str, Any], dict[str, Any] | None, str | None, ContractDB | None]
+    ] = []  # (asset, columns, guarantees, compat_mode, existing_contract or None)
+
     # Track consumer relationships for auto-registration
     # Maps FQN -> (asset, team_id, depends_on_node_ids, meta_consumers)
     asset_consumer_map: dict[str, tuple[AssetDB, UUID, list[str], list[dict[str, Any]]]] = {}
@@ -1060,6 +1065,34 @@ async def upload_dbt_manifest(
                             resolved_user_id,
                         )
                     )
+
+            # Track existing assets for consumer registration too
+            if upload_req.auto_register_consumers:
+                asset_consumer_map[fqn] = (
+                    existing,
+                    resolved_team_id,
+                    depends_on_node_ids if upload_req.infer_consumers_from_refs else [],
+                    tessera_meta.consumers,
+                )
+
+            # Track existing assets for auto-publish (compatible changes or first contract)
+            if upload_req.auto_publish_contracts and columns:
+                # Get active contract for this asset
+                contract_result = await session.execute(
+                    select(ContractDB)
+                    .where(ContractDB.asset_id == existing.id)
+                    .where(ContractDB.status == ContractStatus.ACTIVE)
+                )
+                active_contract = contract_result.scalar_one_or_none()
+                existing_assets_for_contracts.append(
+                    (
+                        existing,
+                        columns,
+                        guarantees,
+                        tessera_meta.compatibility_mode,
+                        active_contract,
+                    )  # noqa: E501
+                )
         else:
             new_asset = AssetDB(
                 fqn=fqn,
@@ -1193,6 +1226,34 @@ async def upload_dbt_manifest(
                             resolved_user_id,
                         )
                     )
+
+            # Track existing sources for consumer registration
+            if upload_req.auto_register_consumers:
+                asset_consumer_map[fqn] = (
+                    existing,
+                    resolved_team_id,
+                    [],  # Sources don't have depends_on
+                    tessera_meta.consumers,
+                )
+
+            # Track existing sources for auto-publish (compatible changes or first contract)
+            if upload_req.auto_publish_contracts and columns:
+                # Get active contract for this source
+                contract_result = await session.execute(
+                    select(ContractDB)
+                    .where(ContractDB.asset_id == existing.id)
+                    .where(ContractDB.status == ContractStatus.ACTIVE)
+                )
+                active_contract = contract_result.scalar_one_or_none()
+                existing_assets_for_contracts.append(
+                    (
+                        existing,
+                        columns,
+                        guarantees,
+                        tessera_meta.compatibility_mode,
+                        active_contract,
+                    )  # noqa: E501
+                )
         else:
             new_asset = AssetDB(
                 fqn=fqn,
@@ -1261,6 +1322,88 @@ async def upload_dbt_manifest(
                 )
                 session.add(new_contract)
                 contracts_published += 1
+
+            except Exception as e:
+                contract_warnings.append(
+                    f"{asset.fqn}: Failed to publish contract ({type(e).__name__}): {str(e)}"
+                )
+
+    # Auto-publish contracts for existing assets (first contract or compatible changes)
+    if upload_req.auto_publish_contracts and existing_assets_for_contracts:
+        for item in existing_assets_for_contracts:
+            asset, columns, asset_guarantees, compat_mode_str, existing_contract = item
+            try:
+                # Convert columns to JSON Schema
+                schema_def = dbt_columns_to_json_schema(columns)
+
+                # Validate schema
+                is_valid, errors = validate_json_schema(schema_def)
+                if not is_valid:
+                    contract_warnings.append(
+                        f"{asset.fqn}: Invalid schema generated from columns: {errors}"
+                    )
+                    continue
+
+                # Determine compatibility mode
+                if compat_mode_str:
+                    try:
+                        compat_mode = CompatibilityMode(compat_mode_str.lower())
+                    except ValueError:
+                        compat_mode = CompatibilityMode.BACKWARD
+                else:
+                    if existing_contract:
+                        compat_mode = existing_contract.compatibility_mode
+                    else:
+                        compat_mode = CompatibilityMode.BACKWARD
+
+                if existing_contract is None:
+                    # No existing contract - publish v1.0.0
+                    new_contract = ContractDB(
+                        asset_id=asset.id,
+                        version="1.0.0",
+                        schema_def=schema_def,
+                        compatibility_mode=compat_mode,
+                        guarantees=asset_guarantees,
+                        status=ContractStatus.ACTIVE,
+                        published_by=asset.owner_team_id,
+                        published_by_user_id=asset.owner_user_id,
+                    )
+                    session.add(new_contract)
+                    contracts_published += 1
+                else:
+                    # Check compatibility with existing contract
+                    is_compatible, breaking_changes_list = check_compatibility(
+                        existing_contract.schema_def,
+                        schema_def,
+                        existing_contract.compatibility_mode,
+                    )
+
+                    if is_compatible:
+                        # Compatible change - bump minor version and publish
+                        current_version = existing_contract.version
+                        parts = current_version.split(".")
+                        if len(parts) == 3:
+                            new_version = f"{parts[0]}.{int(parts[1]) + 1}.0"
+                        else:
+                            new_version = "1.1.0"
+
+                        # Deprecate old contract
+                        existing_contract.status = ContractStatus.DEPRECATED
+
+                        # Create new contract
+                        new_contract = ContractDB(
+                            asset_id=asset.id,
+                            version=new_version,
+                            schema_def=schema_def,
+                            compatibility_mode=compat_mode,
+                            guarantees=asset_guarantees,
+                            status=ContractStatus.ACTIVE,
+                            published_by=asset.owner_team_id,
+                            published_by_user_id=asset.owner_user_id,
+                        )
+                        session.add(new_contract)
+                        contracts_published += 1
+                    # else: breaking change - skip, handled by auto_create_proposals
 
             except Exception as e:
                 contract_warnings.append(
