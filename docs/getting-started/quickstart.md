@@ -29,7 +29,7 @@ Open [http://localhost:8000](http://localhost:8000) in your browser.
 
 Default credentials:
 - **Email**: `admin@example.com`
-- **Password**: `admin123`
+- **Password**: `admin`
 
 ## Create Your First Contract
 
