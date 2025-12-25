@@ -17,8 +17,15 @@ Database Support
 - **SQLite**: Supported for testing via in-memory databases (DATABASE_URL=sqlite+aiosqlite:///:memory:)
   - Note: SQLite does not support schemas, so tables are created without schema prefixes
   - init_db() will fail on SQLite due to CREATE SCHEMA statements; use Alembic migrations instead
+
+Production Configuration
+------------------------
+Set AUTO_CREATE_TABLES=false in production to require Alembic migrations instead
+of automatic table creation. This prevents accidental schema changes and ensures
+all database changes go through proper migration review.
 """
 
+import logging
 from collections.abc import AsyncGenerator
 
 from sqlalchemy import text
@@ -31,6 +38,8 @@ from sqlalchemy.ext.asyncio import (
 
 from tessera.config import settings
 from tessera.db.models import Base
+
+logger = logging.getLogger(__name__)
 
 # Lazy engine initialization to avoid creating connections at import time
 _engine: AsyncEngine | None = None
@@ -93,10 +102,25 @@ async def init_db() -> None:
     """Initialize database schemas and tables.
 
     Supports both PostgreSQL (with schemas) and SQLite (without schemas).
+
+    Behavior is controlled by the AUTO_CREATE_TABLES setting:
+    - True (default): Automatically create schemas and tables
+    - False: Skip table creation (requires Alembic migrations)
+
+    In production, set AUTO_CREATE_TABLES=false to ensure all schema changes
+    go through proper migration review.
     """
+    if not settings.auto_create_tables:
+        logger.info(
+            "Skipping automatic table creation (AUTO_CREATE_TABLES=false). "
+            "Ensure database is initialized via Alembic migrations."
+        )
+        return
+
     engine = get_engine()
     is_sqlite = settings.database_url.startswith("sqlite")
 
+    logger.info("Creating database schemas and tables (AUTO_CREATE_TABLES=true)")
     async with engine.begin() as conn:
         if not is_sqlite:
             # PostgreSQL: Create schemas first (required for table creation)

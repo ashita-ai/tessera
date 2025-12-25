@@ -21,6 +21,7 @@ class Settings(BaseSettings):  # type: ignore[misc]
 
     # Database
     database_url: str = "postgresql+asyncpg://tessera:tessera@localhost:5432/tessera"
+    auto_create_tables: bool = True  # Set to False in production (use Alembic migrations)
 
     # API
     api_host: str = "0.0.0.0"
