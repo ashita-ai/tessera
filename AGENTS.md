@@ -6,7 +6,7 @@
 
 **Design Philosophy**: Simplicity wins, use good defaults, coordination over validation.
 
-**Current Phase**: Core implementation complete. P0 issues from code review resolved. Building test coverage and DX.
+**Current Phase**: Core implementation complete. Python SDK available. Building test coverage and DX.
 
 ---
 
@@ -17,7 +17,7 @@
 uv sync --all-extras
 
 # 2. Run tests to verify environment
-uv run pytest tests/test_schema_diff.py -v
+DATABASE_URL=sqlite+aiosqlite:///:memory: uv run pytest tests/ -v
 
 # 3. Start the server
 uv run uvicorn tessera.main:app --reload
@@ -39,7 +39,7 @@ uv run python examples/quickstart.py
 - Follow async/await patterns for all database operations
 
 **Testing** (CRITICAL):
-- Run tests before committing: `uv run pytest`
+- Run tests before committing: `DATABASE_URL=sqlite+aiosqlite:///:memory: uv run pytest`
 - Add tests when adding new endpoints or services
 - Test both success and error cases
 
@@ -107,35 +107,51 @@ Be concise and direct. No flattery or excessive praise. Focus on what needs to b
 ```
 tessera/
 ├── src/tessera/
-│   ├── api/               # FastAPI endpoints
-│   │   ├── api_keys.py    # API key management (admin)
-│   │   ├── assets.py      # Asset + contract publishing
-│   │   ├── audits.py      # WAP audit reporting + trends
-│   │   ├── auth.py        # Authentication dependencies
-│   │   ├── contracts.py   # Contract lookup
-│   │   ├── errors.py      # Error handling + middleware
-│   │   ├── pagination.py  # Pagination helpers
-│   │   ├── proposals.py   # Breaking change workflow
-│   │   ├── registrations.py # Consumer registration
-│   │   ├── schemas.py     # Schema validation
-│   │   ├── sync.py        # dbt manifest sync
-│   │   └── teams.py       # Team management
-│   ├── db/                # SQLAlchemy models + session
-│   ├── models/            # Pydantic schemas
-│   ├── services/          # Business logic
-│   │   ├── audit.py       # Audit logging
-│   │   ├── auth.py        # API key validation + management
-│   │   ├── schema_diff.py # Schema comparison
+│   ├── api/                   # FastAPI endpoints
+│   │   ├── api_keys.py        # API key management (admin)
+│   │   ├── assets.py          # Asset + contract publishing
+│   │   ├── audit.py           # Single asset audit endpoints
+│   │   ├── audits.py          # WAP audit reporting + trends
+│   │   ├── auth.py            # Authentication dependencies
+│   │   ├── contracts.py       # Contract lookup + comparison
+│   │   ├── dependencies.py    # Asset dependency management
+│   │   ├── errors.py          # Error handling + middleware
+│   │   ├── impact.py          # Impact analysis endpoints
+│   │   ├── pagination.py      # Pagination helpers
+│   │   ├── proposals.py       # Breaking change workflow
+│   │   ├── rate_limit.py      # Rate limiting
+│   │   ├── registrations.py   # Consumer registration
+│   │   ├── schemas.py         # Schema validation
+│   │   ├── sync.py            # dbt/OpenAPI/GraphQL sync
+│   │   ├── teams.py           # Team management
+│   │   ├── users.py           # User management
+│   │   └── webhooks.py        # Webhook notifications
+│   ├── db/                    # SQLAlchemy models + session
+│   ├── models/                # Pydantic schemas
+│   ├── services/              # Business logic
+│   │   ├── audit.py           # Audit logging
+│   │   ├── auth.py            # API key validation + management
+│   │   ├── cache.py           # Redis/in-memory caching
+│   │   ├── graphql.py         # GraphQL introspection parsing
+│   │   ├── openapi.py         # OpenAPI spec parsing
+│   │   ├── schema_diff.py     # Schema comparison
 │   │   └── schema_validator.py # Schema validation
-│   ├── config.py          # Settings from env
-│   └── main.py            # FastAPI app
-├── tests/                 # Test suite (368 tests)
-│   ├── conftest.py        # Fixtures
-│   ├── test_schema_diff.py # Schema diff tests
-│   └── test_*.py          # Endpoint tests
-├── examples/              # Usage examples
-│   └── quickstart.py      # 5 core workflows
-└── assets/                # Images, logos
+│   ├── config.py              # Settings from env
+│   └── main.py                # FastAPI app
+├── sdk/                       # Python SDK (tessera-sdk)
+│   ├── src/tessera_sdk/
+│   │   ├── client.py          # TesseraClient + AsyncTesseraClient
+│   │   ├── http.py            # HTTP transport
+│   │   ├── models.py          # Response models
+│   │   └── resources.py       # API resources
+│   └── tests/
+├── tests/                     # Test suite (403+ tests)
+│   ├── conftest.py            # Fixtures
+│   ├── test_schema_diff.py    # Schema diff tests
+│   └── test_*.py              # Endpoint tests
+├── examples/                  # Usage examples
+│   └── quickstart.py          # Core workflows
+└── docs/                      # MkDocs documentation
 ```
 
 ---
@@ -166,6 +182,45 @@ The core logic is in `services/schema_diff.py`. It detects:
 2. Compatible change: auto-publish, deprecate old
 3. Breaking change: create Proposal, wait for acknowledgments
 4. Force flag: publish anyway (audit logged)
+
+---
+
+## Python SDK
+
+The `sdk/` directory contains a Python client library:
+
+```python
+from tessera_sdk import TesseraClient
+
+client = TesseraClient(base_url="http://localhost:8000")
+
+# Create resources
+team = client.teams.create(name="data-platform")
+asset = client.assets.create(fqn="warehouse.dim_customers", owner_team_id=team.id)
+
+# Check impact before changes
+impact = client.assets.check_impact(asset_id=asset.id, proposed_schema={...})
+if not impact.safe_to_publish:
+    print(f"Breaking changes: {impact.breaking_changes}")
+```
+
+Async version available via `AsyncTesseraClient`.
+
+---
+
+## CLI
+
+Tessera includes a CLI for common operations:
+
+```bash
+# Team management
+uv run tessera team create "data-platform"
+uv run tessera team list
+
+# Contract management
+uv run tessera contract publish <asset-id> --schema schema.json --version 1.0.0
+uv run tessera contract list <asset-id>
+```
 
 ---
 
@@ -244,7 +299,7 @@ Tests are in `tests/`. The conftest.py provides:
 
 **SQLite (recommended for local dev)**:
 - Set `DATABASE_URL=sqlite+aiosqlite:///:memory:` for fast, isolated tests
-- No setup required, tests run in ~1 second
+- No setup required, tests run in ~9 seconds
 
 **PostgreSQL (CI and production)**:
 - Configured via `DATABASE_URL` in `.env`
@@ -266,7 +321,7 @@ git checkout -b feature/my-feature
 
 ```bash
 # 1. Run tests
-uv run pytest
+DATABASE_URL=sqlite+aiosqlite:///:memory: uv run pytest
 
 # 2. Format and lint
 uv run ruff check src/tessera/
@@ -284,7 +339,7 @@ uv run mypy src/tessera/
 
 1. Add route in appropriate `api/*.py` file
 2. Add Pydantic models in `models/*.py` if needed
-3. Add tests in `tests/test_api.py`
+3. Add tests in `tests/test_*.py`
 4. Update README if user-facing
 
 ### Add New Service
@@ -314,7 +369,7 @@ uv run mypy src/tessera/
 
 ### Schemas
 
-- `core`: teams, assets, contracts, registrations
+- `core`: teams, users, assets, contracts, registrations
 - `workflow`: proposals, acknowledgments
 - `audit`: events (append-only)
 
@@ -364,28 +419,54 @@ uv run mypy src/tessera/
 # Pre-commit hooks
 uv run pre-commit install   # Install hooks (one-time)
 uv run pre-commit run --all-files  # Run all checks
+
+# CLI
+uv run tessera --help
+uv run tessera team --help
+uv run tessera contract --help
 ```
 
 ### Key Files
 
 - `api/assets.py`: Contract publishing logic
+- `api/contracts.py`: Contract lookup + guarantees update
 - `services/schema_diff.py`: Compatibility checking
+- `services/cache.py`: Caching layer
 - `db/models.py`: SQLAlchemy models
 - `examples/quickstart.py`: Core workflows
 
 ### API Endpoints
 
 All under `/api/v1`:
+
+**Teams & Users**:
 - `POST /teams` - Create team
+- `GET /teams` - List teams
+- `POST /users` - Create user
+- `GET /users` - List users
+
+**Assets & Contracts**:
 - `POST /assets` - Create asset
+- `GET /assets` - List assets
 - `POST /assets/{id}/contracts` - Publish contract
+- `GET /assets/{id}/contracts` - List asset contracts
 - `POST /assets/{id}/impact` - Impact analysis
+- `PATCH /contracts/{id}/guarantees` - Update guarantees
+
+**Registrations & Proposals**:
+- `POST /registrations` - Register as consumer
+- `GET /registrations` - List registrations
+- `POST /proposals/{id}/acknowledge` - Acknowledge breaking change
+- `POST /proposals/{id}/force-approve` - Force approve (admin)
+
+**Sync & Integration**:
+- `POST /sync/dbt` - Sync from dbt manifest
+- `POST /sync/openapi` - Sync from OpenAPI spec
+- `POST /sync/graphql` - Sync from GraphQL introspection
+
+**Audit & Admin**:
 - `POST /assets/{id}/audit` - Report WAP audit run
 - `GET /assets/{id}/audit-history` - Get audit history
-- `GET /assets/{id}/audit-trends` - Get audit trends and alerts
-- `POST /registrations` - Register as consumer
-- `POST /proposals/{id}/acknowledge` - Acknowledge breaking change
-- `POST /sync/dbt` - Sync from dbt manifest
 - `POST /api-keys` - Create API key (admin)
 - `DELETE /api-keys/{id}` - Revoke API key (admin)
 
