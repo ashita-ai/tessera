@@ -22,7 +22,7 @@ This starts:
 # docker-compose.yml
 services:
   api:
-    image: ghcr.io/ashita-ai/tessera:latest
+    build: .
     ports:
       - "8000:8000"
     environment:
@@ -56,7 +56,7 @@ volumes:
 ```yaml
 services:
   api:
-    image: ghcr.io/ashita-ai/tessera:latest
+    build: .
     environment:
       - DATABASE_URL=postgresql+asyncpg://tessera:tessera@db:5432/tessera
       - REDIS_URL=redis://redis:6379/0
@@ -89,7 +89,9 @@ volumes:
 ```yaml
 services:
   api:
-    image: ghcr.io/ashita-ai/tessera:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
     deploy:
       replicas: 3
       resources:
@@ -141,7 +143,7 @@ docker compose -f docker-compose.yml up -d
 Migrations run automatically on startup. To run manually:
 
 ```bash
-docker compose exec api tessera db upgrade
+docker compose exec api alembic upgrade head
 ```
 
 ## Logs
@@ -173,7 +175,4 @@ cat backup.sql | docker compose exec -T db psql -U tessera tessera
 ```bash
 # API health
 curl http://localhost:8000/health
-
-# Database connectivity
-docker compose exec api tessera db check
 ```

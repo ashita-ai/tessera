@@ -37,7 +37,7 @@ export DATABASE_URL="postgresql+asyncpg://user:pass@localhost:5432/tessera"
 export SECRET_KEY="your-secret-key-here"
 
 # Run database migrations
-tessera db upgrade
+alembic upgrade head
 
 # Start the server
 tessera serve
@@ -76,14 +76,14 @@ Tessera supports:
 createdb tessera
 
 # Run migrations
-DATABASE_URL=postgresql+asyncpg://localhost/tessera tessera db upgrade
+DATABASE_URL=postgresql+asyncpg://localhost/tessera alembic upgrade head
 ```
 
 ### SQLite Setup (Development)
 
 ```bash
 # SQLite works out of the box
-DATABASE_URL=sqlite+aiosqlite:///./tessera.db tessera db upgrade
+DATABASE_URL=sqlite+aiosqlite:///./tessera.db alembic upgrade head
 ```
 
 ## Verify Installation
