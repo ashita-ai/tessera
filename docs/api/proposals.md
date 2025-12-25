@@ -31,7 +31,7 @@ GET /api/v1/proposals
       "breaking_changes_count": 2,
       "total_consumers": 3,
       "acknowledgment_count": 1,
-      "proposed_at": "2024-01-15T10:00:00Z",
+      "proposed_at": "2025-01-15T10:00:00Z",
       "proposed_by": "team-uuid"
     }
   ]
@@ -66,7 +66,7 @@ GET /api/v1/proposals/{proposal_id}
       "team_id": "team-uuid",
       "team_name": "Analytics",
       "acknowledged": true,
-      "acknowledged_at": "2024-01-16T10:00:00Z",
+      "acknowledged_at": "2025-01-16T10:00:00Z",
       "notes": "Updated our dashboards"
     },
     {
@@ -75,7 +75,7 @@ GET /api/v1/proposals/{proposal_id}
       "acknowledged": false
     }
   ],
-  "proposed_at": "2024-01-15T10:00:00Z",
+  "proposed_at": "2025-01-15T10:00:00Z",
   "proposed_by": "team-uuid"
 }
 ```
@@ -101,7 +101,7 @@ Acknowledge that your team is ready for the breaking change.
 ```json
 {
   "acknowledged": true,
-  "acknowledged_at": "2024-01-16T10:00:00Z",
+  "acknowledged_at": "2025-01-16T10:00:00Z",
   "remaining_consumers": 1
 }
 ```

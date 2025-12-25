@@ -85,7 +85,7 @@ Response:
     {
       "team_id": "team-uuid",
       "team_name": "Analytics",
-      "registration_date": "2024-01-15"
+      "registration_date": "2025-01-15"
     }
   ],
   "total_affected": 3

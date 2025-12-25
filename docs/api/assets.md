@@ -29,7 +29,7 @@ GET /api/v1/assets
       "owner_team_id": "team-uuid",
       "owner_team_name": "Data Platform",
       "environment": "production",
-      "created_at": "2024-01-15T10:00:00Z",
+      "created_at": "2025-01-15T10:00:00Z",
       "active_contract_id": "contract-uuid",
       "active_contract_version": "1.2.0"
     }
@@ -62,8 +62,8 @@ GET /api/v1/assets/{asset_id}
     "description": "Core users table",
     "tags": ["pii", "core"]
   },
-  "created_at": "2024-01-15T10:00:00Z",
-  "updated_at": "2024-01-20T15:30:00Z"
+  "created_at": "2025-01-15T10:00:00Z",
+  "updated_at": "2025-01-20T15:30:00Z"
 }
 ```
 
@@ -95,7 +95,7 @@ POST /api/v1/assets
   "fqn": "warehouse.analytics.users",
   "owner_team_id": "team-uuid",
   "environment": "production",
-  "created_at": "2024-01-15T10:00:00Z"
+  "created_at": "2025-01-15T10:00:00Z"
 }
 ```
 

@@ -16,7 +16,7 @@ GET /api/v1/teams
     {
       "id": "team-uuid",
       "name": "data-platform",
-      "created_at": "2024-01-01T10:00:00Z",
+      "created_at": "2025-01-01T10:00:00Z",
       "member_count": 5,
       "asset_count": 25
     }
@@ -36,7 +36,7 @@ GET /api/v1/teams/{team_id}
 {
   "id": "team-uuid",
   "name": "data-platform",
-  "created_at": "2024-01-01T10:00:00Z",
+  "created_at": "2025-01-01T10:00:00Z",
   "members": [
     {
       "id": "user-uuid",
@@ -68,7 +68,7 @@ POST /api/v1/teams
 {
   "id": "new-team-uuid",
   "name": "analytics",
-  "created_at": "2024-01-15T10:00:00Z"
+  "created_at": "2025-01-15T10:00:00Z"
 }
 ```
 
@@ -137,7 +137,7 @@ POST /api/v1/teams/{team_id}/api-keys
   "key": "tsk_abc123...",
   "key_prefix": "tsk_abc1",
   "scopes": ["read", "write"],
-  "created_at": "2024-01-15T10:00:00Z"
+  "created_at": "2025-01-15T10:00:00Z"
 }
 ```
 

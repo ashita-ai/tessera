@@ -29,7 +29,7 @@ GET /api/v1/contracts
       "version": "1.2.0",
       "status": "active",
       "compatibility_mode": "backward",
-      "published_at": "2024-01-15T10:00:00Z",
+      "published_at": "2025-01-15T10:00:00Z",
       "published_by": "team-uuid",
       "published_by_team_name": "Data Platform"
     }
@@ -70,7 +70,7 @@ GET /api/v1/contracts/{contract_id}
       "id": "not_null"
     }
   },
-  "published_at": "2024-01-15T10:00:00Z",
+  "published_at": "2025-01-15T10:00:00Z",
   "published_by": "team-uuid"
 }
 ```
@@ -92,7 +92,7 @@ List all consumer registrations for a contract.
       "id": "registration-uuid",
       "consumer_team_id": "team-uuid",
       "consumer_team_name": "Analytics",
-      "registered_at": "2024-01-10T10:00:00Z",
+      "registered_at": "2025-01-10T10:00:00Z",
       "status": "active"
     }
   ]
