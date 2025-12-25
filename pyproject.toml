@@ -1,5 +1,5 @@
 [project]
-name = "tessera"
+name = "tessera-contracts"
 version = "0.1.0"
 description = "Data contract coordination for warehouses"
 readme = "README.md"
