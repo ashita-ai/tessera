@@ -3,7 +3,6 @@
 import pytest
 from httpx import AsyncClient
 
-
 pytestmark = pytest.mark.asyncio
 
 
@@ -289,3 +288,126 @@ class TestContractsEndpoint:
         assert data["total"] == 1
         assert len(data["results"]) == 1
         assert data["results"][0]["consumer_team_id"] == consumer_id
+
+
+class TestGuaranteesUpdate:
+    """Tests for PATCH /api/v1/contracts/{id}/guarantees endpoint."""
+
+    async def test_update_guarantees_success(self, client: AsyncClient):
+        """Successfully update guarantees on an active contract."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "guarantees-team"})
+        team_id = team_resp.json()["id"]
+
+        asset_resp = await client.post(
+            "/api/v1/assets", json={"fqn": "guarantees.update.table", "owner_team_id": team_id}
+        )
+        asset_id = asset_resp.json()["id"]
+
+        contract_resp = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            json={
+                "version": "1.0.0",
+                "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
+                "compatibility_mode": "backward",
+            },
+        )
+        contract_id = contract_resp.json()["contract"]["id"]
+
+        # Update guarantees
+        resp = await client.patch(
+            f"/api/v1/contracts/{contract_id}/guarantees",
+            json={
+                "guarantees": {
+                    "freshness": {"max_staleness_minutes": 60},
+                    "nullability": {"id": "never"},
+                }
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["guarantees"]["freshness"]["max_staleness_minutes"] == 60
+        assert data["guarantees"]["nullability"]["id"] == "never"
+
+    async def test_update_guarantees_not_found(self, client: AsyncClient):
+        """Updating guarantees on nonexistent contract should 404."""
+        resp = await client.patch(
+            "/api/v1/contracts/00000000-0000-0000-0000-000000000000/guarantees",
+            json={"guarantees": {"freshness": {"max_staleness_minutes": 30}}},
+        )
+        assert resp.status_code == 404
+
+    async def test_update_guarantees_deprecated_contract(self, client: AsyncClient):
+        """Updating guarantees on deprecated contract should fail."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "deprecated-team"})
+        team_id = team_resp.json()["id"]
+
+        asset_resp = await client.post(
+            "/api/v1/assets", json={"fqn": "deprecated.contract.table", "owner_team_id": team_id}
+        )
+        asset_id = asset_resp.json()["id"]
+
+        # First contract
+        contract_resp = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            json={
+                "version": "1.0.0",
+                "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
+                "compatibility_mode": "backward",
+            },
+        )
+        first_contract_id = contract_resp.json()["contract"]["id"]
+
+        # Second contract (deprecates first)
+        await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            json={
+                "version": "1.1.0",
+                "schema": {
+                    "type": "object",
+                    "properties": {"id": {"type": "integer"}, "name": {"type": "string"}},
+                },
+                "compatibility_mode": "backward",
+            },
+        )
+
+        # Try to update guarantees on deprecated contract
+        resp = await client.patch(
+            f"/api/v1/contracts/{first_contract_id}/guarantees",
+            json={"guarantees": {"freshness": {"max_staleness_minutes": 30}}},
+        )
+        assert resp.status_code == 400
+        assert "deprecated" in resp.json()["error"]["message"].lower()
+
+    async def test_update_guarantees_replaces_existing(self, client: AsyncClient):
+        """Updating guarantees should replace existing guarantees."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "replace-team"})
+        team_id = team_resp.json()["id"]
+
+        asset_resp = await client.post(
+            "/api/v1/assets", json={"fqn": "replace.guarantees.table", "owner_team_id": team_id}
+        )
+        asset_id = asset_resp.json()["id"]
+
+        # Create contract with initial guarantees
+        contract_resp = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            json={
+                "version": "1.0.0",
+                "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
+                "compatibility_mode": "backward",
+                "guarantees": {"freshness": {"max_staleness_minutes": 120}},
+            },
+        )
+        contract_id = contract_resp.json()["contract"]["id"]
+
+        # Update with new guarantees (should replace, not merge)
+        resp = await client.patch(
+            f"/api/v1/contracts/{contract_id}/guarantees",
+            json={"guarantees": {"volume": {"min_rows": 100}}},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        # New guarantees should be set
+        assert data["guarantees"]["volume"]["min_rows"] == 100
+        # Old guarantees should be replaced (freshness should be None or not present)
+        assert data["guarantees"].get("freshness") is None

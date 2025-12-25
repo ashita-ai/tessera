@@ -8,13 +8,14 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tessera.api.auth import Auth, RequireRead
-from tessera.api.errors import ErrorCode, NotFoundError
+from tessera.api.auth import Auth, RequireRead, RequireWrite
+from tessera.api.errors import BadRequestError, ErrorCode, ForbiddenError, NotFoundError
 from tessera.api.pagination import PaginationParams, pagination_params
-from tessera.api.rate_limit import limit_read
+from tessera.api.rate_limit import limit_read, limit_write
 from tessera.db import AssetDB, ContractDB, RegistrationDB, TeamDB, get_session
-from tessera.models import Contract, Registration
-from tessera.models.enums import CompatibilityMode, ContractStatus
+from tessera.models import Contract, Guarantees, Registration
+from tessera.models.enums import APIKeyScope, CompatibilityMode, ContractStatus
+from tessera.services import log_guarantees_updated
 from tessera.services.cache import (
     cache_contract,
     cache_schema_diff,
@@ -46,6 +47,12 @@ class ContractCompareResponse(BaseModel):
     compatibility_mode: str
 
 
+class GuaranteesUpdate(BaseModel):
+    """Request body for updating contract guarantees."""
+
+    guarantees: Guarantees
+
+
 @router.get("")
 @limit_read
 async def list_contracts(
@@ -64,30 +71,27 @@ async def list_contracts(
     """
     from sqlalchemy import func
 
-    # Query with join to get asset FQN
-    query = select(ContractDB, AssetDB.fqn.label("asset_fqn")).outerjoin(
-        AssetDB, ContractDB.asset_id == AssetDB.id
-    )
+    # Build shared filters once to keep data/count queries in sync
+    filters = []
     if asset_id:
-        query = query.where(ContractDB.asset_id == asset_id)
+        filters.append(ContractDB.asset_id == asset_id)
     if status:
-        query = query.where(ContractDB.status == status)
+        filters.append(ContractDB.status == status)
     if version:
-        query = query.where(ContractDB.version.ilike(f"%{version}%"))
-    query = query.order_by(ContractDB.published_at.desc())
+        filters.append(ContractDB.version.ilike(f"%{version}%"))
 
     # Manual pagination to handle join result
-    count_query = select(func.count()).select_from(select(ContractDB).subquery())
-    if asset_id:
-        count_query = select(func.count()).select_from(
-            select(ContractDB).where(ContractDB.asset_id == asset_id).subquery()
-        )
-    if status:
-        count_query = select(func.count()).select_from(
-            select(ContractDB).where(ContractDB.status == status).subquery()
-        )
+    count_query = select(func.count()).select_from(select(ContractDB).where(*filters).subquery())
     total_result = await session.execute(count_query)
     total = total_result.scalar() or 0
+
+    # Query with join to get asset FQN and apply identical filters
+    query = (
+        select(ContractDB, AssetDB.fqn.label("asset_fqn"))
+        .outerjoin(AssetDB, ContractDB.asset_id == AssetDB.id)
+        .where(*filters)
+        .order_by(ContractDB.published_at.desc())
+    )
 
     paginated_query = query.limit(params.limit).offset(params.offset)
     result = await session.execute(paginated_query)
@@ -221,6 +225,75 @@ async def get_contract(
 
     # Cache result
     await cache_contract(str(contract_id), Contract.model_validate(contract).model_dump())
+
+    return contract
+
+
+@router.patch("/{contract_id}/guarantees", response_model=Contract)
+@limit_write
+async def update_guarantees(
+    request: Request,
+    contract_id: UUID,
+    update: GuaranteesUpdate,
+    auth: Auth,
+    _: None = RequireWrite,
+    session: AsyncSession = Depends(get_session),
+) -> ContractDB:
+    """Update guarantees on a contract.
+
+    Requires write scope. Only active contracts can be updated.
+    Resource-level auth: must own the asset's team or be admin.
+    """
+    # Get contract with asset info for authorization
+    result = await session.execute(
+        select(ContractDB, AssetDB)
+        .join(AssetDB, ContractDB.asset_id == AssetDB.id)
+        .where(ContractDB.id == contract_id)
+    )
+    row = result.one_or_none()
+    if not row:
+        raise NotFoundError(
+            code=ErrorCode.CONTRACT_NOT_FOUND,
+            message=f"Contract with ID '{contract_id}' not found",
+            details={"contract_id": str(contract_id)},
+        )
+    contract, asset = row
+
+    # Only allow updates on active contracts
+    if contract.status != ContractStatus.ACTIVE:
+        raise BadRequestError(
+            f"Cannot update guarantees on {contract.status.value} contract. "
+            "Only active contracts can be updated."
+        )
+
+    # Resource-level auth: must own the asset's team or be admin
+    if asset.owner_team_id != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):
+        raise ForbiddenError(
+            "You can only update guarantees for contracts on assets owned by your team",
+            code=ErrorCode.UNAUTHORIZED_TEAM,
+        )
+
+    # Store old guarantees for audit log
+    old_guarantees = contract.guarantees
+
+    # Update guarantees
+    contract.guarantees = update.guarantees.model_dump()
+    await session.flush()
+    await session.refresh(contract)
+
+    # Log the update
+    await log_guarantees_updated(
+        session=session,
+        contract_id=contract_id,
+        actor_id=auth.team_id,
+        old_guarantees=old_guarantees,
+        new_guarantees=contract.guarantees,
+    )
+
+    # Invalidate cache
+    from tessera.services.cache import contract_cache
+
+    await contract_cache.delete(str(contract_id))
 
     return contract
 

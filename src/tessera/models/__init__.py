@@ -13,7 +13,7 @@ from tessera.models.asset import (
     AssetWithTeam,
     BulkAssignRequest,
 )
-from tessera.models.contract import Contract, ContractCreate
+from tessera.models.contract import Contract, ContractCreate, Guarantees
 from tessera.models.dependency import Dependency, DependencyCreate
 from tessera.models.enums import (
     AcknowledgmentResponseType,
@@ -57,6 +57,7 @@ __all__ = [
     # Contract
     "Contract",
     "ContractCreate",
+    "Guarantees",
     # Dependency
     "Dependency",
     "DependencyCreate",

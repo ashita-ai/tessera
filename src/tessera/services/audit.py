@@ -28,6 +28,7 @@ class AuditAction(StrEnum):
     CONTRACT_PUBLISHED = "contract.published"
     CONTRACT_DEPRECATED = "contract.deprecated"
     CONTRACT_FORCE_PUBLISHED = "contract.force_published"
+    CONTRACT_GUARANTEES_UPDATED = "contract.guarantees_updated"
 
     # Registration actions
     REGISTRATION_CREATED = "registration.created"
@@ -193,4 +194,25 @@ async def log_proposal_rejected(
         action=AuditAction.PROPOSAL_REJECTED,
         actor_id=blocked_by,
         payload={"reason": "Consumer blocked the proposal"},
+    )
+
+
+async def log_guarantees_updated(
+    session: AsyncSession,
+    contract_id: UUID,
+    actor_id: UUID,
+    old_guarantees: dict[str, Any] | None,
+    new_guarantees: dict[str, Any],
+) -> AuditEventDB:
+    """Log a contract guarantees update event."""
+    return await log_event(
+        session=session,
+        entity_type="contract",
+        entity_id=contract_id,
+        action=AuditAction.CONTRACT_GUARANTEES_UPDATED,
+        actor_id=actor_id,
+        payload={
+            "old_guarantees": old_guarantees,
+            "new_guarantees": new_guarantees,
+        },
     )
