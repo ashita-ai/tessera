@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.png" alt="Tessera" width="300">
+  <img src="https://raw.githubusercontent.com/ashita-ai/tessera/main/assets/logo.png" alt="Tessera" width="300">
 </p>
 
 <h3 align="center">Data contract coordination for warehouses</h3>
