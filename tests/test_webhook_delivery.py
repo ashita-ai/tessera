@@ -287,3 +287,171 @@ class TestSignPayload:
         sig1 = _sign_payload('{"a": 1}', secret)
         sig2 = _sign_payload('{"b": 2}', secret)
         assert sig1 != sig2
+
+
+class TestSendWebhookFunctions:
+    """Tests for send_* webhook functions."""
+
+    async def test_send_proposal_created(self):
+        """send_proposal_created creates event and fires."""
+        from tessera.services.webhooks import send_proposal_created
+
+        with patch("tessera.services.webhooks._fire_and_forget") as mock_fire:
+            await send_proposal_created(
+                proposal_id=uuid4(),
+                asset_id=uuid4(),
+                asset_fqn="db.schema.table",
+                producer_team_id=uuid4(),
+                producer_team_name="data-team",
+                proposed_version="2.0.0",
+                breaking_changes=[
+                    {"change_type": "removed", "path": "$.email", "message": "Field removed"}
+                ],
+                impacted_consumers=[
+                    {"team_id": uuid4(), "team_name": "marketing", "pinned_version": "1.0.0"}
+                ],
+            )
+            mock_fire.assert_called_once()
+            event = mock_fire.call_args[0][0]
+            assert event.event == WebhookEventType.PROPOSAL_CREATED
+            assert event.payload.proposed_version == "2.0.0"
+            assert len(event.payload.breaking_changes) == 1
+            assert len(event.payload.impacted_consumers) == 1
+
+    async def test_send_proposal_acknowledged(self):
+        """send_proposal_acknowledged creates event and fires."""
+        from tessera.services.webhooks import send_proposal_acknowledged
+
+        with patch("tessera.services.webhooks._fire_and_forget") as mock_fire:
+            await send_proposal_acknowledged(
+                proposal_id=uuid4(),
+                asset_id=uuid4(),
+                asset_fqn="db.schema.table",
+                consumer_team_id=uuid4(),
+                consumer_team_name="finance-team",
+                response="approved",
+                migration_deadline=None,
+                notes="Looks good to me",
+                pending_count=2,
+                acknowledged_count=3,
+            )
+            mock_fire.assert_called_once()
+            event = mock_fire.call_args[0][0]
+            assert event.event == WebhookEventType.PROPOSAL_ACKNOWLEDGED
+            assert event.payload.response == "approved"
+            assert event.payload.pending_count == 2
+
+    async def test_send_proposal_status_change(self):
+        """send_proposal_status_change creates event and fires."""
+        from tessera.services.webhooks import send_proposal_status_change
+
+        with patch("tessera.services.webhooks._fire_and_forget") as mock_fire:
+            await send_proposal_status_change(
+                event_type=WebhookEventType.PROPOSAL_APPROVED,
+                proposal_id=uuid4(),
+                asset_id=uuid4(),
+                asset_fqn="db.schema.table",
+                status="approved",
+                actor_team_id=uuid4(),
+                actor_team_name="data-team",
+            )
+            mock_fire.assert_called_once()
+            event = mock_fire.call_args[0][0]
+            assert event.event == WebhookEventType.PROPOSAL_APPROVED
+            assert event.payload.status == "approved"
+
+    async def test_send_contract_published(self):
+        """send_contract_published creates event and fires."""
+        from tessera.services.webhooks import send_contract_published
+
+        with patch("tessera.services.webhooks._fire_and_forget") as mock_fire:
+            await send_contract_published(
+                contract_id=uuid4(),
+                asset_id=uuid4(),
+                asset_fqn="db.schema.table",
+                version="2.0.0",
+                producer_team_id=uuid4(),
+                producer_team_name="data-team",
+                from_proposal_id=uuid4(),
+            )
+            mock_fire.assert_called_once()
+            event = mock_fire.call_args[0][0]
+            assert event.event == WebhookEventType.CONTRACT_PUBLISHED
+            assert event.payload.version == "2.0.0"
+
+
+class TestDeliverWithTracking:
+    """Tests for _deliver_with_tracking function."""
+
+    async def test_deliver_with_tracking_success(self):
+        """Creates delivery record and delivers webhook."""
+        from tessera.services.webhooks import _deliver_with_tracking
+
+        event = WebhookEvent(
+            event=WebhookEventType.CONTRACT_PUBLISHED,
+            timestamp=datetime.now(UTC),
+            payload=ContractPublishedPayload(
+                contract_id=uuid4(),
+                asset_id=uuid4(),
+                asset_fqn="test.asset",
+                version="1.0.0",
+                producer_team_id=uuid4(),
+                producer_team_name="test-team",
+            ),
+        )
+
+        with (
+            patch("tessera.services.webhooks._create_delivery_record") as mock_create,
+            patch("tessera.services.webhooks._deliver_webhook") as mock_deliver,
+        ):
+            mock_create.return_value = uuid4()
+            mock_deliver.return_value = True
+
+            result = await _deliver_with_tracking(event)
+            assert result is True
+            mock_create.assert_called_once_with(event)
+            mock_deliver.assert_called_once()
+
+
+class TestCreateDeliveryRecord:
+    """Tests for _create_delivery_record function."""
+
+    async def test_create_delivery_record_no_url(self):
+        """Returns None when no webhook URL configured."""
+        from tessera.services.webhooks import _create_delivery_record
+
+        event = WebhookEvent(
+            event=WebhookEventType.CONTRACT_PUBLISHED,
+            timestamp=datetime.now(UTC),
+            payload=ContractPublishedPayload(
+                contract_id=uuid4(),
+                asset_id=uuid4(),
+                asset_fqn="test.asset",
+                version="1.0.0",
+                producer_team_id=uuid4(),
+                producer_team_name="test-team",
+            ),
+        )
+
+        with patch("tessera.services.webhooks.settings") as mock_settings:
+            mock_settings.webhook_url = None
+            result = await _create_delivery_record(event)
+            assert result is None
+
+
+class TestUpdateDeliveryStatus:
+    """Tests for _update_delivery_status function."""
+
+    async def test_update_delivery_status_exception(self):
+        """Logs error when update fails."""
+        from tessera.services.webhooks import WebhookDeliveryStatus, _update_delivery_status
+
+        with patch("tessera.services.webhooks.get_async_session_maker") as mock_session:
+            mock_session.side_effect = Exception("DB error")
+            # Should not raise
+            await _update_delivery_status(
+                uuid4(),
+                status=WebhookDeliveryStatus.FAILED,
+                attempts=3,
+                last_error="Error",
+            )
