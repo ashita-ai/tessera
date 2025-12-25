@@ -10,10 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from tessera.db.models import Base, TeamDB
 from tessera.main import app
-from tessera.services.auth import create_api_key, generate_api_key, hash_api_key, verify_api_key
 from tessera.models.api_key import APIKeyCreate
 from tessera.models.enums import APIKeyScope
-
+from tessera.services.auth import create_api_key, generate_api_key, hash_api_key, verify_api_key
 
 # Test with auth enabled
 TEST_DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
@@ -77,8 +76,8 @@ async def auth_session(auth_test_engine) -> AsyncGenerator[AsyncSession, None]:
 @pytest.fixture
 async def auth_client(auth_test_engine) -> AsyncGenerator[AsyncClient, None]:
     """Create a test client with auth ENABLED."""
-    from tessera.db import database
     from tessera.config import settings
+    from tessera.db import database
 
     # Store original value
     original_auth_disabled = settings.auth_disabled
@@ -251,13 +250,39 @@ class TestAuthEndpoints:
         assert response.status_code == 401
 
 
+class TestInvalidAuthFormat:
+    """Tests for invalid authorization header format."""
+
+    async def test_invalid_auth_header_format(self, auth_client: AsyncClient):
+        """Test that non-Bearer auth headers are rejected."""
+        # Try with wrong format (no "Bearer " prefix)
+        response = await auth_client.get(
+            "/api/v1/teams",
+            headers={"Authorization": "Basic abc123"},
+        )
+        assert response.status_code == 401
+        data = response.json()
+        assert data["error"]["code"] == "INVALID_AUTH_HEADER"
+
+    async def test_malformed_bearer_token(self, auth_client: AsyncClient):
+        """Test that malformed Bearer tokens are rejected."""
+        # Try with "Bearer" but no space
+        response = await auth_client.get(
+            "/api/v1/teams",
+            headers={"Authorization": "Bearertoken123"},
+        )
+        assert response.status_code == 401
+        data = response.json()
+        assert data["error"]["code"] == "INVALID_AUTH_HEADER"
+
+
 class TestBootstrapKey:
     """Tests for bootstrap API key functionality."""
 
     async def test_bootstrap_key_creates_team(self, auth_test_engine):
         """Test that bootstrap key can create first team."""
-        from tessera.db import database
         from tessera.config import settings
+        from tessera.db import database
 
         # Set up bootstrap key
         original_auth_disabled = settings.auth_disabled

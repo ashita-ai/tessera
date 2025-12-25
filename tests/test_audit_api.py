@@ -1,25 +1,27 @@
 """Tests for audit trail query API."""
 
+import os
+from collections.abc import AsyncGenerator
+from uuid import uuid4
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from collections.abc import AsyncGenerator
-import os
-from uuid import uuid4
-from datetime import datetime, UTC
 
-from tessera.db.models import Base, AuditEventDB, TeamDB
+from tessera.db.models import AuditEventDB, Base
 from tessera.main import app
 
 TEST_DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 _USE_SQLITE = TEST_DATABASE_URL.startswith("sqlite")
+
 
 @pytest.fixture
 async def test_engine():
     engine = create_async_engine(TEST_DATABASE_URL, echo=False)
     yield engine
     await engine.dispose()
+
 
 @pytest.fixture
 async def session(test_engine) -> AsyncGenerator[AsyncSession, None]:
@@ -38,13 +40,14 @@ async def session(test_engine) -> AsyncGenerator[AsyncSession, None]:
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
 
+
 @pytest.fixture
 async def client(session) -> AsyncGenerator[AsyncClient, None]:
-    from tessera.db import database
     from tessera.config import settings
+    from tessera.db import database
 
     original_auth_disabled = settings.auth_disabled
-    settings.auth_disabled = True # Disable auth for simpler setup
+    settings.auth_disabled = True  # Disable auth for simpler setup
 
     async def get_test_session() -> AsyncGenerator[AsyncSession, None]:
         yield session
@@ -56,6 +59,7 @@ async def client(session) -> AsyncGenerator[AsyncClient, None]:
     app.dependency_overrides.clear()
     settings.auth_disabled = original_auth_disabled
 
+
 class TestAuditAPI:
     """Tests for GET /api/v1/audit/events."""
 
@@ -66,7 +70,7 @@ class TestAuditAPI:
             entity_id=uuid4(),
             action="created",
             actor_id=uuid4(),
-            payload={"fqn": "test.asset"}
+            payload={"fqn": "test.asset"},
         )
         session.add(event1)
         await session.flush()
@@ -84,14 +88,14 @@ class TestAuditAPI:
             entity_id=entity_id,
             action="created",
             actor_id=uuid4(),
-            payload={"fqn": "test.asset"}
+            payload={"fqn": "test.asset"},
         )
         event2 = AuditEventDB(
             entity_type="contract",
             entity_id=uuid4(),
             action="published",
             actor_id=uuid4(),
-            payload={"version": "1.0.0"}
+            payload={"version": "1.0.0"},
         )
         session.add_all([event1, event2])
         await session.flush()
@@ -105,5 +109,3 @@ class TestAuditAPI:
         response = await client.get("/api/v1/audit/events", params={"entity_id": str(entity_id)})
         assert response.status_code == 200
         assert len(response.json()["results"]) == 1
-
-

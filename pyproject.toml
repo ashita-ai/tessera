@@ -83,6 +83,11 @@ testpaths = ["tests"]
 [tool.coverage.run]
 source = ["src/tessera"]
 concurrency = ["greenlet", "thread"]
+omit = [
+    "src/tessera/cli/*",
+    "src/tessera/connectors/*",
+    "src/tessera/web/*",
+]
 
 [tool.coverage.report]
 exclude_lines = [

@@ -1,12 +1,15 @@
 """Tests for schema diffing service."""
 
-import pytest
-
 from tessera.models.enums import ChangeType, CompatibilityMode
 from tessera.services.schema_diff import (
     ChangeKind,
-    SchemaDiff,
+    GuaranteeChangeKind,
+    GuaranteeChangeSeverity,
+    GuaranteeMode,
     check_compatibility,
+    check_guarantee_compatibility,
+    diff_contracts,
+    diff_guarantees,
     diff_schemas,
 )
 
@@ -406,3 +409,261 @@ class TestChangeTypeClassification:
         new = {"type": "object", "properties": {"id": {"type": "integer"}}}
         result = diff_schemas(old, new)
         assert result.change_type == ChangeType.MAJOR
+
+
+class TestArrayConstraintChanges:
+    """Test array constraint changes like minItems, maxItems, etc."""
+
+    def test_constraint_relaxed_min_items(self):
+        """Relaxing minItems constraint should be detected."""
+        old = {
+            "type": "object",
+            "properties": {"tags": {"type": "array", "items": {"type": "string"}, "minItems": 3}},
+        }
+        new = {
+            "type": "object",
+            "properties": {"tags": {"type": "array", "items": {"type": "string"}, "minItems": 1}},
+        }
+        result = diff_schemas(old, new)
+        assert any(c.kind == ChangeKind.CONSTRAINT_RELAXED for c in result.changes)
+
+    def test_constraint_tightened_min_items(self):
+        """Tightening minItems constraint should be detected."""
+        old = {
+            "type": "object",
+            "properties": {"tags": {"type": "array", "items": {"type": "string"}, "minItems": 1}},
+        }
+        new = {
+            "type": "object",
+            "properties": {"tags": {"type": "array", "items": {"type": "string"}, "minItems": 5}},
+        }
+        result = diff_schemas(old, new)
+        assert any(c.kind == ChangeKind.CONSTRAINT_TIGHTENED for c in result.changes)
+
+    def test_pattern_changed(self):
+        """Changing pattern constraint should be detected as tightening."""
+        old = {
+            "type": "object",
+            "properties": {"email": {"type": "string", "pattern": "^.*$"}},
+        }
+        new = {
+            "type": "object",
+            "properties": {"email": {"type": "string", "pattern": "^[a-z]+@[a-z]+\\.[a-z]+$"}},
+        }
+        result = diff_schemas(old, new)
+        assert any(c.kind == ChangeKind.CONSTRAINT_TIGHTENED for c in result.changes)
+
+
+class TestGuaranteeDiff:
+    """Test guarantee diffing functionality."""
+
+    def test_no_changes(self):
+        """Identical guarantees should produce no changes."""
+        guarantees = {
+            "nullability": {"id": True, "name": True},
+            "uniqueness": {"id": True},
+        }
+        result = diff_guarantees(guarantees, guarantees)
+        assert not result.has_changes
+
+    def test_nullability_added(self):
+        """Adding not_null constraint should be detected."""
+        old = {"nullability": {"id": True}}
+        new = {"nullability": {"id": True, "email": True}}
+        result = diff_guarantees(old, new)
+        assert result.has_changes
+        assert any(c.kind == GuaranteeChangeKind.NOT_NULL_ADDED for c in result.changes)
+
+    def test_nullability_removed(self):
+        """Removing not_null constraint should be detected as warning."""
+        old = {"nullability": {"id": True, "email": True}}
+        new = {"nullability": {"id": True}}
+        result = diff_guarantees(old, new)
+        assert result.has_changes
+        assert any(c.kind == GuaranteeChangeKind.NOT_NULL_REMOVED for c in result.changes)
+        assert any(c.severity == GuaranteeChangeSeverity.WARNING for c in result.changes)
+
+    def test_uniqueness_added(self):
+        """Adding unique constraint should be detected."""
+        old = {"uniqueness": {"id": True}}
+        new = {"uniqueness": {"id": True, "email": True}}
+        result = diff_guarantees(old, new)
+        assert result.has_changes
+        assert any(c.kind == GuaranteeChangeKind.UNIQUE_ADDED for c in result.changes)
+
+    def test_uniqueness_removed(self):
+        """Removing unique constraint should be detected as warning."""
+        old = {"uniqueness": {"id": True, "email": True}}
+        new = {"uniqueness": {"id": True}}
+        result = diff_guarantees(old, new)
+        assert result.has_changes
+        assert any(c.kind == GuaranteeChangeKind.UNIQUE_REMOVED for c in result.changes)
+
+    def test_accepted_values_expanded(self):
+        """Expanding accepted values should be detected."""
+        old = {"accepted_values": {"status": ["active"]}}
+        new = {"accepted_values": {"status": ["active", "pending"]}}
+        result = diff_guarantees(old, new)
+        assert result.has_changes
+        # Adding a new accepted value = expanded constraint
+        assert any(c.kind == GuaranteeChangeKind.ACCEPTED_VALUES_EXPANDED for c in result.changes)
+
+    def test_accepted_values_contracted(self):
+        """Contracting accepted values should be detected as warning."""
+        old = {"accepted_values": {"status": ["active", "pending"]}}
+        new = {"accepted_values": {"status": ["active"]}}
+        result = diff_guarantees(old, new)
+        assert result.has_changes
+        # Removing an accepted value = contracted constraint
+        assert any(c.kind == GuaranteeChangeKind.ACCEPTED_VALUES_CONTRACTED for c in result.changes)
+
+    def test_freshness_added(self):
+        """Adding freshness guarantee should be detected."""
+        old = {}
+        new = {"freshness": {"warn_after": {"hours": 24}}}
+        result = diff_guarantees(old, new)
+        assert result.has_changes
+
+    def test_freshness_relaxed(self):
+        """Relaxing freshness guarantee should be warning."""
+        old = {"freshness": {"warn_after": {"hours": 12}}}
+        new = {"freshness": {"warn_after": {"hours": 48}}}
+        result = diff_guarantees(old, new)
+        assert result.has_changes
+        assert any(c.severity == GuaranteeChangeSeverity.WARNING for c in result.changes)
+
+    def test_relationship_added(self):
+        """Adding relationship guarantee should be detected."""
+        old = {"relationships": {}}
+        new = {"relationships": {"user_id": {"to": "users.id"}}}
+        result = diff_guarantees(old, new)
+        assert result.has_changes
+
+    def test_volume_changed(self):
+        """Changing volume guarantee should be detected."""
+        old = {"volume": {"min_rows": 100, "max_rows": 10000}}
+        new = {"volume": {"min_rows": 50, "max_rows": 5000}}
+        result = diff_guarantees(old, new)
+        assert result.has_changes
+
+
+class TestGuaranteeDiffResult:
+    """Test GuaranteeDiffResult methods."""
+
+    def test_by_severity(self):
+        """Test filtering changes by severity."""
+        old = {"nullability": {"id": True, "email": True}, "uniqueness": {"id": True}}
+        new = {"nullability": {"id": True}, "uniqueness": {"id": True, "email": True}}
+        result = diff_guarantees(old, new)
+        # Should have both INFO (uniqueness added) and WARNING (nullability removed)
+        assert len(result.info_changes) > 0 or len(result.warning_changes) > 0
+
+    def test_is_breaking_ignore_mode(self):
+        """Ignore mode should never be breaking."""
+        old = {"nullability": {"id": True, "email": True}}
+        new = {"nullability": {"id": True}}
+        result = diff_guarantees(old, new)
+        assert not result.is_breaking(GuaranteeMode.IGNORE)
+
+    def test_is_breaking_notify_mode(self):
+        """Notify mode should never block."""
+        old = {"nullability": {"id": True, "email": True}}
+        new = {"nullability": {"id": True}}
+        result = diff_guarantees(old, new)
+        assert not result.is_breaking(GuaranteeMode.NOTIFY)
+
+    def test_is_breaking_strict_mode(self):
+        """Strict mode should block on warning changes."""
+        old = {"nullability": {"id": True, "email": True}}
+        new = {"nullability": {"id": True}}
+        result = diff_guarantees(old, new)
+        assert result.is_breaking(GuaranteeMode.STRICT)
+
+    def test_breaking_changes_returns_warnings(self):
+        """breaking_changes should return warnings in strict mode."""
+        old = {"nullability": {"id": True, "email": True}}
+        new = {"nullability": {"id": True}}
+        result = diff_guarantees(old, new)
+        breaking = result.breaking_changes(GuaranteeMode.STRICT)
+        assert len(breaking) > 0
+
+
+class TestGuaranteeChange:
+    """Test GuaranteeChange serialization."""
+
+    def test_to_dict(self):
+        """Test GuaranteeChange.to_dict serialization."""
+        old = {"nullability": {"id": True}}
+        new = {"nullability": {"id": True, "email": True}}
+        result = diff_guarantees(old, new)
+        for change in result.changes:
+            d = change.to_dict()
+            assert "type" in d
+            assert "path" in d
+            assert "message" in d
+            assert "severity" in d
+
+
+class TestCheckGuaranteeCompatibility:
+    """Test check_guarantee_compatibility function."""
+
+    def test_compatible_ignore_mode(self):
+        """Any change is compatible in ignore mode."""
+        old = {"nullability": {"id": True, "email": True}}
+        new = {"nullability": {"id": True}}
+        is_compatible, breaking = check_guarantee_compatibility(old, new, GuaranteeMode.IGNORE)
+        assert is_compatible
+        assert len(breaking) == 0
+
+    def test_compatible_notify_mode(self):
+        """Any change is compatible in notify mode."""
+        old = {"nullability": {"id": True, "email": True}}
+        new = {"nullability": {"id": True}}
+        is_compatible, breaking = check_guarantee_compatibility(old, new, GuaranteeMode.NOTIFY)
+        assert is_compatible
+
+    def test_incompatible_strict_mode(self):
+        """Removing guarantees breaks strict mode."""
+        old = {"nullability": {"id": True, "email": True}}
+        new = {"nullability": {"id": True}}
+        is_compatible, breaking = check_guarantee_compatibility(old, new, GuaranteeMode.STRICT)
+        assert not is_compatible
+        assert len(breaking) > 0
+
+
+class TestDiffContracts:
+    """Test diff_contracts function for full contract comparison."""
+
+    def test_diff_contracts_schema_only(self):
+        """Test diffing contracts with only schema changes."""
+        old_schema = {"type": "object", "properties": {"id": {"type": "integer"}}}
+        new_schema = {
+            "type": "object",
+            "properties": {"id": {"type": "integer"}, "name": {"type": "string"}},
+        }
+        result = diff_contracts(old_schema, new_schema)
+        assert result.schema_diff.has_changes
+        assert not result.guarantee_diff.has_changes
+
+    def test_diff_contracts_guarantees_only(self):
+        """Test diffing contracts with only guarantee changes."""
+        schema = {"type": "object", "properties": {"id": {"type": "integer"}}}
+        old_guarantees = {"nullability": {"id": True}}
+        new_guarantees = {"nullability": {"id": True, "name": True}}
+        result = diff_contracts(schema, schema, old_guarantees, new_guarantees)
+        assert not result.schema_diff.has_changes
+        assert result.guarantee_diff.has_changes
+
+    def test_diff_contracts_both(self):
+        """Test diffing contracts with both schema and guarantee changes."""
+        old_schema = {"type": "object", "properties": {"id": {"type": "integer"}}}
+        new_schema = {
+            "type": "object",
+            "properties": {"id": {"type": "integer"}, "name": {"type": "string"}},
+        }
+        old_guarantees = {"nullability": {"id": True}}
+        new_guarantees = {"nullability": {"id": True, "name": True}}
+        result = diff_contracts(old_schema, new_schema, old_guarantees, new_guarantees)
+        assert result.schema_diff.has_changes
+        assert result.guarantee_diff.has_changes
+        assert result.has_changes

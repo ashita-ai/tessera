@@ -15,8 +15,7 @@ class TestContractEdgeCases:
         team_id = team_resp.json()["id"]
 
         resp = await client.post(
-            "/api/v1/assets/00000000-0000-0000-0000-000000000000/contracts"
-            f"?published_by={team_id}",
+            f"/api/v1/assets/00000000-0000-0000-0000-000000000000/contracts?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {"type": "object"},
@@ -117,7 +116,7 @@ class TestProposalEdgeCases:
         team_id = team_resp.json()["id"]
 
         resp = await client.post(
-            "/api/v1/proposals/00000000-0000-0000-0000-000000000000/force" f"?actor_id={team_id}"
+            f"/api/v1/proposals/00000000-0000-0000-0000-000000000000/force?actor_id={team_id}"
         )
         assert resp.status_code == 404
 

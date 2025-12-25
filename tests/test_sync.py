@@ -1151,3 +1151,159 @@ class TestDbtAutoRegisterConsumersExisting:
 
         # Registration should be created
         assert result["registrations"]["created"] >= 1
+
+
+class TestDbtDiff:
+    """Tests for /api/v1/sync/dbt/diff endpoint (CI dry-run)."""
+
+    async def test_dbt_diff_new_models(self, client: AsyncClient):
+        """Diff should identify new models that would be created."""
+        await client.post("/api/v1/teams", json={"name": "diff-team-1"})
+
+        manifest = {
+            "nodes": {
+                "model.project.new_model": {
+                    "resource_type": "model",
+                    "database": "analytics",
+                    "schema": "public",
+                    "name": "diff_new_model",
+                    "columns": {"id": {"data_type": "integer"}},
+                }
+            },
+            "sources": {},
+        }
+
+        resp = await client.post(
+            "/api/v1/sync/dbt/diff",
+            json={"manifest": manifest, "fail_on_breaking": False},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["summary"]["new"] >= 1
+        assert data["blocking"] is False
+
+    async def test_dbt_diff_updated_model(self, client: AsyncClient):
+        """Diff should identify existing models that would be updated."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "diff-team-2"})
+        team_id = team_resp.json()["id"]
+
+        # Create existing asset
+        asset_resp = await client.post(
+            "/api/v1/assets",
+            json={"fqn": "analytics.public.diff_updated", "owner_team_id": team_id},
+        )
+        asset_id = asset_resp.json()["id"]
+
+        # Publish contract
+        await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            json={
+                "version": "1.0.0",
+                "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
+                "compatibility_mode": "backward",
+            },
+        )
+
+        manifest = {
+            "nodes": {
+                "model.project.diff_updated": {
+                    "resource_type": "model",
+                    "database": "analytics",
+                    "schema": "public",
+                    "name": "diff_updated",
+                    "columns": {
+                        "id": {"data_type": "integer"},
+                        "new_col": {"data_type": "string"},
+                    },
+                }
+            },
+            "sources": {},
+        }
+
+        resp = await client.post(
+            "/api/v1/sync/dbt/diff",
+            json={"manifest": manifest, "fail_on_breaking": False},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["summary"]["modified"] >= 1
+
+    async def test_dbt_diff_breaking_change_detected(self, client: AsyncClient):
+        """Diff should detect breaking changes and set blocking=True."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "diff-team-3"})
+        team_id = team_resp.json()["id"]
+
+        # Create asset with contract
+        asset_resp = await client.post(
+            "/api/v1/assets",
+            json={"fqn": "analytics.public.diff_breaking", "owner_team_id": team_id},
+        )
+        asset_id = asset_resp.json()["id"]
+
+        await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            json={
+                "version": "1.0.0",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "integer"},
+                        "email": {"type": "string"},
+                    },
+                },
+                "compatibility_mode": "backward",
+            },
+        )
+
+        # Manifest removes email column (breaking)
+        manifest = {
+            "nodes": {
+                "model.project.diff_breaking": {
+                    "resource_type": "model",
+                    "database": "analytics",
+                    "schema": "public",
+                    "name": "diff_breaking",
+                    "columns": {"id": {"data_type": "integer"}},  # email removed
+                }
+            },
+            "sources": {},
+        }
+
+        resp = await client.post(
+            "/api/v1/sync/dbt/diff",
+            json={"manifest": manifest, "fail_on_breaking": True},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["summary"]["breaking"] >= 1
+        assert data["blocking"] is True
+
+    async def test_dbt_diff_meta_validation_errors(self, client: AsyncClient):
+        """Diff should report meta validation errors for unknown teams."""
+        manifest = {
+            "nodes": {
+                "model.project.bad_meta": {
+                    "resource_type": "model",
+                    "database": "analytics",
+                    "schema": "public",
+                    "name": "bad_meta_model",
+                    "columns": {"id": {"data_type": "integer"}},
+                    "meta": {
+                        "tessera": {
+                            "owner_team": "nonexistent-team",
+                            "consumers": [{"team": "also-nonexistent"}],
+                        }
+                    },
+                }
+            },
+            "sources": {},
+        }
+
+        resp = await client.post(
+            "/api/v1/sync/dbt/diff",
+            json={"manifest": manifest, "fail_on_breaking": False},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        # Should have meta_errors for unknown teams
+        assert len(data.get("meta_errors", [])) >= 1
