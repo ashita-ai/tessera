@@ -257,6 +257,8 @@ async def update_guarantees(
             message=f"Contract with ID '{contract_id}' not found",
             details={"contract_id": str(contract_id)},
         )
+    contract: ContractDB
+    asset: AssetDB
     contract, asset = row
 
     # Only allow updates on active contracts
