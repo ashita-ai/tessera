@@ -455,3 +455,351 @@ class TestUpdateDeliveryStatus:
                 attempts=3,
                 last_error="Error",
             )
+
+    async def test_update_delivery_status_success(self):
+        """Successfully updates delivery status."""
+        from tessera.services.webhooks import WebhookDeliveryStatus, _update_delivery_status
+
+        delivery_id = uuid4()
+        mock_delivery = MagicMock()
+        mock_delivery.status = WebhookDeliveryStatus.PENDING
+        mock_delivery.attempts = 0
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_delivery
+
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=mock_result)
+        mock_session.commit = AsyncMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=None)
+
+        mock_session_maker = MagicMock()
+        mock_session_maker.return_value = mock_session
+
+        with patch(
+            "tessera.services.webhooks.get_async_session_maker",
+            return_value=mock_session_maker,
+        ):
+            await _update_delivery_status(
+                delivery_id,
+                status=WebhookDeliveryStatus.DELIVERED,
+                attempts=1,
+                last_status_code=200,
+            )
+            mock_session.commit.assert_called_once()
+            assert mock_delivery.status == WebhookDeliveryStatus.DELIVERED
+            assert mock_delivery.attempts == 1
+
+    async def test_update_delivery_status_failed(self):
+        """Updates delivery status to failed with error info."""
+        from tessera.services.webhooks import WebhookDeliveryStatus, _update_delivery_status
+
+        delivery_id = uuid4()
+        mock_delivery = MagicMock()
+        mock_delivery.status = WebhookDeliveryStatus.PENDING
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_delivery
+
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=mock_result)
+        mock_session.commit = AsyncMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=None)
+
+        mock_session_maker = MagicMock()
+        mock_session_maker.return_value = mock_session
+
+        with patch(
+            "tessera.services.webhooks.get_async_session_maker",
+            return_value=mock_session_maker,
+        ):
+            await _update_delivery_status(
+                delivery_id,
+                status=WebhookDeliveryStatus.FAILED,
+                attempts=3,
+                last_error="Service unavailable",
+                last_status_code=503,
+            )
+            assert mock_delivery.status == WebhookDeliveryStatus.FAILED
+            assert mock_delivery.last_error == "Service unavailable"
+            assert mock_delivery.last_status_code == 503
+
+    async def test_update_delivery_status_not_found(self):
+        """Handles case when delivery record not found."""
+        from tessera.services.webhooks import WebhookDeliveryStatus, _update_delivery_status
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=mock_result)
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=None)
+
+        mock_session_maker = MagicMock()
+        mock_session_maker.return_value = mock_session
+
+        with patch(
+            "tessera.services.webhooks.get_async_session_maker",
+            return_value=mock_session_maker,
+        ):
+            # Should not raise
+            await _update_delivery_status(
+                uuid4(),
+                status=WebhookDeliveryStatus.DELIVERED,
+                attempts=1,
+            )
+
+
+class TestCreateDeliveryRecordWithDB:
+    """Tests for _create_delivery_record with mocked database."""
+
+    async def test_create_delivery_record_success(self):
+        """Successfully creates delivery record."""
+        from tessera.services.webhooks import _create_delivery_record
+
+        event = WebhookEvent(
+            event=WebhookEventType.CONTRACT_PUBLISHED,
+            timestamp=datetime.now(UTC),
+            payload=ContractPublishedPayload(
+                contract_id=uuid4(),
+                asset_id=uuid4(),
+                asset_fqn="test.asset",
+                version="1.0.0",
+                producer_team_id=uuid4(),
+                producer_team_name="test-team",
+            ),
+        )
+
+        delivery_id = uuid4()
+        mock_delivery = MagicMock()
+        mock_delivery.id = delivery_id
+
+        mock_session = AsyncMock()
+        mock_session.add = MagicMock()
+        mock_session.commit = AsyncMock()
+        mock_session.refresh = AsyncMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=None)
+
+        def set_id_on_refresh(obj):
+            obj.id = delivery_id
+
+        mock_session.refresh.side_effect = set_id_on_refresh
+
+        mock_session_maker = MagicMock()
+        mock_session_maker.return_value = mock_session
+
+        with (
+            patch("tessera.services.webhooks.settings") as mock_settings,
+            patch(
+                "tessera.services.webhooks.get_async_session_maker",
+                return_value=mock_session_maker,
+            ),
+            patch("tessera.services.webhooks.WebhookDeliveryDB") as mock_db_cls,
+        ):
+            mock_settings.webhook_url = "https://example.com/webhook"
+            mock_db_instance = MagicMock()
+            mock_db_instance.id = delivery_id
+            mock_db_cls.return_value = mock_db_instance
+
+            result = await _create_delivery_record(event)
+            assert result == delivery_id
+            mock_session.add.assert_called_once()
+            mock_session.commit.assert_called_once()
+
+    async def test_create_delivery_record_exception(self):
+        """Returns None when database error occurs."""
+        from tessera.services.webhooks import _create_delivery_record
+
+        event = WebhookEvent(
+            event=WebhookEventType.CONTRACT_PUBLISHED,
+            timestamp=datetime.now(UTC),
+            payload=ContractPublishedPayload(
+                contract_id=uuid4(),
+                asset_id=uuid4(),
+                asset_fqn="test.asset",
+                version="1.0.0",
+                producer_team_id=uuid4(),
+                producer_team_name="test-team",
+            ),
+        )
+
+        with (
+            patch("tessera.services.webhooks.settings") as mock_settings,
+            patch("tessera.services.webhooks.get_async_session_maker") as mock_maker,
+        ):
+            mock_settings.webhook_url = "https://example.com/webhook"
+            mock_maker.side_effect = Exception("DB error")
+
+            result = await _create_delivery_record(event)
+            assert result is None
+
+
+class TestDeliverWebhookWithDeliveryId:
+    """Tests for _deliver_webhook with delivery tracking."""
+
+    async def test_deliver_success_with_delivery_id(self):
+        """Updates delivery status on success when delivery_id provided."""
+
+        delivery_id = uuid4()
+
+        with (
+            patch("tessera.services.webhooks.settings") as mock_settings,
+            patch("tessera.services.webhooks.httpx.AsyncClient") as mock_client_cls,
+            patch("tessera.services.webhooks._update_delivery_status") as mock_update,
+        ):
+            mock_settings.webhook_url = "https://example.com/webhook"
+            mock_settings.webhook_secret = None
+
+            mock_response = AsyncMock()
+            mock_response.status_code = 200
+            mock_response.text = "ok"
+
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(return_value=mock_response)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client_cls.return_value = mock_client
+
+            event = WebhookEvent(
+                event=WebhookEventType.CONTRACT_PUBLISHED,
+                timestamp=datetime.now(UTC),
+                payload=ContractPublishedPayload(
+                    contract_id=uuid4(),
+                    asset_id=uuid4(),
+                    asset_fqn="test.asset",
+                    version="1.0.0",
+                    producer_team_id=uuid4(),
+                    producer_team_name="test-team",
+                ),
+            )
+            result = await _deliver_webhook(event, delivery_id=delivery_id)
+            assert result is True
+            mock_update.assert_called_once()
+            call_kwargs = mock_update.call_args.kwargs
+            assert call_kwargs["status"].value == "delivered"
+            assert call_kwargs["attempts"] == 1
+
+    async def test_deliver_failure_with_delivery_id(self):
+        """Updates delivery status on failure when delivery_id provided."""
+        delivery_id = uuid4()
+
+        with (
+            patch("tessera.services.webhooks.settings") as mock_settings,
+            patch("tessera.services.webhooks.httpx.AsyncClient") as mock_client_cls,
+            patch("tessera.services.webhooks.asyncio.sleep") as mock_sleep,
+            patch("tessera.services.webhooks._update_delivery_status") as mock_update,
+        ):
+            mock_settings.webhook_url = "https://example.com/webhook"
+            mock_settings.webhook_secret = None
+
+            mock_response = AsyncMock()
+            mock_response.status_code = 500
+            mock_response.text = "Error"
+
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(return_value=mock_response)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client_cls.return_value = mock_client
+
+            mock_sleep.return_value = None
+
+            event = WebhookEvent(
+                event=WebhookEventType.CONTRACT_PUBLISHED,
+                timestamp=datetime.now(UTC),
+                payload=ContractPublishedPayload(
+                    contract_id=uuid4(),
+                    asset_id=uuid4(),
+                    asset_fqn="test.asset",
+                    version="1.0.0",
+                    producer_team_id=uuid4(),
+                    producer_team_name="test-team",
+                ),
+            )
+            result = await _deliver_webhook(event, delivery_id=delivery_id)
+            assert result is False
+            mock_update.assert_called_once()
+            call_kwargs = mock_update.call_args.kwargs
+            assert call_kwargs["status"].value == "failed"
+            assert call_kwargs["attempts"] == 3
+
+    async def test_deliver_request_error(self):
+        """Handles httpx.RequestError during delivery."""
+        import httpx
+
+        with (
+            patch("tessera.services.webhooks.settings") as mock_settings,
+            patch("tessera.services.webhooks.httpx.AsyncClient") as mock_client_cls,
+            patch("tessera.services.webhooks.asyncio.sleep") as mock_sleep,
+        ):
+            mock_settings.webhook_url = "https://example.com/webhook"
+            mock_settings.webhook_secret = None
+
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(side_effect=httpx.RequestError("Connection failed"))
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client_cls.return_value = mock_client
+
+            mock_sleep.return_value = None
+
+            event = WebhookEvent(
+                event=WebhookEventType.CONTRACT_PUBLISHED,
+                timestamp=datetime.now(UTC),
+                payload=ContractPublishedPayload(
+                    contract_id=uuid4(),
+                    asset_id=uuid4(),
+                    asset_fqn="test.asset",
+                    version="1.0.0",
+                    producer_team_id=uuid4(),
+                    producer_team_name="test-team",
+                ),
+            )
+            result = await _deliver_webhook(event)
+            assert result is False
+            assert mock_client.post.call_count == 3
+
+    async def test_deliver_request_error_with_delivery_id(self):
+        """Updates status on RequestError when delivery_id provided."""
+        import httpx
+
+        delivery_id = uuid4()
+
+        with (
+            patch("tessera.services.webhooks.settings") as mock_settings,
+            patch("tessera.services.webhooks.httpx.AsyncClient") as mock_client_cls,
+            patch("tessera.services.webhooks.asyncio.sleep") as mock_sleep,
+            patch("tessera.services.webhooks._update_delivery_status") as mock_update,
+        ):
+            mock_settings.webhook_url = "https://example.com/webhook"
+            mock_settings.webhook_secret = None
+
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(side_effect=httpx.RequestError("Connection refused"))
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client_cls.return_value = mock_client
+
+            mock_sleep.return_value = None
+
+            event = WebhookEvent(
+                event=WebhookEventType.CONTRACT_PUBLISHED,
+                timestamp=datetime.now(UTC),
+                payload=ContractPublishedPayload(
+                    contract_id=uuid4(),
+                    asset_id=uuid4(),
+                    asset_fqn="test.asset",
+                    version="1.0.0",
+                    producer_team_id=uuid4(),
+                    producer_team_name="test-team",
+                ),
+            )
+            result = await _deliver_webhook(event, delivery_id=delivery_id)
+            assert result is False
+            mock_update.assert_called_once()
+            call_kwargs = mock_update.call_args.kwargs
+            assert "Connection refused" in call_kwargs["last_error"]

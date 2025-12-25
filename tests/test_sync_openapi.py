@@ -161,6 +161,92 @@ class TestOpenAPISync:
         # Endpoint may return error or success with empty results
         assert resp.status_code in (200, 400)
 
+    async def test_import_openapi_update_existing(self, client: AsyncClient):
+        """Import OpenAPI spec updates existing assets."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "openapi-update-team"})
+        team_id = team_resp.json()["id"]
+
+        openapi_spec = {
+            "openapi": "3.0.0",
+            "info": {"title": "Update API", "version": "1.0.0"},
+            "paths": {
+                "/products": {
+                    "get": {
+                        "operationId": "listProducts",
+                        "summary": "List products",
+                        "responses": {
+                            "200": {
+                                "description": "Success",
+                                "content": {
+                                    "application/json": {
+                                        "schema": {"type": "array", "items": {"type": "object"}}
+                                    }
+                                },
+                            }
+                        },
+                    }
+                }
+            },
+        }
+
+        # First import
+        resp1 = await client.post(
+            "/api/v1/sync/openapi",
+            json={"spec": openapi_spec, "owner_team_id": team_id},
+        )
+        assert resp1.status_code == 200
+        data1 = resp1.json()
+        assert data1["assets_created"] >= 1
+
+        # Second import should update
+        openapi_spec["info"]["version"] = "2.0.0"
+        openapi_spec["paths"]["/products"]["get"]["summary"] = "List all products"
+        resp2 = await client.post(
+            "/api/v1/sync/openapi",
+            json={"spec": openapi_spec, "owner_team_id": team_id},
+        )
+        assert resp2.status_code == 200
+        data2 = resp2.json()
+        assert data2["assets_updated"] >= 1
+
+    async def test_import_openapi_dry_run_existing(self, client: AsyncClient):
+        """Dry run with existing assets shows would_update."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "openapi-dryrun-exist"})
+        team_id = team_resp.json()["id"]
+
+        openapi_spec = {
+            "openapi": "3.0.0",
+            "info": {"title": "Dry Run Existing API", "version": "1.0.0"},
+            "paths": {
+                "/status": {
+                    "get": {
+                        "operationId": "getStatus",
+                        "responses": {"200": {"description": "OK"}},
+                    }
+                }
+            },
+        }
+
+        # First create the asset
+        resp1 = await client.post(
+            "/api/v1/sync/openapi",
+            json={"spec": openapi_spec, "owner_team_id": team_id},
+        )
+        assert resp1.status_code == 200
+        assert resp1.json()["assets_created"] >= 1
+
+        # Now dry run should show would_update
+        resp2 = await client.post(
+            "/api/v1/sync/openapi",
+            json={"spec": openapi_spec, "owner_team_id": team_id, "dry_run": True},
+        )
+        assert resp2.status_code == 200
+        data2 = resp2.json()
+        endpoints = data2.get("endpoints", [])
+        # At least one endpoint should show would_update
+        actions = [e["action"] for e in endpoints]
+        assert "would_update" in actions or data2.get("assets_updated", 0) >= 1
+
 
 class TestGraphQLSync:
     """Tests for /api/v1/sync/graphql endpoint."""
