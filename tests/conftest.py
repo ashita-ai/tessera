@@ -19,13 +19,17 @@ os.environ["RATE_LIMIT_ENABLED"] = "false"
 if "REDIS_URL" not in os.environ:
     os.environ["REDIS_URL"] = ""
 
-import pytest
-from httpx import ASGITransport, AsyncClient
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+import pytest  # noqa: E402
+from httpx import ASGITransport, AsyncClient  # noqa: E402
+from sqlalchemy import text  # noqa: E402
+from sqlalchemy.ext.asyncio import (  # noqa: E402
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
-from tessera.db.models import Base
-from tessera.main import app
+from tessera.db.models import Base  # noqa: E402
+from tessera.main import app  # noqa: E402
 
 # Support both PostgreSQL and SQLite
 # SQLite: DATABASE_URL=sqlite+aiosqlite:///./test.db or sqlite+aiosqlite:///:memory:
@@ -75,6 +79,7 @@ def drop_tables(connection):
     if not _USE_SQLITE:
         # Drop all tables with CASCADE to handle dependencies
         from sqlalchemy import inspect
+
         inspector = inspect(connection)
         tables = inspector.get_table_names(schema="core")
         tables.extend(inspector.get_table_names(schema="workflow"))
@@ -129,8 +134,8 @@ async def test_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
 @pytest.fixture
 async def client(test_engine) -> AsyncGenerator[AsyncClient, None]:
     """Create a test client with isolated database and auth disabled."""
-    from tessera.db import database
     from tessera.config import settings
+    from tessera.db import database
 
     # Disable auth for general tests
     original_auth_disabled = settings.auth_disabled

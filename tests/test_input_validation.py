@@ -255,8 +255,7 @@ class TestSchemaSizeValidation:
         """Invalid schema with too many properties."""
         # Create a schema with more than settings.max_schema_properties
         too_many_props = {
-            f"field_{i}": {"type": "string"}
-            for i in range(settings.max_schema_properties + 1)
+            f"field_{i}": {"type": "string"} for i in range(settings.max_schema_properties + 1)
         }
 
         with pytest.raises(ValidationError) as exc_info:

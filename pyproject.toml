@@ -80,6 +80,22 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 
+[tool.coverage.run]
+source = ["src/tessera"]
+concurrency = ["greenlet", "thread"]
+omit = [
+    "src/tessera/cli/*",
+    "src/tessera/connectors/*",
+    "src/tessera/web/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
+
 [dependency-groups]
 dev = [
     "aiosqlite>=0.22.0,<1.0.0",

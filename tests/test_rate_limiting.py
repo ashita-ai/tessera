@@ -1,11 +1,12 @@
 """Tests for rate limiting enforcement."""
 
+import os
+from collections.abc import AsyncGenerator
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from collections.abc import AsyncGenerator
-import os
 
 from tessera.db.models import Base, TeamDB
 from tessera.main import app
@@ -16,11 +17,13 @@ from tessera.services.auth import create_api_key
 TEST_DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 _USE_SQLITE = TEST_DATABASE_URL.startswith("sqlite")
 
+
 @pytest.fixture
 async def test_engine():
     engine = create_async_engine(TEST_DATABASE_URL, echo=False)
     yield engine
     await engine.dispose()
+
 
 @pytest.fixture
 async def session(test_engine) -> AsyncGenerator[AsyncSession, None]:
@@ -39,10 +42,11 @@ async def session(test_engine) -> AsyncGenerator[AsyncSession, None]:
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
 
+
 @pytest.fixture
 async def client(session) -> AsyncGenerator[AsyncClient, None]:
-    from tessera.db import database
     from tessera.config import settings
+    from tessera.db import database
 
     # Enable rate limiting for tests
     original_rate_limit_enabled = settings.rate_limit_enabled
@@ -62,6 +66,7 @@ async def client(session) -> AsyncGenerator[AsyncClient, None]:
     settings.rate_limit_enabled = original_rate_limit_enabled
     settings.rate_limit_read = original_rate_limit_read
 
+
 async def create_team_and_key(session: AsyncSession, name: str, scopes: list[APIKeyScope]):
     team = TeamDB(name=name)
     session.add(team)
@@ -70,6 +75,7 @@ async def create_team_and_key(session: AsyncSession, name: str, scopes: list[API
     key_data = APIKeyCreate(name=f"{name}-key", team_id=team.id, scopes=scopes)
     api_key = await create_api_key(session, key_data)
     return team, api_key.key
+
 
 class TestRateLimiting:
     """Tests for rate limit enforcement."""
@@ -95,8 +101,8 @@ class TestRateLimiting:
 
     async def test_rate_limit_disabled(self, session: AsyncSession):
         """Test that rate limiting can be disabled."""
-        from tessera.db import database
         from tessera.config import settings
+        from tessera.db import database
 
         # Disable rate limiting
         original_rate_limit_enabled = settings.rate_limit_enabled
@@ -111,12 +117,15 @@ class TestRateLimiting:
         app.dependency_overrides[database.get_session] = get_test_session
 
         try:
-            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
                 # Make many requests - should all succeed when rate limiting is disabled
                 for i in range(10):
                     response = await client.get("/api/v1/assets", headers=headers)
-                    assert response.status_code == 200, f"Request {i+1} should succeed when rate limiting is disabled"
+                    assert (
+                        response.status_code == 200
+                    ), f"Request {i + 1} should succeed when rate limiting is disabled"
         finally:
             app.dependency_overrides.clear()
             settings.rate_limit_enabled = original_rate_limit_enabled
-
