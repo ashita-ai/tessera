@@ -340,3 +340,165 @@ class TestBootstrapKey:
         finally:
             settings.auth_disabled = original_auth_disabled
             settings.bootstrap_api_key = original_bootstrap_key
+
+
+class TestAuthContext:
+    """Tests for AuthContext class and scope checking."""
+
+    def test_auth_context_has_scope(self):
+        """Test AuthContext.has_scope method."""
+        from uuid import uuid4
+
+        from tessera.api.auth import AuthContext
+        from tessera.db.models import APIKeyDB, TeamDB
+        from tessera.models.enums import APIKeyScope
+
+        team = TeamDB(id=uuid4(), name="test-team")
+        api_key = APIKeyDB(
+            key_hash="hash",
+            key_prefix="tess_",
+            name="Test Key",
+            team_id=team.id,
+            scopes=[APIKeyScope.READ.value, APIKeyScope.WRITE.value],
+        )
+
+        ctx = AuthContext(
+            team=team,
+            api_key=api_key,
+            scopes=[APIKeyScope.READ, APIKeyScope.WRITE],
+        )
+
+        assert ctx.has_scope(APIKeyScope.READ)
+        assert ctx.has_scope(APIKeyScope.WRITE)
+        assert not ctx.has_scope(APIKeyScope.ADMIN)
+
+    def test_auth_context_admin_has_all_scopes(self):
+        """Test that admin scope grants access to all scopes."""
+        from uuid import uuid4
+
+        from tessera.api.auth import AuthContext
+        from tessera.db.models import APIKeyDB, TeamDB
+        from tessera.models.enums import APIKeyScope
+
+        team = TeamDB(id=uuid4(), name="admin-team")
+        api_key = APIKeyDB(
+            key_hash="hash",
+            key_prefix="tess_",
+            name="Admin Key",
+            team_id=team.id,
+            scopes=[APIKeyScope.ADMIN.value],
+        )
+
+        ctx = AuthContext(
+            team=team,
+            api_key=api_key,
+            scopes=[APIKeyScope.ADMIN],
+        )
+
+        # Admin should have access to all scopes
+        assert ctx.has_scope(APIKeyScope.READ)
+        assert ctx.has_scope(APIKeyScope.WRITE)
+        assert ctx.has_scope(APIKeyScope.ADMIN)
+
+    def test_auth_context_require_scope_raises(self):
+        """Test require_scope raises ForbiddenError when scope is missing."""
+        from uuid import uuid4
+
+        import pytest
+
+        from tessera.api.auth import AuthContext
+        from tessera.api.errors import ForbiddenError
+        from tessera.db.models import APIKeyDB, TeamDB
+        from tessera.models.enums import APIKeyScope
+
+        team = TeamDB(id=uuid4(), name="limited-team")
+        api_key = APIKeyDB(
+            key_hash="hash",
+            key_prefix="tess_",
+            name="Read-only Key",
+            team_id=team.id,
+            scopes=[APIKeyScope.READ.value],
+        )
+
+        ctx = AuthContext(
+            team=team,
+            api_key=api_key,
+            scopes=[APIKeyScope.READ],
+        )
+
+        # Should not raise for READ
+        ctx.require_scope(APIKeyScope.READ)
+
+        # Should raise for WRITE
+        with pytest.raises(ForbiddenError) as exc_info:
+            ctx.require_scope(APIKeyScope.WRITE)
+        assert "write" in str(exc_info.value).lower()
+
+    def test_auth_context_team_id_property(self):
+        """Test team_id property returns correct ID."""
+        from uuid import uuid4
+
+        from tessera.api.auth import AuthContext
+        from tessera.db.models import APIKeyDB, TeamDB
+        from tessera.models.enums import APIKeyScope
+
+        team_id = uuid4()
+        team = TeamDB(id=team_id, name="test-team")
+        api_key = APIKeyDB(
+            key_hash="hash",
+            key_prefix="tess_",
+            name="Key",
+            team_id=team.id,
+            scopes=[APIKeyScope.READ.value],
+        )
+
+        ctx = AuthContext(
+            team=team,
+            api_key=api_key,
+            scopes=[APIKeyScope.READ],
+        )
+
+        assert ctx.team_id == team_id
+
+
+class TestRequireScopeDependency:
+    """Tests for the require_scope dependency factory."""
+
+    async def test_require_scope_factory(self):
+        """Test require_scope creates correct dependency."""
+        from uuid import uuid4
+
+        from tessera.api.auth import AuthContext, require_scope
+        from tessera.db.models import APIKeyDB, TeamDB
+        from tessera.models.enums import APIKeyScope
+
+        team = TeamDB(id=uuid4(), name="test-team")
+        api_key = APIKeyDB(
+            key_hash="hash",
+            key_prefix="tess_",
+            name="Key",
+            team_id=team.id,
+            scopes=[APIKeyScope.READ.value],
+        )
+
+        ctx = AuthContext(
+            team=team,
+            api_key=api_key,
+            scopes=[APIKeyScope.READ],
+        )
+
+        # Create the check function
+        check_read = require_scope(APIKeyScope.READ)
+
+        # Should not raise for READ scope
+        await check_read(ctx)
+
+        # Create check for WRITE - should raise
+        check_write = require_scope(APIKeyScope.WRITE)
+
+        import pytest
+
+        from tessera.api.errors import ForbiddenError
+
+        with pytest.raises(ForbiddenError):
+            await check_write(ctx)
