@@ -22,9 +22,9 @@ from tessera.db import AssetDB, ContractDB, ProposalDB, RegistrationDB, TeamDB, 
 from tessera.models.enums import CompatibilityMode, ContractStatus, RegistrationStatus, ResourceType
 from tessera.services import validate_json_schema
 from tessera.services.audit import log_contract_published, log_proposal_created
+from tessera.services.graphql import GraphQLOperation, parse_graphql_introspection
 from tessera.services.graphql import operations_to_assets as graphql_operations_to_assets
-from tessera.services.graphql import parse_graphql_introspection
-from tessera.services.openapi import endpoints_to_assets, parse_openapi
+from tessera.services.openapi import OpenAPIEndpoint, endpoints_to_assets, parse_openapi
 from tessera.services.schema_diff import check_compatibility, diff_schemas
 
 router = APIRouter()
@@ -2094,5 +2094,751 @@ async def import_graphql(
         assets_skipped=assets_skipped,
         contracts_published=contracts_published,
         operations=operations_results,
+        parse_errors=parse_result.errors,
+    )
+
+
+# =============================================================================
+# OpenAPI Impact and Diff Endpoints
+# =============================================================================
+
+
+class OpenAPIImpactRequest(BaseModel):
+    """Request body for OpenAPI spec impact analysis."""
+
+    spec: dict[str, Any] = Field(..., description="OpenAPI 3.x specification as JSON")
+    environment: str = Field(
+        default="production",
+        min_length=1,
+        max_length=50,
+        description="Environment to check against",
+    )
+
+
+class OpenAPIImpactResult(BaseModel):
+    """Impact analysis result for a single OpenAPI endpoint."""
+
+    fqn: str
+    path: str
+    method: str
+    has_contract: bool
+    safe_to_publish: bool
+    change_type: str | None = None
+    breaking_changes: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class OpenAPIImpactResponse(BaseModel):
+    """Response from OpenAPI spec impact analysis."""
+
+    status: str
+    api_title: str
+    api_version: str
+    total_endpoints: int
+    endpoints_with_contracts: int
+    breaking_changes_count: int
+    results: list[OpenAPIImpactResult]
+    parse_errors: list[str] = Field(default_factory=list)
+
+
+async def _check_openapi_endpoint_impact(
+    endpoint: "OpenAPIEndpoint",
+    api_title: str,
+    environment: str,
+    session: AsyncSession,
+) -> OpenAPIImpactResult:
+    """Check impact of a single OpenAPI endpoint against its registered contract."""
+    from tessera.services.openapi import generate_fqn as openapi_generate_fqn
+
+    fqn = openapi_generate_fqn(api_title, endpoint.path, endpoint.method)
+
+    # Look up existing asset and active contract
+    asset_result = await session.execute(
+        select(AssetDB)
+        .where(AssetDB.fqn == fqn)
+        .where(AssetDB.environment == environment)
+        .where(AssetDB.deleted_at.is_(None))
+    )
+    existing_asset = asset_result.scalar_one_or_none()
+
+    if not existing_asset:
+        return OpenAPIImpactResult(
+            fqn=fqn,
+            path=endpoint.path,
+            method=endpoint.method,
+            has_contract=False,
+            safe_to_publish=True,
+            change_type=None,
+            breaking_changes=[],
+        )
+
+    # Get active contract for this asset
+    contract_result = await session.execute(
+        select(ContractDB).where(
+            ContractDB.asset_id == existing_asset.id,
+            ContractDB.status == ContractStatus.ACTIVE,
+        )
+    )
+    existing_contract = contract_result.scalar_one_or_none()
+
+    if not existing_contract:
+        return OpenAPIImpactResult(
+            fqn=fqn,
+            path=endpoint.path,
+            method=endpoint.method,
+            has_contract=False,
+            safe_to_publish=True,
+            change_type=None,
+            breaking_changes=[],
+        )
+
+    # Compare schemas
+    proposed_schema = endpoint.combined_schema
+    existing_schema = existing_contract.schema_def
+
+    diff_result = diff_schemas(existing_schema, proposed_schema)
+    is_compatible, breaking_changes_list = check_compatibility(
+        existing_schema,
+        proposed_schema,
+        existing_contract.compatibility_mode,
+    )
+
+    return OpenAPIImpactResult(
+        fqn=fqn,
+        path=endpoint.path,
+        method=endpoint.method,
+        has_contract=True,
+        safe_to_publish=is_compatible,
+        change_type=diff_result.change_type.value,
+        breaking_changes=[bc.to_dict() for bc in breaking_changes_list],
+    )
+
+
+@router.post("/openapi/impact", response_model=OpenAPIImpactResponse)
+@limit_admin
+async def check_openapi_impact(
+    request: Request,
+    impact_req: OpenAPIImpactRequest,
+    auth: Auth,
+    _: None = RequireAdmin,
+    session: AsyncSession = Depends(get_session),
+) -> OpenAPIImpactResponse:
+    """Check impact of an OpenAPI spec against registered contracts.
+
+    Parses an OpenAPI 3.x spec and checks each endpoint's schema against
+    existing contracts. This is the primary CI/CD integration point for API
+    contract validation.
+
+    Returns impact analysis for each endpoint, identifying breaking changes.
+    """
+    # Parse the OpenAPI spec
+    parse_result = parse_openapi(impact_req.spec)
+
+    if not parse_result.endpoints and parse_result.errors:
+        raise BadRequestError(
+            "Failed to parse OpenAPI spec",
+            code=ErrorCode.INVALID_OPENAPI_SPEC,
+            details={"errors": parse_result.errors},
+        )
+
+    results: list[OpenAPIImpactResult] = []
+
+    for endpoint in parse_result.endpoints:
+        result = await _check_openapi_endpoint_impact(
+            endpoint,
+            parse_result.title,
+            impact_req.environment,
+            session,
+        )
+        results.append(result)
+
+    endpoints_with_contracts = sum(1 for r in results if r.has_contract)
+    breaking_changes_count = sum(1 for r in results if not r.safe_to_publish)
+
+    return OpenAPIImpactResponse(
+        status="success" if breaking_changes_count == 0 else "breaking_changes_detected",
+        api_title=parse_result.title,
+        api_version=parse_result.version,
+        total_endpoints=len(results),
+        endpoints_with_contracts=endpoints_with_contracts,
+        breaking_changes_count=breaking_changes_count,
+        results=results,
+        parse_errors=parse_result.errors,
+    )
+
+
+class OpenAPIDiffRequest(BaseModel):
+    """Request body for OpenAPI spec diff (CI preview)."""
+
+    spec: dict[str, Any] = Field(..., description="OpenAPI 3.x specification as JSON")
+    environment: str = Field(
+        default="production", min_length=1, max_length=50, description="Environment to diff against"
+    )
+    fail_on_breaking: bool = Field(
+        default=True,
+        description="Return blocking=true if any breaking changes are detected",
+    )
+
+
+class OpenAPIDiffItem(BaseModel):
+    """A single change detected in OpenAPI spec."""
+
+    fqn: str
+    path: str
+    method: str
+    change_type: str  # 'new', 'modified', 'unchanged'
+    has_schema: bool = True
+    schema_change_type: str | None = None  # 'none', 'compatible', 'breaking'
+    breaking_changes: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class OpenAPIDiffResponse(BaseModel):
+    """Response from OpenAPI spec diff (CI preview)."""
+
+    status: str  # 'clean', 'changes_detected', 'breaking_changes_detected'
+    api_title: str
+    api_version: str
+    summary: dict[str, int]  # {'new': N, 'modified': M, 'unchanged': U, 'breaking': B}
+    blocking: bool  # True if CI should fail
+    endpoints: list[OpenAPIDiffItem]
+    parse_errors: list[str] = Field(default_factory=list)
+
+
+@router.post("/openapi/diff", response_model=OpenAPIDiffResponse)
+@limit_admin
+async def diff_openapi_spec(
+    request: Request,
+    diff_req: OpenAPIDiffRequest,
+    auth: Auth,
+    _: None = RequireAdmin,
+    session: AsyncSession = Depends(get_session),
+) -> OpenAPIDiffResponse:
+    """Preview what would change if this OpenAPI spec is applied (CI dry-run).
+
+    This is the primary CI/CD integration point for API contract validation. Call this
+    in your PR checks to:
+    1. See what endpoints would be created/modified
+    2. Detect breaking schema changes
+    3. Fail the build if breaking changes aren't acknowledged
+
+    Example CI usage:
+    ```yaml
+    - name: Check API contract impact
+      run: |
+        curl -X POST $TESSERA_URL/api/v1/sync/openapi/diff \\
+          -H "Authorization: Bearer $TESSERA_API_KEY" \\
+          -H "Content-Type: application/json" \\
+          -d '{"spec": '$(cat openapi.json)', "fail_on_breaking": true}'
+    ```
+    """
+    from tessera.services.openapi import generate_fqn as openapi_generate_fqn
+
+    # Parse the OpenAPI spec
+    parse_result = parse_openapi(diff_req.spec)
+
+    if not parse_result.endpoints and parse_result.errors:
+        raise BadRequestError(
+            "Failed to parse OpenAPI spec",
+            code=ErrorCode.INVALID_OPENAPI_SPEC,
+            details={"errors": parse_result.errors},
+        )
+
+    endpoints: list[OpenAPIDiffItem] = []
+
+    # Build FQN -> endpoint mapping from spec
+    spec_fqns: dict[str, OpenAPIEndpoint] = {}
+    for endpoint in parse_result.endpoints:
+        fqn = openapi_generate_fqn(parse_result.title, endpoint.path, endpoint.method)
+        spec_fqns[fqn] = endpoint
+
+    # Get all existing assets for this environment
+    existing_result = await session.execute(
+        select(AssetDB)
+        .where(AssetDB.environment == diff_req.environment)
+        .where(AssetDB.deleted_at.is_(None))
+        .where(AssetDB.resource_type == ResourceType.API_ENDPOINT)
+    )
+    existing_assets = {a.fqn: a for a in existing_result.scalars().all()}
+
+    # Process each endpoint in the spec
+    for fqn, endpoint in spec_fqns.items():
+        existing_asset = existing_assets.get(fqn)
+
+        if not existing_asset:
+            # New endpoint
+            endpoints.append(
+                OpenAPIDiffItem(
+                    fqn=fqn,
+                    path=endpoint.path,
+                    method=endpoint.method,
+                    change_type="new",
+                    has_schema=True,
+                    schema_change_type=None,
+                    breaking_changes=[],
+                )
+            )
+        else:
+            # Existing endpoint - check for schema changes
+            contract_result = await session.execute(
+                select(ContractDB)
+                .where(ContractDB.asset_id == existing_asset.id)
+                .where(ContractDB.status == ContractStatus.ACTIVE)
+            )
+            existing_contract = contract_result.scalar_one_or_none()
+
+            if not existing_contract:
+                # No contract to compare
+                endpoints.append(
+                    OpenAPIDiffItem(
+                        fqn=fqn,
+                        path=endpoint.path,
+                        method=endpoint.method,
+                        change_type="modified",
+                        has_schema=True,
+                        schema_change_type=None,
+                        breaking_changes=[],
+                    )
+                )
+            else:
+                # Compare schemas
+                proposed_schema = endpoint.combined_schema
+                existing_schema = existing_contract.schema_def
+
+                diff_result = diff_schemas(existing_schema, proposed_schema)
+                is_compatible, breaking_changes_list = check_compatibility(
+                    existing_schema,
+                    proposed_schema,
+                    existing_contract.compatibility_mode,
+                )
+
+                if diff_result.change_type.value == "none":
+                    schema_change_type = "none"
+                    change_type = "unchanged"
+                elif is_compatible:
+                    schema_change_type = "compatible"
+                    change_type = "modified"
+                else:
+                    schema_change_type = "breaking"
+                    change_type = "modified"
+
+                endpoints.append(
+                    OpenAPIDiffItem(
+                        fqn=fqn,
+                        path=endpoint.path,
+                        method=endpoint.method,
+                        change_type=change_type,
+                        has_schema=True,
+                        schema_change_type=schema_change_type,
+                        breaking_changes=[bc.to_dict() for bc in breaking_changes_list],
+                    )
+                )
+
+    # Calculate summary
+    summary = {
+        "new": sum(1 for e in endpoints if e.change_type == "new"),
+        "modified": sum(1 for e in endpoints if e.change_type == "modified"),
+        "unchanged": sum(1 for e in endpoints if e.change_type == "unchanged"),
+        "breaking": sum(1 for e in endpoints if e.schema_change_type == "breaking"),
+    }
+
+    # Determine status and blocking
+    has_breaking = summary["breaking"] > 0
+
+    if has_breaking:
+        status = "breaking_changes_detected"
+    elif summary["new"] > 0 or summary["modified"] > 0:
+        status = "changes_detected"
+    else:
+        status = "clean"
+
+    blocking = has_breaking and diff_req.fail_on_breaking
+
+    return OpenAPIDiffResponse(
+        status=status,
+        api_title=parse_result.title,
+        api_version=parse_result.version,
+        summary=summary,
+        blocking=blocking,
+        endpoints=endpoints,
+        parse_errors=parse_result.errors,
+    )
+
+
+# =============================================================================
+# GraphQL Impact and Diff Endpoints
+# =============================================================================
+
+
+class GraphQLImpactRequest(BaseModel):
+    """Request body for GraphQL schema impact analysis."""
+
+    introspection: dict[str, Any] = Field(
+        ..., description="GraphQL introspection response (__schema or data.__schema)"
+    )
+    schema_name: str = Field(
+        default="GraphQL API",
+        min_length=1,
+        max_length=100,
+        description="Name for the GraphQL schema (used in FQN generation)",
+    )
+    environment: str = Field(
+        default="production",
+        min_length=1,
+        max_length=50,
+        description="Environment to check against",
+    )
+
+
+class GraphQLImpactResult(BaseModel):
+    """Impact analysis result for a single GraphQL operation."""
+
+    fqn: str
+    operation_name: str
+    operation_type: str  # "query" or "mutation"
+    has_contract: bool
+    safe_to_publish: bool
+    change_type: str | None = None
+    breaking_changes: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class GraphQLImpactResponse(BaseModel):
+    """Response from GraphQL schema impact analysis."""
+
+    status: str
+    schema_name: str
+    total_operations: int
+    operations_with_contracts: int
+    breaking_changes_count: int
+    results: list[GraphQLImpactResult]
+    parse_errors: list[str] = Field(default_factory=list)
+
+
+async def _check_graphql_operation_impact(
+    operation: "GraphQLOperation",
+    schema_name: str,
+    environment: str,
+    session: AsyncSession,
+) -> GraphQLImpactResult:
+    """Check impact of a single GraphQL operation against its registered contract."""
+    from tessera.services.graphql import generate_fqn as graphql_generate_fqn
+
+    fqn = graphql_generate_fqn(schema_name, operation.name, operation.operation_type)
+
+    # Look up existing asset and active contract
+    asset_result = await session.execute(
+        select(AssetDB)
+        .where(AssetDB.fqn == fqn)
+        .where(AssetDB.environment == environment)
+        .where(AssetDB.deleted_at.is_(None))
+    )
+    existing_asset = asset_result.scalar_one_or_none()
+
+    if not existing_asset:
+        return GraphQLImpactResult(
+            fqn=fqn,
+            operation_name=operation.name,
+            operation_type=operation.operation_type,
+            has_contract=False,
+            safe_to_publish=True,
+            change_type=None,
+            breaking_changes=[],
+        )
+
+    # Get active contract for this asset
+    contract_result = await session.execute(
+        select(ContractDB).where(
+            ContractDB.asset_id == existing_asset.id,
+            ContractDB.status == ContractStatus.ACTIVE,
+        )
+    )
+    existing_contract = contract_result.scalar_one_or_none()
+
+    if not existing_contract:
+        return GraphQLImpactResult(
+            fqn=fqn,
+            operation_name=operation.name,
+            operation_type=operation.operation_type,
+            has_contract=False,
+            safe_to_publish=True,
+            change_type=None,
+            breaking_changes=[],
+        )
+
+    # Compare schemas
+    proposed_schema = operation.combined_schema
+    existing_schema = existing_contract.schema_def
+
+    diff_result = diff_schemas(existing_schema, proposed_schema)
+    is_compatible, breaking_changes_list = check_compatibility(
+        existing_schema,
+        proposed_schema,
+        existing_contract.compatibility_mode,
+    )
+
+    return GraphQLImpactResult(
+        fqn=fqn,
+        operation_name=operation.name,
+        operation_type=operation.operation_type,
+        has_contract=True,
+        safe_to_publish=is_compatible,
+        change_type=diff_result.change_type.value,
+        breaking_changes=[bc.to_dict() for bc in breaking_changes_list],
+    )
+
+
+@router.post("/graphql/impact", response_model=GraphQLImpactResponse)
+@limit_admin
+async def check_graphql_impact(
+    request: Request,
+    impact_req: GraphQLImpactRequest,
+    auth: Auth,
+    _: None = RequireAdmin,
+    session: AsyncSession = Depends(get_session),
+) -> GraphQLImpactResponse:
+    """Check impact of a GraphQL schema against registered contracts.
+
+    Parses a GraphQL introspection response and checks each operation's schema
+    against existing contracts. This is the primary CI/CD integration point for
+    GraphQL contract validation.
+
+    Returns impact analysis for each operation, identifying breaking changes.
+    """
+    # Parse the GraphQL introspection
+    parse_result = parse_graphql_introspection(impact_req.introspection)
+
+    if not parse_result.operations and parse_result.errors:
+        raise BadRequestError(
+            "Failed to parse GraphQL introspection",
+            code=ErrorCode.INVALID_OPENAPI_SPEC,  # Reuse error code
+            details={"errors": parse_result.errors},
+        )
+
+    results: list[GraphQLImpactResult] = []
+
+    for operation in parse_result.operations:
+        result = await _check_graphql_operation_impact(
+            operation,
+            impact_req.schema_name,
+            impact_req.environment,
+            session,
+        )
+        results.append(result)
+
+    operations_with_contracts = sum(1 for r in results if r.has_contract)
+    breaking_changes_count = sum(1 for r in results if not r.safe_to_publish)
+
+    return GraphQLImpactResponse(
+        status="success" if breaking_changes_count == 0 else "breaking_changes_detected",
+        schema_name=impact_req.schema_name,
+        total_operations=len(results),
+        operations_with_contracts=operations_with_contracts,
+        breaking_changes_count=breaking_changes_count,
+        results=results,
+        parse_errors=parse_result.errors,
+    )
+
+
+class GraphQLDiffRequest(BaseModel):
+    """Request body for GraphQL schema diff (CI preview)."""
+
+    introspection: dict[str, Any] = Field(
+        ..., description="GraphQL introspection response (__schema or data.__schema)"
+    )
+    schema_name: str = Field(
+        default="GraphQL API",
+        min_length=1,
+        max_length=100,
+        description="Name for the GraphQL schema (used in FQN generation)",
+    )
+    environment: str = Field(
+        default="production", min_length=1, max_length=50, description="Environment to diff against"
+    )
+    fail_on_breaking: bool = Field(
+        default=True,
+        description="Return blocking=true if any breaking changes are detected",
+    )
+
+
+class GraphQLDiffItem(BaseModel):
+    """A single change detected in GraphQL schema."""
+
+    fqn: str
+    operation_name: str
+    operation_type: str  # "query" or "mutation"
+    change_type: str  # 'new', 'modified', 'unchanged'
+    has_schema: bool = True
+    schema_change_type: str | None = None  # 'none', 'compatible', 'breaking'
+    breaking_changes: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class GraphQLDiffResponse(BaseModel):
+    """Response from GraphQL schema diff (CI preview)."""
+
+    status: str  # 'clean', 'changes_detected', 'breaking_changes_detected'
+    schema_name: str
+    summary: dict[str, int]  # {'new': N, 'modified': M, 'unchanged': U, 'breaking': B}
+    blocking: bool  # True if CI should fail
+    operations: list[GraphQLDiffItem]
+    parse_errors: list[str] = Field(default_factory=list)
+
+
+@router.post("/graphql/diff", response_model=GraphQLDiffResponse)
+@limit_admin
+async def diff_graphql_schema(
+    request: Request,
+    diff_req: GraphQLDiffRequest,
+    auth: Auth,
+    _: None = RequireAdmin,
+    session: AsyncSession = Depends(get_session),
+) -> GraphQLDiffResponse:
+    """Preview what would change if this GraphQL schema is applied (CI dry-run).
+
+    This is the primary CI/CD integration point for GraphQL contract validation. Call
+    this in your PR checks to:
+    1. See what operations would be created/modified
+    2. Detect breaking schema changes
+    3. Fail the build if breaking changes aren't acknowledged
+
+    Example CI usage:
+    ```yaml
+    - name: Check GraphQL contract impact
+      run: |
+        # Get introspection
+        INTROSPECTION=$(curl -s $GRAPHQL_URL -H "Content-Type: application/json" \\
+          -d '{"query": "{ __schema { ... } }"}')
+        # Check for breaking changes
+        curl -X POST $TESSERA_URL/api/v1/sync/graphql/diff \\
+          -H "Authorization: Bearer $TESSERA_API_KEY" \\
+          -H "Content-Type: application/json" \\
+          -d "{\"introspection\": $INTROSPECTION, \"fail_on_breaking\": true}"
+    ```
+    """
+    from tessera.services.graphql import generate_fqn as graphql_generate_fqn
+
+    # Parse the GraphQL introspection
+    parse_result = parse_graphql_introspection(diff_req.introspection)
+
+    if not parse_result.operations and parse_result.errors:
+        raise BadRequestError(
+            "Failed to parse GraphQL introspection",
+            code=ErrorCode.INVALID_OPENAPI_SPEC,  # Reuse error code
+            details={"errors": parse_result.errors},
+        )
+
+    operations: list[GraphQLDiffItem] = []
+
+    # Build FQN -> operation mapping from introspection
+    schema_fqns: dict[str, GraphQLOperation] = {}
+    for operation in parse_result.operations:
+        fqn = graphql_generate_fqn(diff_req.schema_name, operation.name, operation.operation_type)
+        schema_fqns[fqn] = operation
+
+    # Get all existing GraphQL assets for this environment
+    existing_result = await session.execute(
+        select(AssetDB)
+        .where(AssetDB.environment == diff_req.environment)
+        .where(AssetDB.deleted_at.is_(None))
+        .where(AssetDB.resource_type == ResourceType.GRAPHQL_QUERY)
+    )
+    existing_assets = {a.fqn: a for a in existing_result.scalars().all()}
+
+    # Process each operation in the schema
+    for fqn, operation in schema_fqns.items():
+        existing_asset = existing_assets.get(fqn)
+
+        if not existing_asset:
+            # New operation
+            operations.append(
+                GraphQLDiffItem(
+                    fqn=fqn,
+                    operation_name=operation.name,
+                    operation_type=operation.operation_type,
+                    change_type="new",
+                    has_schema=True,
+                    schema_change_type=None,
+                    breaking_changes=[],
+                )
+            )
+        else:
+            # Existing operation - check for schema changes
+            contract_result = await session.execute(
+                select(ContractDB)
+                .where(ContractDB.asset_id == existing_asset.id)
+                .where(ContractDB.status == ContractStatus.ACTIVE)
+            )
+            existing_contract = contract_result.scalar_one_or_none()
+
+            if not existing_contract:
+                # No contract to compare
+                operations.append(
+                    GraphQLDiffItem(
+                        fqn=fqn,
+                        operation_name=operation.name,
+                        operation_type=operation.operation_type,
+                        change_type="modified",
+                        has_schema=True,
+                        schema_change_type=None,
+                        breaking_changes=[],
+                    )
+                )
+            else:
+                # Compare schemas
+                proposed_schema = operation.combined_schema
+                existing_schema = existing_contract.schema_def
+
+                diff_result = diff_schemas(existing_schema, proposed_schema)
+                is_compatible, breaking_changes_list = check_compatibility(
+                    existing_schema,
+                    proposed_schema,
+                    existing_contract.compatibility_mode,
+                )
+
+                if diff_result.change_type.value == "none":
+                    schema_change_type = "none"
+                    change_type = "unchanged"
+                elif is_compatible:
+                    schema_change_type = "compatible"
+                    change_type = "modified"
+                else:
+                    schema_change_type = "breaking"
+                    change_type = "modified"
+
+                operations.append(
+                    GraphQLDiffItem(
+                        fqn=fqn,
+                        operation_name=operation.name,
+                        operation_type=operation.operation_type,
+                        change_type=change_type,
+                        has_schema=True,
+                        schema_change_type=schema_change_type,
+                        breaking_changes=[bc.to_dict() for bc in breaking_changes_list],
+                    )
+                )
+
+    # Calculate summary
+    summary = {
+        "new": sum(1 for o in operations if o.change_type == "new"),
+        "modified": sum(1 for o in operations if o.change_type == "modified"),
+        "unchanged": sum(1 for o in operations if o.change_type == "unchanged"),
+        "breaking": sum(1 for o in operations if o.schema_change_type == "breaking"),
+    }
+
+    # Determine status and blocking
+    has_breaking = summary["breaking"] > 0
+
+    if has_breaking:
+        status = "breaking_changes_detected"
+    elif summary["new"] > 0 or summary["modified"] > 0:
+        status = "changes_detected"
+    else:
+        status = "clean"
+
+    blocking = has_breaking and diff_req.fail_on_breaking
+
+    return GraphQLDiffResponse(
+        status=status,
+        schema_name=diff_req.schema_name,
+        summary=summary,
+        blocking=blocking,
+        operations=operations,
         parse_errors=parse_result.errors,
     )

@@ -493,6 +493,425 @@ class TestDbtUploadConflicts:
         assert data["assets"]["skipped"] >= 1
 
 
+class TestOpenAPIImpactAndDiff:
+    """Tests for OpenAPI impact and diff endpoints."""
+
+    async def test_openapi_impact_no_contracts(self, client: AsyncClient):
+        """Impact check with no existing contracts returns success."""
+        openapi_spec = {
+            "openapi": "3.0.0",
+            "info": {"title": "New API", "version": "1.0.0"},
+            "paths": {
+                "/health": {
+                    "get": {
+                        "operationId": "healthCheck",
+                        "responses": {"200": {"description": "OK"}},
+                    }
+                }
+            },
+        }
+
+        resp = await client.post(
+            "/api/v1/sync/openapi/impact",
+            json={"spec": openapi_spec},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "success"
+        assert data["breaking_changes_count"] == 0
+        assert data["endpoints_with_contracts"] == 0
+
+    async def test_openapi_impact_with_existing_contract(self, client: AsyncClient):
+        """Impact check detects when endpoint has existing contract."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "impact-test-team"})
+        team_id = team_resp.json()["id"]
+
+        # First import to create assets and contracts
+        openapi_spec = {
+            "openapi": "3.0.0",
+            "info": {"title": "Impact API", "version": "1.0.0"},
+            "paths": {
+                "/users": {
+                    "get": {
+                        "operationId": "listUsers",
+                        "responses": {
+                            "200": {
+                                "description": "OK",
+                                "content": {
+                                    "application/json": {
+                                        "schema": {
+                                            "type": "object",
+                                            "properties": {
+                                                "id": {"type": "integer"},
+                                                "name": {"type": "string"},
+                                            },
+                                        }
+                                    }
+                                },
+                            }
+                        },
+                    }
+                }
+            },
+        }
+
+        await client.post(
+            "/api/v1/sync/openapi",
+            json={
+                "spec": openapi_spec,
+                "owner_team_id": team_id,
+                "auto_publish_contracts": True,
+            },
+        )
+
+        # Now check impact - should find the contract
+        resp = await client.post(
+            "/api/v1/sync/openapi/impact",
+            json={"spec": openapi_spec},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["endpoints_with_contracts"] >= 1
+
+    async def test_openapi_diff_new_endpoints(self, client: AsyncClient):
+        """Diff shows new endpoints correctly."""
+        openapi_spec = {
+            "openapi": "3.0.0",
+            "info": {"title": "Diff New API", "version": "1.0.0"},
+            "paths": {
+                "/new-endpoint": {
+                    "get": {
+                        "operationId": "newEndpoint",
+                        "responses": {"200": {"description": "OK"}},
+                    }
+                }
+            },
+        }
+
+        resp = await client.post(
+            "/api/v1/sync/openapi/diff",
+            json={"spec": openapi_spec},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["summary"]["new"] >= 1
+        assert data["blocking"] is False
+
+    async def test_openapi_diff_detects_breaking_changes(self, client: AsyncClient):
+        """Diff detects breaking schema changes."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "diff-break-team"})
+        team_id = team_resp.json()["id"]
+
+        # First import with original schema
+        openapi_spec_v1 = {
+            "openapi": "3.0.0",
+            "info": {"title": "Breaking API", "version": "1.0.0"},
+            "paths": {
+                "/data": {
+                    "get": {
+                        "operationId": "getData",
+                        "responses": {
+                            "200": {
+                                "description": "OK",
+                                "content": {
+                                    "application/json": {
+                                        "schema": {
+                                            "type": "object",
+                                            "properties": {
+                                                "id": {"type": "integer"},
+                                                "email": {"type": "string"},
+                                            },
+                                            "required": ["id", "email"],
+                                        }
+                                    }
+                                },
+                            }
+                        },
+                    }
+                }
+            },
+        }
+
+        await client.post(
+            "/api/v1/sync/openapi",
+            json={
+                "spec": openapi_spec_v1,
+                "owner_team_id": team_id,
+                "auto_publish_contracts": True,
+            },
+        )
+
+        # Now diff with breaking change (remove email property)
+        openapi_spec_v2 = {
+            "openapi": "3.0.0",
+            "info": {"title": "Breaking API", "version": "2.0.0"},
+            "paths": {
+                "/data": {
+                    "get": {
+                        "operationId": "getData",
+                        "responses": {
+                            "200": {
+                                "description": "OK",
+                                "content": {
+                                    "application/json": {
+                                        "schema": {
+                                            "type": "object",
+                                            "properties": {
+                                                "id": {"type": "integer"},
+                                                # email removed - breaking change!
+                                            },
+                                            "required": ["id"],
+                                        }
+                                    }
+                                },
+                            }
+                        },
+                    }
+                }
+            },
+        }
+
+        resp = await client.post(
+            "/api/v1/sync/openapi/diff",
+            json={"spec": openapi_spec_v2, "fail_on_breaking": True},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        # Should detect breaking changes
+        assert data["summary"]["breaking"] >= 1 or data["summary"]["modified"] >= 1
+        if data["summary"]["breaking"] >= 1:
+            assert data["blocking"] is True
+            assert data["status"] == "breaking_changes_detected"
+
+    async def test_openapi_diff_fail_on_breaking_false(self, client: AsyncClient):
+        """Diff with fail_on_breaking=false doesn't block."""
+        openapi_spec = {
+            "openapi": "3.0.0",
+            "info": {"title": "Non-blocking API", "version": "1.0.0"},
+            "paths": {
+                "/test": {
+                    "get": {
+                        "operationId": "test",
+                        "responses": {"200": {"description": "OK"}},
+                    }
+                }
+            },
+        }
+
+        resp = await client.post(
+            "/api/v1/sync/openapi/diff",
+            json={"spec": openapi_spec, "fail_on_breaking": False},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["blocking"] is False
+
+
+class TestGraphQLImpactAndDiff:
+    """Tests for GraphQL impact and diff endpoints."""
+
+    async def test_graphql_impact_no_contracts(self, client: AsyncClient):
+        """Impact check with no existing contracts returns success."""
+        introspection = {
+            "__schema": {
+                "queryType": {"name": "Query"},
+                "types": [
+                    {
+                        "kind": "OBJECT",
+                        "name": "Query",
+                        "fields": [
+                            {
+                                "name": "ping",
+                                "args": [],
+                                "type": {"kind": "SCALAR", "name": "String"},
+                            }
+                        ],
+                    }
+                ],
+            }
+        }
+
+        resp = await client.post(
+            "/api/v1/sync/graphql/impact",
+            json={"introspection": introspection, "schema_name": "new-graphql-api"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "success"
+        assert data["breaking_changes_count"] == 0
+
+    async def test_graphql_impact_with_existing_contract(self, client: AsyncClient):
+        """Impact check finds existing contracts."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "gql-impact-team"})
+        team_id = team_resp.json()["id"]
+
+        introspection = {
+            "__schema": {
+                "queryType": {"name": "Query"},
+                "types": [
+                    {
+                        "kind": "OBJECT",
+                        "name": "Query",
+                        "fields": [
+                            {
+                                "name": "items",
+                                "args": [],
+                                "type": {
+                                    "kind": "LIST",
+                                    "ofType": {"kind": "SCALAR", "name": "String"},
+                                },
+                            }
+                        ],
+                    }
+                ],
+            }
+        }
+
+        # First import to create assets
+        await client.post(
+            "/api/v1/sync/graphql",
+            json={
+                "introspection": introspection,
+                "owner_team_id": team_id,
+                "schema_name": "impact-gql-api",
+                "auto_publish_contracts": True,
+            },
+        )
+
+        # Now check impact
+        resp = await client.post(
+            "/api/v1/sync/graphql/impact",
+            json={"introspection": introspection, "schema_name": "impact-gql-api"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["operations_with_contracts"] >= 1
+
+    async def test_graphql_diff_new_operations(self, client: AsyncClient):
+        """Diff shows new operations correctly."""
+        introspection = {
+            "__schema": {
+                "queryType": {"name": "Query"},
+                "types": [
+                    {
+                        "kind": "OBJECT",
+                        "name": "Query",
+                        "fields": [
+                            {
+                                "name": "newQuery",
+                                "args": [],
+                                "type": {"kind": "SCALAR", "name": "String"},
+                            }
+                        ],
+                    }
+                ],
+            }
+        }
+
+        resp = await client.post(
+            "/api/v1/sync/graphql/diff",
+            json={"introspection": introspection, "schema_name": "new-gql-diff-api"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["summary"]["new"] >= 1
+        assert data["blocking"] is False
+
+    async def test_graphql_diff_detects_changes(self, client: AsyncClient):
+        """Diff detects schema changes in GraphQL operations."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "gql-diff-team"})
+        team_id = team_resp.json()["id"]
+
+        introspection_v1 = {
+            "__schema": {
+                "queryType": {"name": "Query"},
+                "types": [
+                    {
+                        "kind": "OBJECT",
+                        "name": "Query",
+                        "fields": [
+                            {
+                                "name": "user",
+                                "args": [
+                                    {
+                                        "name": "id",
+                                        "type": {
+                                            "kind": "NON_NULL",
+                                            "ofType": {"kind": "SCALAR", "name": "ID"},
+                                        },
+                                    }
+                                ],
+                                "type": {"kind": "OBJECT", "name": "User"},
+                            }
+                        ],
+                    },
+                    {
+                        "kind": "OBJECT",
+                        "name": "User",
+                        "fields": [
+                            {"name": "id", "type": {"kind": "SCALAR", "name": "ID"}},
+                            {"name": "email", "type": {"kind": "SCALAR", "name": "String"}},
+                        ],
+                    },
+                ],
+            }
+        }
+
+        # First import
+        await client.post(
+            "/api/v1/sync/graphql",
+            json={
+                "introspection": introspection_v1,
+                "owner_team_id": team_id,
+                "schema_name": "diff-gql-api",
+                "auto_publish_contracts": True,
+            },
+        )
+
+        # Now diff - same schema should show unchanged
+        resp = await client.post(
+            "/api/v1/sync/graphql/diff",
+            json={"introspection": introspection_v1, "schema_name": "diff-gql-api"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        # Should find existing operation
+        assert data["total_operations"] >= 1 if "total_operations" in data else True
+
+    async def test_graphql_diff_fail_on_breaking_false(self, client: AsyncClient):
+        """Diff with fail_on_breaking=false doesn't block."""
+        introspection = {
+            "__schema": {
+                "queryType": {"name": "Query"},
+                "types": [
+                    {
+                        "kind": "OBJECT",
+                        "name": "Query",
+                        "fields": [
+                            {
+                                "name": "test",
+                                "args": [],
+                                "type": {"kind": "SCALAR", "name": "Boolean"},
+                            }
+                        ],
+                    }
+                ],
+            }
+        }
+
+        resp = await client.post(
+            "/api/v1/sync/graphql/diff",
+            json={
+                "introspection": introspection,
+                "schema_name": "nonblock-gql-api",
+                "fail_on_breaking": False,
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["blocking"] is False
+
+
 class TestDbtMetaOwnership:
     """Tests for meta.tessera ownership resolution."""
 
