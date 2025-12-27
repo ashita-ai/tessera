@@ -87,6 +87,8 @@ nav:
   - Guides:
     - Python SDK: guides/python-sdk.md
     - dbt Integration: guides/dbt-integration.md
+    - OpenAPI Integration: guides/openapi-integration.md
+    - GraphQL Integration: guides/graphql-integration.md
     - CI/CD Integration: guides/ci-cd.md
     - Docker Deployment: guides/docker.md
   - API Reference:
