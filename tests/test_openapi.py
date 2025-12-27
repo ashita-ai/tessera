@@ -6,6 +6,9 @@ import pytest
 
 from tessera.models.enums import ResourceType
 from tessera.services.openapi import (
+    _extract_tessera_guarantees,
+    _infer_nullability_from_schema,
+    _merge_guarantees,
     endpoints_to_assets,
     generate_fqn,
     parse_openapi,
@@ -532,3 +535,215 @@ class TestOpenAPIImportEndpoint:
         assert "error" in data
         assert data["error"]["code"] == "INVALID_OPENAPI_SPEC"
         assert "errors" in data["error"]["details"]
+
+
+class TestOpenAPIGuarantees:
+    """Tests for OpenAPI guarantee extraction and merging."""
+
+    def test_extract_tessera_guarantees_with_all_fields(self) -> None:
+        """Test extracting all guarantee types from x-tessera extension."""
+        operation = {
+            "x-tessera": {
+                "freshness": {"max_staleness_minutes": 60},
+                "volume": {"max_requests_per_minute": 1000},
+                "nullability": {"user_id": "never"},
+                "accepted_values": {"status": ["active", "inactive"]},
+                "custom": [{"type": "latency_p99_ms", "value": 200}],
+            }
+        }
+
+        guarantees = _extract_tessera_guarantees(operation)
+
+        assert guarantees is not None
+        assert guarantees["freshness"] == {"max_staleness_minutes": 60}
+        assert guarantees["volume"] == {"max_requests_per_minute": 1000}
+        assert guarantees["nullability"] == {"user_id": "never"}
+        assert guarantees["accepted_values"] == {"status": ["active", "inactive"]}
+        assert guarantees["custom"] == [{"type": "latency_p99_ms", "value": 200}]
+
+    def test_extract_tessera_guarantees_partial(self) -> None:
+        """Test extracting only some guarantee types."""
+        operation = {
+            "x-tessera": {
+                "freshness": {"max_staleness_minutes": 30},
+            }
+        }
+
+        guarantees = _extract_tessera_guarantees(operation)
+
+        assert guarantees is not None
+        assert guarantees == {"freshness": {"max_staleness_minutes": 30}}
+
+    def test_extract_tessera_guarantees_none(self) -> None:
+        """Test that no x-tessera returns None."""
+        operation = {"operationId": "test"}
+
+        guarantees = _extract_tessera_guarantees(operation)
+
+        assert guarantees is None
+
+    def test_extract_tessera_guarantees_empty(self) -> None:
+        """Test that empty x-tessera returns None."""
+        operation = {"x-tessera": {}}
+
+        guarantees = _extract_tessera_guarantees(operation)
+
+        assert guarantees is None
+
+    def test_infer_nullability_from_required_fields(self) -> None:
+        """Test inferring nullability from required fields."""
+        schema = {
+            "type": "object",
+            "properties": {
+                "id": {"type": "integer"},
+                "name": {"type": "string"},
+                "email": {"type": "string"},
+            },
+            "required": ["id", "name"],
+        }
+
+        nullability = _infer_nullability_from_schema(schema)
+
+        assert nullability == {"id": "never", "name": "never"}
+
+    def test_infer_nullability_respects_nullable_true(self) -> None:
+        """Test that nullable: true prevents 'never' inference."""
+        schema = {
+            "type": "object",
+            "properties": {
+                "id": {"type": "integer"},
+                "name": {"type": "string", "nullable": True},
+            },
+            "required": ["id", "name"],
+        }
+
+        nullability = _infer_nullability_from_schema(schema)
+
+        # 'name' is required but nullable, so only 'id' is never-null
+        assert nullability == {"id": "never"}
+
+    def test_infer_nullability_from_nullable_false(self) -> None:
+        """Test that nullable: false implies 'never' even without required."""
+        schema = {
+            "type": "object",
+            "properties": {
+                "id": {"type": "integer", "nullable": False},
+                "name": {"type": "string"},
+            },
+        }
+
+        nullability = _infer_nullability_from_schema(schema)
+
+        assert nullability == {"id": "never"}
+
+    def test_infer_nullability_empty_schema(self) -> None:
+        """Test inferring nullability from empty schema."""
+        assert _infer_nullability_from_schema({}) == {}
+        assert _infer_nullability_from_schema(None) == {}
+
+    def test_merge_guarantees_basic(self) -> None:
+        """Test basic guarantee merging."""
+        default = {"freshness": {"max_staleness_minutes": 60}}
+        operation = {"nullability": {"user_id": "never"}}
+
+        merged = _merge_guarantees(default, operation)
+
+        assert merged == {
+            "freshness": {"max_staleness_minutes": 60},
+            "nullability": {"user_id": "never"},
+        }
+
+    def test_merge_guarantees_override(self) -> None:
+        """Test that later guarantees override earlier ones."""
+        default = {"freshness": {"max_staleness_minutes": 60}}
+        operation = {"freshness": {"max_staleness_minutes": 30}}
+
+        merged = _merge_guarantees(default, operation)
+
+        assert merged == {"freshness": {"max_staleness_minutes": 30}}
+
+    def test_merge_guarantees_nullability_deep_merge(self) -> None:
+        """Test that nullability dicts are deep-merged."""
+        default = {"nullability": {"id": "never"}}
+        operation = {"nullability": {"name": "never"}}
+
+        merged = _merge_guarantees(default, operation)
+
+        assert merged == {"nullability": {"id": "never", "name": "never"}}
+
+    def test_merge_guarantees_custom_appends(self) -> None:
+        """Test that custom guarantees are appended."""
+        default = {"custom": [{"type": "a", "value": 1}]}
+        operation = {"custom": [{"type": "b", "value": 2}]}
+
+        merged = _merge_guarantees(default, operation)
+
+        assert merged == {"custom": [{"type": "a", "value": 1}, {"type": "b", "value": 2}]}
+
+    def test_merge_guarantees_none_inputs(self) -> None:
+        """Test merging with None inputs."""
+        assert _merge_guarantees(None, None) is None
+        assert _merge_guarantees({"a": 1}, None) == {"a": 1}
+        assert _merge_guarantees(None, {"b": 2}) == {"b": 2}
+
+    def test_parse_openapi_extracts_guarantees(self) -> None:
+        """Test that parse_openapi extracts guarantees from operations."""
+        spec = {
+            "openapi": "3.0.0",
+            "info": {"title": "Test API", "version": "1.0.0"},
+            "paths": {
+                "/users": {
+                    "get": {
+                        "x-tessera": {
+                            "freshness": {"max_staleness_minutes": 60},
+                        },
+                        "responses": {
+                            "200": {
+                                "content": {
+                                    "application/json": {
+                                        "schema": {
+                                            "type": "object",
+                                            "properties": {"id": {"type": "integer"}},
+                                            "required": ["id"],
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                    }
+                }
+            },
+        }
+
+        result = parse_openapi(spec)
+
+        assert len(result.endpoints) == 1
+        endpoint = result.endpoints[0]
+        assert endpoint.guarantees is not None
+        # Should have merged: explicit freshness + inferred nullability
+        assert "freshness" in endpoint.guarantees
+        assert endpoint.guarantees["freshness"] == {"max_staleness_minutes": 60}
+        assert "nullability" in endpoint.guarantees
+        assert endpoint.guarantees["nullability"] == {"id": "never"}
+
+    def test_endpoints_to_assets_includes_guarantees(self) -> None:
+        """Test that endpoints_to_assets includes guarantees in asset."""
+        spec = {
+            "openapi": "3.0.0",
+            "info": {"title": "Test API", "version": "1.0.0"},
+            "paths": {
+                "/users": {
+                    "get": {
+                        "x-tessera": {"freshness": {"max_staleness_minutes": 60}},
+                        "responses": {"200": {"description": "OK"}},
+                    }
+                }
+            },
+        }
+
+        result = parse_openapi(spec)
+        assets = endpoints_to_assets(result, uuid4(), "production")
+
+        assert len(assets) == 1
+        assert assets[0].guarantees is not None
+        assert assets[0].guarantees["freshness"] == {"max_staleness_minutes": 60}

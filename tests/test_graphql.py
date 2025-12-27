@@ -667,3 +667,206 @@ class TestGraphQLImportEndpoint:
         assert response.status_code == 400
         data = response.json()
         assert "error" in data
+
+
+class TestGraphQLGuarantees:
+    """Tests for GraphQL guarantee inference."""
+
+    def test_parse_infers_nullability_from_non_null_args(self) -> None:
+        """Test that NON_NULL args create nullability guarantees."""
+        introspection = {
+            "__schema": {
+                "queryType": {"name": "Query"},
+                "mutationType": None,
+                "types": [
+                    {
+                        "kind": "OBJECT",
+                        "name": "Query",
+                        "fields": [
+                            {
+                                "name": "user",
+                                "args": [
+                                    {
+                                        "name": "id",
+                                        "type": {
+                                            "kind": "NON_NULL",
+                                            "ofType": {"kind": "SCALAR", "name": "ID"},
+                                        },
+                                    },
+                                    {
+                                        "name": "optional",
+                                        "type": {"kind": "SCALAR", "name": "String"},
+                                    },
+                                ],
+                                "type": {"kind": "OBJECT", "name": "User"},
+                            }
+                        ],
+                    },
+                    {
+                        "kind": "OBJECT",
+                        "name": "User",
+                        "fields": [
+                            {"name": "id", "type": {"kind": "SCALAR", "name": "ID"}},
+                        ],
+                    },
+                ],
+            }
+        }
+
+        result = parse_graphql_introspection(introspection)
+
+        assert len(result.operations) == 1
+        op = result.operations[0]
+        assert op.guarantees is not None
+        assert "nullability" in op.guarantees
+        # Only 'id' is NON_NULL, not 'optional'
+        assert op.guarantees["nullability"] == {"id": "never"}
+
+    def test_operations_to_assets_includes_guarantees(self) -> None:
+        """Test that operations_to_assets includes guarantees in asset."""
+        introspection = {
+            "__schema": {
+                "queryType": {"name": "Query"},
+                "mutationType": None,
+                "types": [
+                    {
+                        "kind": "OBJECT",
+                        "name": "Query",
+                        "fields": [
+                            {
+                                "name": "getUser",
+                                "args": [
+                                    {
+                                        "name": "id",
+                                        "type": {
+                                            "kind": "NON_NULL",
+                                            "ofType": {"kind": "SCALAR", "name": "ID"},
+                                        },
+                                    }
+                                ],
+                                "type": {"kind": "OBJECT", "name": "User"},
+                            }
+                        ],
+                    },
+                    {
+                        "kind": "OBJECT",
+                        "name": "User",
+                        "fields": [
+                            {"name": "id", "type": {"kind": "SCALAR", "name": "ID"}},
+                        ],
+                    },
+                ],
+            }
+        }
+
+        result = parse_graphql_introspection(introspection)
+        assets = operations_to_assets(result, uuid4(), "production")
+
+        assert len(assets) == 1
+        assert assets[0].guarantees is not None
+        assert assets[0].guarantees["nullability"] == {"id": "never"}
+
+    def test_mutation_with_multiple_non_null_args(self) -> None:
+        """Test mutation with multiple NON_NULL arguments."""
+        introspection = {
+            "__schema": {
+                "queryType": {"name": "Query"},
+                "mutationType": {"name": "Mutation"},
+                "types": [
+                    {
+                        "kind": "OBJECT",
+                        "name": "Query",
+                        "fields": [
+                            {
+                                "name": "dummy",
+                                "args": [],
+                                "type": {"kind": "SCALAR", "name": "String"},
+                            }
+                        ],
+                    },
+                    {
+                        "kind": "OBJECT",
+                        "name": "Mutation",
+                        "fields": [
+                            {
+                                "name": "createUser",
+                                "args": [
+                                    {
+                                        "name": "name",
+                                        "type": {
+                                            "kind": "NON_NULL",
+                                            "ofType": {"kind": "SCALAR", "name": "String"},
+                                        },
+                                    },
+                                    {
+                                        "name": "email",
+                                        "type": {
+                                            "kind": "NON_NULL",
+                                            "ofType": {"kind": "SCALAR", "name": "String"},
+                                        },
+                                    },
+                                    {
+                                        "name": "bio",
+                                        "type": {"kind": "SCALAR", "name": "String"},
+                                    },
+                                ],
+                                "type": {"kind": "OBJECT", "name": "User"},
+                            }
+                        ],
+                    },
+                    {
+                        "kind": "OBJECT",
+                        "name": "User",
+                        "fields": [
+                            {"name": "id", "type": {"kind": "SCALAR", "name": "ID"}},
+                        ],
+                    },
+                ],
+            }
+        }
+
+        result = parse_graphql_introspection(introspection)
+
+        # Find the createUser mutation
+        create_user = next(op for op in result.operations if op.name == "createUser")
+        assert create_user.guarantees is not None
+        assert create_user.guarantees["nullability"] == {
+            "name": "never",
+            "email": "never",
+        }
+
+    def test_no_guarantees_when_no_non_null_args(self) -> None:
+        """Test that no guarantees are created when no NON_NULL args."""
+        introspection = {
+            "__schema": {
+                "queryType": {"name": "Query"},
+                "mutationType": None,
+                "types": [
+                    {
+                        "kind": "OBJECT",
+                        "name": "Query",
+                        "fields": [
+                            {
+                                "name": "search",
+                                "args": [
+                                    {
+                                        "name": "query",
+                                        "type": {"kind": "SCALAR", "name": "String"},
+                                    }
+                                ],
+                                "type": {
+                                    "kind": "LIST",
+                                    "ofType": {"kind": "SCALAR", "name": "String"},
+                                },
+                            }
+                        ],
+                    }
+                ],
+            }
+        }
+
+        result = parse_graphql_introspection(introspection)
+
+        assert len(result.operations) == 1
+        op = result.operations[0]
+        assert op.guarantees is None

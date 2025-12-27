@@ -21,6 +21,7 @@ class GraphQLOperation(BaseModel):
     args: list[dict[str, Any]]  # List of argument definitions
     return_type: dict[str, Any]  # JSON Schema for return type
     combined_schema: dict[str, Any]  # Combined args + return for contract
+    guarantees: dict[str, Any] | None = None  # Inferred nullability guarantees
 
 
 class GraphQLParseResult(BaseModel):
@@ -222,6 +223,16 @@ def _extract_operations(
             },
         }
 
+        # Build guarantees from required args (NON_NULL in GraphQL)
+        nullability: dict[str, str] = {}
+        for arg_info in args_list:
+            if arg_info.get("required"):
+                nullability[arg_info["name"]] = "never"
+
+        guarantees: dict[str, Any] | None = None
+        if nullability:
+            guarantees = {"nullability": nullability}
+
         operations.append(
             GraphQLOperation(
                 name=name,
@@ -230,6 +241,7 @@ def _extract_operations(
                 args=args_list,
                 return_type=return_schema,
                 combined_schema=combined,
+                guarantees=guarantees,
             )
         )
 
@@ -365,6 +377,7 @@ class AssetFromGraphQL(BaseModel):
     resource_type: ResourceType
     metadata: dict[str, Any]
     schema_def: dict[str, Any]
+    guarantees: dict[str, Any] | None = None
 
 
 def operations_to_assets(
@@ -407,6 +420,7 @@ def operations_to_assets(
                 resource_type=ResourceType.GRAPHQL_QUERY,
                 metadata=metadata,
                 schema_def=op.combined_schema,
+                guarantees=op.guarantees,
             )
         )
 

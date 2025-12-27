@@ -61,7 +61,7 @@ runs:
     - name: Install Tessera CLI
       shell: bash
       run: |
-        uv pip install tessera --system
+        uv pip install tessera-contracts[cli] --system
 
     - name: Run dbt check
       id: check

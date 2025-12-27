@@ -23,6 +23,7 @@ class OpenAPIEndpoint(BaseModel):
     request_schema: dict[str, Any] | None
     response_schema: dict[str, Any] | None
     combined_schema: dict[str, Any]  # Combined request + response for contract
+    guarantees: dict[str, Any] | None = None  # Guarantees from x-tessera or inferred
 
 
 class OpenAPIParseResult(BaseModel):
@@ -139,6 +140,112 @@ def _extract_response_schema(
     return None
 
 
+def _extract_tessera_guarantees(operation: dict[str, Any]) -> dict[str, Any] | None:
+    """Extract x-tessera guarantees from an OpenAPI operation.
+
+    Parses the x-tessera extension from an operation to extract SLA guarantees.
+
+    Example OpenAPI:
+        paths:
+          /users:
+            get:
+              x-tessera:
+                freshness:
+                  max_staleness_minutes: 60
+                volume:
+                  max_requests_per_minute: 1000
+                custom:
+                  - type: latency_p99_ms
+                    value: 200
+
+    Returns:
+        Guarantees dict or None if no x-tessera extension found.
+    """
+    tessera = operation.get("x-tessera", {})
+    if not tessera:
+        return None
+
+    guarantees: dict[str, Any] = {}
+
+    if "freshness" in tessera:
+        guarantees["freshness"] = tessera["freshness"]
+    if "volume" in tessera:
+        guarantees["volume"] = tessera["volume"]
+    if "custom" in tessera:
+        guarantees["custom"] = tessera["custom"]
+    if "nullability" in tessera:
+        guarantees["nullability"] = tessera["nullability"]
+    if "accepted_values" in tessera:
+        guarantees["accepted_values"] = tessera["accepted_values"]
+
+    return guarantees if guarantees else None
+
+
+def _infer_nullability_from_schema(schema: dict[str, Any]) -> dict[str, str]:
+    """Infer nullability guarantees from JSON Schema.
+
+    Parses the schema to identify required fields and nullable properties.
+
+    Args:
+        schema: A JSON Schema object
+
+    Returns:
+        Dict of field_name -> "never" for non-nullable fields
+    """
+    nullability: dict[str, str] = {}
+
+    if not schema or not isinstance(schema, dict):
+        return nullability
+
+    properties = schema.get("properties", {})
+    required = set(schema.get("required", []))
+
+    for prop_name, prop_schema in properties.items():
+        if not isinstance(prop_schema, dict):
+            continue
+
+        # Field is required (explicitly in required array)
+        if prop_name in required:
+            # Also check it's not explicitly nullable
+            if prop_schema.get("nullable") is not True:
+                nullability[prop_name] = "never"
+        # Field has nullable: false explicitly set
+        elif prop_schema.get("nullable") is False:
+            nullability[prop_name] = "never"
+
+    return nullability
+
+
+def _merge_guarantees(*guarantee_dicts: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Merge multiple guarantee dicts, later ones taking precedence.
+
+    Args:
+        *guarantee_dicts: Variable number of guarantee dicts (can be None)
+
+    Returns:
+        Merged guarantees or None if all inputs are None/empty
+    """
+    merged: dict[str, Any] = {}
+
+    for g in guarantee_dicts:
+        if g:
+            for key, value in g.items():
+                if key == "nullability" and key in merged:
+                    # Merge nullability dicts
+                    merged[key] = {**merged[key], **value}
+                elif key == "accepted_values" and key in merged:
+                    # Merge accepted_values dicts
+                    merged[key] = {**merged[key], **value}
+                elif key == "custom" and key in merged:
+                    # Append custom guarantees
+                    merged[key] = merged[key] + value
+                else:
+                    # Overwrite for other keys
+                    merged[key] = value
+
+    return merged if merged else None
+
+
 def _combine_schemas(
     request_schema: dict[str, Any] | None, response_schema: dict[str, Any] | None
 ) -> dict[str, Any]:
@@ -220,6 +327,24 @@ def parse_openapi(spec: dict[str, Any]) -> OpenAPIParseResult:
                 response_schema = _extract_response_schema(spec, operation)
                 combined_schema = _combine_schemas(request_schema, response_schema)
 
+                # Extract guarantees from x-tessera extension
+                explicit_guarantees = _extract_tessera_guarantees(operation)
+
+                # Infer nullability from schemas
+                inferred_nullability: dict[str, str] = {}
+                if request_schema:
+                    inferred_nullability.update(_infer_nullability_from_schema(request_schema))
+                if response_schema:
+                    inferred_nullability.update(_infer_nullability_from_schema(response_schema))
+
+                # Build inferred guarantees
+                inferred_guarantees: dict[str, Any] | None = None
+                if inferred_nullability:
+                    inferred_guarantees = {"nullability": inferred_nullability}
+
+                # Merge: inferred first, then explicit (explicit wins)
+                guarantees = _merge_guarantees(inferred_guarantees, explicit_guarantees)
+
                 endpoints.append(
                     OpenAPIEndpoint(
                         path=path,
@@ -231,6 +356,7 @@ def parse_openapi(spec: dict[str, Any]) -> OpenAPIParseResult:
                         request_schema=request_schema,
                         response_schema=response_schema,
                         combined_schema=combined_schema,
+                        guarantees=guarantees,
                     )
                 )
             except Exception as e:
@@ -289,6 +415,7 @@ class AssetFromOpenAPI(BaseModel):
     resource_type: ResourceType
     metadata: dict[str, Any]
     schema_def: dict[str, Any]
+    guarantees: dict[str, Any] | None = None
 
 
 def endpoints_to_assets(
@@ -328,6 +455,7 @@ def endpoints_to_assets(
                 resource_type=ResourceType.API_ENDPOINT,
                 metadata=metadata,
                 schema_def=endpoint.combined_schema,
+                guarantees=endpoint.guarantees,
             )
         )
 

@@ -24,7 +24,12 @@ from tessera.services import validate_json_schema
 from tessera.services.audit import log_contract_published, log_proposal_created
 from tessera.services.graphql import GraphQLOperation, parse_graphql_introspection
 from tessera.services.graphql import operations_to_assets as graphql_operations_to_assets
-from tessera.services.openapi import OpenAPIEndpoint, endpoints_to_assets, parse_openapi
+from tessera.services.openapi import (
+    OpenAPIEndpoint,
+    _merge_guarantees,
+    endpoints_to_assets,
+    parse_openapi,
+)
 from tessera.services.schema_diff import check_compatibility, diff_schemas
 
 router = APIRouter()
@@ -1624,6 +1629,10 @@ class OpenAPIImportRequest(BaseModel):
         default=True, description="Automatically publish contracts for new assets"
     )
     dry_run: bool = Field(default=False, description="Preview changes without creating assets")
+    default_guarantees: dict[str, Any] | None = Field(
+        default=None,
+        description="Default guarantees to apply to all endpoints",
+    )
 
 
 class OpenAPIEndpointResult(BaseModel):
@@ -1778,11 +1787,17 @@ async def import_openapi(
 
                 # Auto-publish contract if enabled
                 if import_req.auto_publish_contracts:
+                    # Merge default_guarantees with per-operation guarantees
+                    merged_guarantees = _merge_guarantees(
+                        import_req.default_guarantees, asset_def.guarantees
+                    )
+
                     new_contract = ContractDB(
                         asset_id=new_asset.id,
                         version="1.0.0",
                         schema_def=asset_def.schema_def,
                         compatibility_mode=CompatibilityMode.BACKWARD,
+                        guarantees=merged_guarantees,
                         published_by=import_req.owner_team_id,
                     )
                     session.add(new_contract)
@@ -1860,6 +1875,10 @@ class GraphQLImportRequest(BaseModel):
         default=True, description="Automatically publish contracts for new assets"
     )
     dry_run: bool = Field(default=False, description="Preview changes without creating assets")
+    default_guarantees: dict[str, Any] | None = Field(
+        default=None,
+        description="Default guarantees to apply to all operations",
+    )
 
 
 class GraphQLOperationResult(BaseModel):
@@ -2042,11 +2061,17 @@ async def import_graphql(
 
                 # Auto-publish contract if enabled
                 if import_req.auto_publish_contracts:
+                    # Merge default_guarantees with per-operation guarantees
+                    merged_guarantees = _merge_guarantees(
+                        import_req.default_guarantees, asset_def.guarantees
+                    )
+
                     new_contract = ContractDB(
                         asset_id=new_asset.id,
                         version="1.0.0",
                         schema_def=asset_def.schema_def,
                         compatibility_mode=CompatibilityMode.BACKWARD,
+                        guarantees=merged_guarantees,
                         published_by=import_req.owner_team_id,
                     )
                     session.add(new_contract)
