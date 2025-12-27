@@ -39,10 +39,6 @@ docker compose up -d db  # PostgreSQL
 uv run uvicorn tessera.main:app --reload
 ```
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/ashita-ai/tessera/main/assets/dashboard.png" alt="Tessera Dashboard" width="800">
-</p>
-
 ## Key Features
 
 - **Schema contracts** - JSON Schema definitions with semantic versioning
