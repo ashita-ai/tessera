@@ -6,145 +6,75 @@
 
 **Design Philosophy**: Simplicity wins, use good defaults, coordination over validation.
 
-**Current Phase**: Core implementation complete. Python SDK published to PyPI. Comprehensive documentation available.
-
----
-
-## Quick Start (First Session Commands)
-
-```bash
-# 1. Verify environment
-uv sync --all-extras
-
-# 2. Run tests to verify environment
-DATABASE_URL=sqlite+aiosqlite:///:memory: uv run pytest tests/ -v
-
-# 3. Start the server
-uv run uvicorn tessera.main:app --reload
-
-# 4. Run the quickstart examples
-uv run python examples/quickstart.py
-```
-
 ---
 
 ## Boundaries
 
 ### Always Do (No Permission Needed)
 
-**Implementation**:
 - Write complete, production-grade code (no TODOs, no placeholders)
-- Add tests for all new features
+- Add tests for all new features (test both success and error cases)
 - Use type hints (mypy strict mode)
 - Follow async/await patterns for all database operations
-
-**Testing** (CRITICAL):
-- Run tests before committing: `DATABASE_URL=sqlite+aiosqlite:///:memory: uv run pytest`
-- Add tests when adding new endpoints or services
-- Test both success and error cases
-
-**Documentation**:
 - Update README.md when adding user-facing features
 - Add docstrings to public functions
-- Update this file when you learn something important
 
 ### Ask First
 
-**Architecture Changes**:
 - Modifying database models (affects migrations)
 - Changing API contracts (breaking for consumers)
 - Adding new dependencies to pyproject.toml
-
-**Risky Operations**:
 - Deleting existing endpoints or models
 - Refactoring core services (schema_diff, audit)
-- Changing compatibility mode logic
 
 ### Never Do
 
-**GitHub Issues (CRITICAL)**:
+**GitHub Issues**:
 - NEVER close an issue unless ALL acceptance criteria are met
-- NEVER mark work as done if it's partially complete
 - If an issue has checkboxes, ALL boxes must be checked before closing
 - If you can't complete all criteria, leave the issue open and comment on what remains
-- Closing issues prematurely erodes trust and creates hidden technical debt
 
-**Git (CRITICAL)**:
+**Git**:
 - NEVER commit directly to main - always use a feature branch and PR
 - NEVER push directly to main - all changes must go through pull requests
-- NEVER merge to main without PR approval
-- Force push to shared branches
+- NEVER force push to shared branches
+- Do NOT include "Co-Authored-By: Claude" or the "Generated with Claude Code" footer
 
-**Security (CRITICAL)**:
-- NEVER commit credentials to GitHub
-- No API keys, tokens, passwords in any file
-- Use environment variables (.env in .gitignore)
+**Security**:
+- NEVER commit credentials, API keys, tokens, or passwords
+- Use environment variables (.env is in .gitignore)
 
 **Code Quality**:
 - Skip tests to make builds pass
 - Disable type checking or linting
 - Leave TODO comments in production code
-- Create placeholder implementations
-
-**Destructive**:
 - Delete failing tests instead of fixing them
 
 ---
 
-## Communication Preferences
+## Commands
 
-Be concise and direct. No flattery or excessive praise. Focus on what needs to be done.
+```bash
+# Setup
+uv sync --all-extras
 
-## Git Commit Rules
+# Run server
+uv run uvicorn tessera.main:app --reload
 
-- Do NOT include "Co-Authored-By: Claude" or similar trailers in commits
-- Do NOT include the "Generated with Claude Code" footer in commits
+# Tests (use SQLite for speed)
+DATABASE_URL=sqlite+aiosqlite:///:memory: uv run pytest tests/ -v
 
----
+# Code quality
+uv run ruff check src/tessera/
+uv run ruff format src/tessera/
+uv run mypy src/tessera/
 
-## Project Structure
+# Docker
+docker compose up -d
+docker compose down
 
-```
-tessera/
-├── src/tessera/
-│   ├── api/                   # FastAPI endpoints
-│   │   ├── api_keys.py        # API key management (admin)
-│   │   ├── assets.py          # Asset + contract publishing
-│   │   ├── audit.py           # Single asset audit endpoints
-│   │   ├── audits.py          # WAP audit reporting + trends
-│   │   ├── auth.py            # Authentication dependencies
-│   │   ├── contracts.py       # Contract lookup + comparison
-│   │   ├── dependencies.py    # Asset dependency management
-│   │   ├── errors.py          # Error handling + middleware
-│   │   ├── impact.py          # Impact analysis endpoints
-│   │   ├── pagination.py      # Pagination helpers
-│   │   ├── proposals.py       # Breaking change workflow
-│   │   ├── rate_limit.py      # Rate limiting
-│   │   ├── registrations.py   # Consumer registration
-│   │   ├── schemas.py         # Schema validation
-│   │   ├── sync.py            # dbt/OpenAPI/GraphQL sync
-│   │   ├── teams.py           # Team management
-│   │   ├── users.py           # User management
-│   │   └── webhooks.py        # Webhook notifications
-│   ├── db/                    # SQLAlchemy models + session
-│   ├── models/                # Pydantic schemas
-│   ├── services/              # Business logic
-│   │   ├── audit.py           # Audit logging
-│   │   ├── auth.py            # API key validation + management
-│   │   ├── cache.py           # Redis/in-memory caching
-│   │   ├── graphql.py         # GraphQL introspection parsing
-│   │   ├── openapi.py         # OpenAPI spec parsing
-│   │   ├── schema_diff.py     # Schema comparison
-│   │   └── schema_validator.py # Schema validation
-│   ├── config.py              # Settings from env
-│   └── main.py                # FastAPI app
-├── tests/                     # Test suite (403+ tests)
-│   ├── conftest.py            # Fixtures
-│   ├── test_schema_diff.py    # Schema diff tests
-│   └── test_*.py              # Endpoint tests
-├── examples/                  # Usage examples
-│   └── quickstart.py          # Core workflows
-└── docs/                      # MkDocs documentation
+# CLI
+uv run tessera --help
 ```
 
 ---
@@ -153,12 +83,7 @@ tessera/
 
 ### Schema Diffing
 
-The core logic is in `services/schema_diff.py`. It detects:
-- Property additions/removals
-- Required field changes
-- Type changes (widening/narrowing)
-- Enum value changes
-- Constraint changes (maxLength, etc.)
+Core logic in `services/schema_diff.py`. Detects property additions/removals, required field changes, type changes, enum value changes, constraint changes.
 
 ### Compatibility Modes
 
@@ -171,355 +96,54 @@ The core logic is in `services/schema_diff.py`. It detects:
 
 ### Contract Publishing Flow
 
-1. First contract: auto-publish
-2. Compatible change: auto-publish, deprecate old
-3. Breaking change: create Proposal, wait for acknowledgments
-4. Force flag: publish anyway (audit logged)
+1. First contract → auto-publish
+2. Compatible change → auto-publish, deprecate old
+3. Breaking change → create Proposal, wait for acknowledgments
+4. Force flag → publish anyway (audit logged)
 
----
+### Teams vs Users
 
-## Python SDK
-
-The Python SDK is published as a separate package: [tessera-sdk on PyPI](https://pypi.org/project/tessera-sdk/)
-
-**Installation:**
-```bash
-pip install tessera-sdk
-```
-
-**Documentation:** https://ashita-ai.github.io/tessera-python
-
-**Repository:** https://github.com/ashita-ai/tessera-python
-
-**Usage:**
-```python
-from tessera_sdk import TesseraClient
-
-client = TesseraClient(base_url="http://localhost:8000")
-
-# Create resources
-team = client.teams.create(name="data-platform")
-asset = client.assets.create(fqn="warehouse.dim_customers", owner_team_id=team.id)
-
-# Check impact before changes
-impact = client.assets.check_impact(asset_id=asset.id, proposed_schema={...})
-if not impact.safe_to_publish:
-    print(f"Breaking changes: {impact.breaking_changes}")
-```
-
-Async version available via `AsyncTesseraClient`.
-
----
-
-## CLI
-
-Tessera includes a CLI for common operations:
-
-```bash
-# Team management
-uv run tessera team create "data-platform"
-uv run tessera team list
-
-# Contract management
-uv run tessera contract publish <asset-id> --schema schema.json --version 1.0.0
-uv run tessera contract list <asset-id>
-```
-
----
-
-## Data Model: Teams vs Users
-
-Tessera uses a dual-level ownership model that separates organizational responsibility from individual accountability.
-
-### Design Philosophy
-
-Teams represent persistent organizational units (data platform team, analytics team). Users represent individuals who may change teams or leave. By anchoring ownership at the team level, assets survive personnel changes while still tracking who did what.
-
-### Ownership Model
-
-| Concept | Level | Why |
-|---------|-------|-----|
-| Asset ownership | Team | Organizational responsibility survives personnel changes |
-| Asset stewardship | User (optional) | Day-to-day contact, can be reassigned |
-| Consumer registration | Team | Team's pipelines depend on data, not individuals |
-| Acknowledgment | Team + User | Team accepts impact, individual is accountable |
-| Contract publishing | Team + User | Team publishes, individual did the action |
-| Proposal creation | Team + User | Team proposes change, individual authored it |
-
-### Database Fields
-
-**AssetDB**:
-- `owner_team_id` (required): Team responsible for the asset
-- `owner_user_id` (optional): Individual steward/contact
-
-**ContractDB**:
-- `published_by` (required): Team ID that published
-- `published_by_user_id` (optional): Individual who clicked publish
-
-**ProposalDB**:
-- `proposed_by` (required): Team ID that proposed
-- `proposed_by_user_id` (optional): Individual who created proposal
-
-**AcknowledgmentDB**:
-- `consumer_team_id` (required): Team accepting the breaking change
-- `acknowledged_by_user_id` (optional): Individual who acknowledged
-
-### Rationale
-
-1. **Notifications**: When breaking changes happen, notify the team (email list, Slack channel) as primary, individual steward as backup
-2. **Audit trail**: Always know which human approved a breaking change
-3. **Pipeline ownership**: CI/CD pipelines run as teams, not individuals
-4. **Organizational continuity**: When Alice leaves, her team still owns the assets
-
----
-
-## Testing Requirements
-
-### Running Tests
-
-```bash
-# Fast: schema diff tests (no DB)
-uv run pytest tests/test_schema_diff.py -v
-
-# Full: all tests with SQLite (fast, in-memory)
-DATABASE_URL=sqlite+aiosqlite:///:memory: uv run pytest tests/ -v
-
-# Full: all tests with PostgreSQL
-uv run pytest tests/ -v
-
-# With coverage
-DATABASE_URL=sqlite+aiosqlite:///:memory: uv run pytest tests/ --cov=tessera --cov-report=term-missing
-```
-
-### Test Structure
-
-Tests are in `tests/`. The conftest.py provides:
-- `client`: AsyncClient for API tests
-- `test_session`: SQLAlchemy session for DB tests
-- Factory functions for creating test data
-
-### Database for Tests
-
-**SQLite (recommended for local dev)**:
-- Set `DATABASE_URL=sqlite+aiosqlite:///:memory:` for fast, isolated tests
-- No setup required, tests run in ~9 seconds
-
-**PostgreSQL (CI and production)**:
-- Configured via `DATABASE_URL` in `.env`
-- Tests CI runs with both SQLite and PostgreSQL
+Teams own assets (organizational responsibility survives personnel changes). Users are optional stewards for accountability. All ownership fields: `owner_team_id` (required), `owner_user_id` (optional).
 
 ---
 
 ## Development Workflow
 
-### Before Starting
-
 ```bash
-git status              # Check current branch
-git branch              # Verify not on main
+# 1. Create branch (never work on main)
 git checkout -b feature/my-feature
-```
 
-### Before Committing
-
-```bash
-# 1. Run tests
+# 2. Make changes, run tests
 DATABASE_URL=sqlite+aiosqlite:///:memory: uv run pytest
 
-# 2. Format and lint
-uv run ruff check src/tessera/
-uv run ruff format src/tessera/
+# 3. Format and type check
+uv run ruff check src/tessera/ && uv run ruff format src/tessera/ && uv run mypy src/tessera/
 
-# 3. Type check
-uv run mypy src/tessera/
+# 4. Commit, push, create PR
+git push -u origin feature/my-feature
 ```
 
 ---
 
-## Common Tasks
+## Key Files
 
-### Add New Endpoint
-
-1. Add route in appropriate `api/*.py` file
-2. Add Pydantic models in `models/*.py` if needed
-3. Add tests in `tests/test_*.py`
-4. Update README if user-facing
-
-### Add New Service
-
-1. Create file in `services/`
-2. Export in `services/__init__.py`
-3. Add comprehensive tests
-4. Add docstrings
-
-### Fix Failing Tests
-
-1. Run specific test: `pytest tests/test_file.py::test_name -v`
-2. Read failure message carefully
-3. Fix implementation or test
-4. Run full suite to verify no regressions
-
----
-
-## Database
-
-### Supported Databases
-
-| Database | Use Case | Notes |
-|----------|----------|-------|
-| SQLite | Local dev, CI tests | Fast, no setup. Use `sqlite+aiosqlite:///:memory:` |
-| PostgreSQL | Production, Docker | Full feature set, recommended for production |
-
-### Schemas
-
-- `core`: teams, users, assets, contracts, registrations
-- `workflow`: proposals, acknowledgments
-- `audit`: events (append-only)
-
-### Connection
-
-Configured via `DATABASE_URL` in `.env`:
-- SQLite: `sqlite+aiosqlite:///:memory:` or `sqlite+aiosqlite:///./tessera.db`
-- PostgreSQL: `postgresql+asyncpg://user:pass@host:5432/tessera`
-
-### Transaction Handling
-
-Multi-step mutations use nested transactions (savepoints) for atomicity:
-```python
-async with session.begin_nested():
-    # Step 1: create new contract
-    # Step 2: deprecate old contract
-    # Rollback both if either fails
-```
-
-Key patterns in `api/assets.py` and `api/proposals.py`.
-
----
-
-## Quick Reference
-
-### Executable Commands
-
-```bash
-# Development
-uv sync --all-extras
-uv run uvicorn tessera.main:app --reload
-
-# Docker (PostgreSQL)
-docker compose up -d        # Start with PostgreSQL
-docker compose logs -f api  # View logs
-docker compose down         # Stop services
-
-# Testing
-DATABASE_URL=sqlite+aiosqlite:///:memory: uv run pytest tests/ -v
-uv run pytest tests/test_schema_diff.py -v
-
-# Code Quality
-uv run ruff check src/tessera/
-uv run ruff format src/tessera/
-uv run mypy src/tessera/
-
-# Pre-commit hooks
-uv run pre-commit install   # Install hooks (one-time)
-uv run pre-commit run --all-files  # Run all checks
-
-# CLI
-uv run tessera --help
-uv run tessera team --help
-uv run tessera contract --help
-```
-
-### Key Files
-
-- `api/assets.py`: Contract publishing logic
-- `api/contracts.py`: Contract lookup + guarantees update
-- `services/schema_diff.py`: Compatibility checking
-- `services/cache.py`: Caching layer
-- `db/models.py`: SQLAlchemy models
-- `examples/quickstart.py`: Core workflows
-
-### API Endpoints
-
-All under `/api/v1`:
-
-**Teams & Users**:
-- `POST /teams` - Create team
-- `GET /teams` - List teams
-- `POST /users` - Create user
-- `GET /users` - List users
-
-**Assets & Contracts**:
-- `POST /assets` - Create asset
-- `GET /assets` - List assets
-- `POST /assets/{id}/contracts` - Publish contract
-- `GET /assets/{id}/contracts` - List asset contracts
-- `POST /assets/{id}/impact` - Impact analysis
-- `PATCH /contracts/{id}/guarantees` - Update guarantees
-
-**Registrations & Proposals**:
-- `POST /registrations` - Register as consumer
-- `GET /registrations` - List registrations
-- `POST /proposals/{id}/acknowledge` - Acknowledge breaking change
-- `POST /proposals/{id}/force-approve` - Force approve (admin)
-
-**Sync & Integration**:
-- `POST /sync/dbt/upload` - Sync from dbt manifest with automation options
-- `POST /sync/dbt/impact` - Check dbt model impact on existing contracts
-- `POST /sync/dbt/diff` - CI/CD dry-run preview for breaking changes
-- `POST /sync/openapi` - Sync from OpenAPI spec
-- `POST /sync/graphql` - Sync from GraphQL introspection
-
-**Audit & Admin**:
-- `POST /assets/{id}/audit` - Report WAP audit run
-- `GET /assets/{id}/audit-history` - Get audit history
-- `POST /api-keys` - Create API key (admin)
-- `DELETE /api-keys/{id}` - Revoke API key (admin)
-
-### Authentication
-
-API key-based auth with three scopes: `read`, `write`, `admin`.
-
-Development: Set `AUTH_DISABLED=true` to skip auth.
-
-Bootstrap: Set `BOOTSTRAP_API_KEY` env var for initial setup.
+| File | Purpose |
+|------|---------|
+| `api/assets.py` | Contract publishing logic |
+| `api/sync.py` | dbt/OpenAPI/GraphQL sync |
+| `services/schema_diff.py` | Compatibility checking |
+| `db/models.py` | SQLAlchemy models |
 
 ---
 
 ## Documentation
 
-**Server Documentation:** https://ashita-ai.github.io/tessera
-
-Key documentation pages:
-- [dbt Integration](https://ashita-ai.github.io/tessera/guides/dbt-integration/) - Comprehensive guide for dbt integration including `meta.tessera` tags
-- [Python SDK](https://ashita-ai.github.io/tessera/guides/python-sdk/) - SDK usage guide
+- **Server docs**: https://ashita-ai.github.io/tessera
+- **Python SDK**: https://pypi.org/project/tessera-sdk/ ([docs](https://ashita-ai.github.io/tessera-python))
+- **dbt Integration**: https://ashita-ai.github.io/tessera/guides/dbt-integration/
 
 ---
 
-## dbt Integration
+## Communication
 
-The dbt sync supports rich metadata via `meta.tessera` in your YAML files:
-
-```yaml
-models:
-  - name: dim_customers
-    meta:
-      tessera:
-        owner_team: data-platform        # Override default team
-        owner_user: alice@company.com    # Individual steward
-        consumers:                        # Explicit consumer declarations
-          - team: analytics
-            purpose: Dashboard metrics
-        freshness:                        # SLA guarantees
-          max_staleness_minutes: 60
-        volume:
-          min_rows: 10000
-        compatibility_mode: backward      # Contract compatibility
-```
-
-Sync options:
-- `auto_publish_contracts: true` - Auto-publish contracts for assets
-- `auto_create_proposals: true` - Create proposals for breaking changes
-- `auto_register_consumers: true` - Register from `meta.tessera.consumers`
-- `infer_consumers_from_refs: true` - Infer consumers from dbt `ref()` calls
-
-See [dbt Integration docs](https://ashita-ai.github.io/tessera/guides/dbt-integration/) for full details.
+Be concise and direct. No flattery or excessive praise. Focus on what needs to be done.
