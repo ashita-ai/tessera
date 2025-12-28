@@ -9,7 +9,7 @@ Creates:
 - Kafka topics with Avro schemas (demonstrating schema_format="avro")
 - REST API endpoints via /sync/openapi (demonstrating OpenAPI import)
 - GraphQL operations via /sync/graphql (demonstrating GraphQL introspection import)
-- Audit results for WAP demo (dbt_test, great_expectations, soda integrations)
+- Audit results for WAP demo (dbt test results on dbt models only)
 - A handful of proposals (breaking changes in progress)
 """
 
@@ -926,24 +926,23 @@ def import_graphql_schema(team_ids: dict[str, str]) -> int:
 def create_audit_results(team_ids: dict[str, str]) -> int:
     """Create sample audit results to demonstrate WAP (Write-Audit-Publish) pattern.
 
-    Creates a realistic mix of:
-    - dbt test results (most common)
-    - Great Expectations validations
-    - Soda checks
-    - Manual audits
+    Creates realistic dbt test results for dbt models/sources only.
+    (Kafka topics, APIs, and GraphQL assets don't have dbt tests.)
 
-    Some assets will have:
-    - Consistently passing audits
-    - Intermittent failures (realistic data quality issues)
-    - Recent failures to trigger alerts
+    Creates different asset health patterns:
+    - Healthy: 90% pass rate (8 assets)
+    - Flaky: 70% pass rate with intermittent failures (4 assets)
+    - Degrading: 50% pass rate with recent failures (4 assets)
+    - Failing: 20% pass rate (4 assets)
     """
     print("\nCreating audit results for WAP demo...")
     audits_created = 0
 
-    # Get some assets to add audit results to
+    # Get only dbt assets (models, sources, seeds, snapshots) to add audit results to
+    # dbt tests only make sense for dbt resources, not for Kafka topics or APIs
     try:
         assets_resp = httpx.get(
-            f"{API_URL}/api/v1/assets?limit=30",
+            f"{API_URL}/api/v1/assets?limit=100",
             headers=get_headers(),
             timeout=10,
         )
@@ -951,10 +950,15 @@ def create_audit_results(team_ids: dict[str, str]) -> int:
             print("  Could not fetch assets")
             return 0
 
-        assets = assets_resp.json().get("results", [])
+        all_assets = assets_resp.json().get("results", [])
+        # Filter to only dbt resource types (model, source, seed, snapshot)
+        dbt_resource_types = {"model", "source", "seed", "snapshot"}
+        assets = [a for a in all_assets if a.get("resource_type") in dbt_resource_types]
         if not assets:
-            print("  No assets found")
+            print("  No dbt assets found for audit results")
             return 0
+
+        print(f"  Found {len(assets)} dbt assets to audit (filtering out APIs, Kafka, etc.)")
 
         # Define test patterns for different scenarios
         test_patterns = {
@@ -1002,7 +1006,8 @@ def create_audit_results(team_ids: dict[str, str]) -> int:
                 pattern_assignments[asset["id"]] = "failing"
 
         # Generate audit results
-        triggered_by_sources = ["dbt_test", "dbt_test", "dbt_test", "great_expectations", "soda"]
+        # For dbt models, the triggered_by is always dbt_test since these come from `dbt test`
+        # Great Expectations and Soda are separate tools that don't test dbt models directly
 
         for asset_id, pattern_name in pattern_assignments.items():
             pattern = test_patterns[pattern_name]
@@ -1064,7 +1069,7 @@ def create_audit_results(team_ids: dict[str, str]) -> int:
                     status = "failed"
 
                 # Build payload
-                triggered_by = random.choice(triggered_by_sources)
+                triggered_by = "dbt_test"  # Always dbt_test for dbt models
                 payload = {
                     "status": status,
                     "guarantees_checked": num_guarantees,
