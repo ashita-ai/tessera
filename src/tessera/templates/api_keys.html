@@ -1,0 +1,274 @@
+{% extends "base.html" %}
+
+{% block title %}API Keys - Tessera{% endblock %}
+
+{% block content %}
+<section>
+  <h2>API Keys</h2>
+
+  <div style="margin-bottom: 1rem;">
+    <button onclick="showCreateForm()">+ New API Key</button>
+  </div>
+
+  <div id="create-form" style="display: none; margin-bottom: 2rem;">
+    <div class="card">
+      <h3>Create API Key</h3>
+      <form onsubmit="createKey(event)">
+        <label for="key-name">Name</label>
+        <input type="text" id="key-name" name="name" required placeholder="e.g., production-pipeline">
+
+        <label for="key-team">Team</label>
+        <select id="key-team" required>
+          <option value="">Loading teams...</option>
+        </select>
+
+        <label>Scopes</label>
+        <div class="checkbox-group">
+          <label class="checkbox-option">
+            <input type="checkbox" id="scope-read" value="read" checked>
+            Read - View assets, contracts, and registrations
+          </label>
+          <label class="checkbox-option">
+            <input type="checkbox" id="scope-write" value="write" checked>
+            Write - Create and modify resources
+          </label>
+          <label class="checkbox-option">
+            <input type="checkbox" id="scope-admin" value="admin">
+            Admin - Full administrative access
+          </label>
+        </div>
+
+        <label for="key-expires">Expires</label>
+        <select id="key-expires">
+          <option value="">Never</option>
+          <option value="30">30 days</option>
+          <option value="90">90 days</option>
+          <option value="365">1 year</option>
+        </select>
+
+        <div style="margin-top: 1rem;">
+          <button type="submit">Create Key</button>
+          <button type="button" class="secondary" onclick="hideCreateForm()">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- New key display -->
+  <div id="new-key-display" style="display: none; margin-bottom: 2rem;">
+    <div class="card" style="background: #fff3cd; border-left-color: #856404;">
+      <h3 style="color: #856404;">API Key Created</h3>
+      <p style="margin-bottom: 0.5rem;">Copy this key now. It will not be shown again.</p>
+      <div style="display: flex; align-items: center; gap: 0.5rem;">
+        <code id="new-key-value" style="flex: 1; padding: 0.75rem; background: #fff; border: 2px solid var(--black); font-size: 1rem; word-break: break-all;"></code>
+        <button onclick="copyKey()">Copy</button>
+      </div>
+      <div style="margin-top: 1rem;">
+        <button class="secondary" onclick="dismissNewKey()">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <div style="margin-bottom: 1rem; display: flex; gap: 1rem; align-items: center;">
+    <div>
+      <label for="filter-team" style="margin-right: 0.5rem;">Team:</label>
+      <select id="filter-team" onchange="loadKeys()">
+        <option value="">All Teams</option>
+      </select>
+    </div>
+    <div>
+      <label class="checkbox-option" style="margin: 0;">
+        <input type="checkbox" id="filter-revoked" onchange="loadKeys()">
+        Show revoked keys
+      </label>
+    </div>
+  </div>
+
+  <div id="keys-list">
+    <div class="loading">Loading...</div>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let allTeams = [];
+
+async function loadTeams() {
+  try {
+    const data = await api.listTeams({ limit: 100 });
+    allTeams = data.results || [];
+
+    const teamSelect = document.getElementById('key-team');
+    const filterSelect = document.getElementById('filter-team');
+
+    teamSelect.innerHTML = '<option value="">Select a team...</option>' +
+      allTeams.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
+
+    filterSelect.innerHTML = '<option value="">All Teams</option>' +
+      allTeams.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
+  } catch (error) {
+    showError('Failed to load teams: ' + error.message);
+  }
+}
+
+function showCreateForm() {
+  document.getElementById('create-form').style.display = 'block';
+  document.getElementById('key-name').focus();
+}
+
+function hideCreateForm() {
+  document.getElementById('create-form').style.display = 'none';
+  document.getElementById('key-name').value = '';
+  document.getElementById('scope-read').checked = true;
+  document.getElementById('scope-write').checked = true;
+  document.getElementById('scope-admin').checked = false;
+  document.getElementById('key-expires').value = '';
+}
+
+async function createKey(event) {
+  event.preventDefault();
+
+  const name = document.getElementById('key-name').value.trim();
+  const teamId = document.getElementById('key-team').value;
+  const expiresIn = document.getElementById('key-expires').value;
+
+  if (!name || !teamId) return;
+
+  const scopes = [];
+  if (document.getElementById('scope-read').checked) scopes.push('read');
+  if (document.getElementById('scope-write').checked) scopes.push('write');
+  if (document.getElementById('scope-admin').checked) scopes.push('admin');
+
+  if (scopes.length === 0) {
+    showError('Please select at least one scope');
+    return;
+  }
+
+  const data = {
+    name: name,
+    team_id: teamId,
+    scopes: scopes,
+  };
+
+  if (expiresIn) {
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + parseInt(expiresIn));
+    data.expires_at = expiresAt.toISOString();
+  }
+
+  try {
+    const result = await api.createAPIKey(data);
+    hideCreateForm();
+
+    // Show the new key
+    document.getElementById('new-key-value').textContent = result.key;
+    document.getElementById('new-key-display').style.display = 'block';
+
+    loadKeys();
+  } catch (error) {
+    showError(error.message);
+  }
+}
+
+function copyKey() {
+  const keyValue = document.getElementById('new-key-value').textContent;
+  navigator.clipboard.writeText(keyValue).then(() => {
+    showSuccess('Key copied to clipboard');
+  }).catch(() => {
+    showError('Failed to copy key');
+  });
+}
+
+function dismissNewKey() {
+  document.getElementById('new-key-display').style.display = 'none';
+  document.getElementById('new-key-value').textContent = '';
+}
+
+async function revokeKey(id, name) {
+  if (!confirm(`Revoke API key "${name}"? This action cannot be undone.`)) return;
+
+  try {
+    await api.revokeAPIKey(id);
+    showSuccess(`API key "${name}" has been revoked`);
+    loadKeys();
+  } catch (error) {
+    showError(error.message);
+  }
+}
+
+async function loadKeys() {
+  const container = document.getElementById('keys-list');
+  container.innerHTML = '<div class="loading">Loading...</div>';
+
+  const params = {};
+  const teamId = document.getElementById('filter-team').value;
+  const showRevoked = document.getElementById('filter-revoked').checked;
+
+  if (teamId) params.team_id = teamId;
+  if (showRevoked) params.include_revoked = 'true';
+
+  try {
+    const data = await api.listAPIKeys(params);
+
+    if (!data.keys || data.keys.length === 0) {
+      container.innerHTML = '<div class="empty">No API keys found. Create one to get started.</div>';
+      return;
+    }
+
+    // Group by team for display
+    const teamNames = {};
+    allTeams.forEach(t => teamNames[t.id] = t.name);
+
+    container.innerHTML = `
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Prefix</th>
+            <th>Team</th>
+            <th>Scopes</th>
+            <th>Created</th>
+            <th>Last Used</th>
+            <th>Expires</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${data.keys.map(key => {
+            const isRevoked = key.revoked_at != null;
+            const isExpired = key.expires_at && new Date(key.expires_at) < new Date();
+            const status = isRevoked ? 'revoked' : (isExpired ? 'expired' : 'active');
+            const statusClass = status === 'active' ? 'status-active' : (status === 'expired' ? 'status-pending' : 'status-deprecated');
+
+            return `
+              <tr style="${isRevoked ? 'opacity: 0.6;' : ''}">
+                <td><a href="/api-keys/${key.id}">${escapeHtml(key.name)}</a></td>
+                <td><code>${escapeHtml(key.key_prefix)}...</code></td>
+                <td>${teamNames[key.team_id] ? `<a href="/teams/${key.team_id}">${escapeHtml(teamNames[key.team_id])}</a>` : key.team_id}</td>
+                <td>${key.scopes.map(s => `<span class="status">${s}</span>`).join(' ')}</td>
+                <td>${formatDate(key.created_at)}</td>
+                <td>${key.last_used_at ? formatDate(key.last_used_at) : '<span style="color: var(--gray);">Never</span>'}</td>
+                <td>${key.expires_at ? formatDate(key.expires_at) : '<span style="color: var(--gray);">Never</span>'}</td>
+                <td><span class="status ${statusClass}">${status}</span></td>
+                <td>
+                  ${!isRevoked ? `<button class="secondary" onclick="revokeKey('${key.id}', '${escapeHtml(key.name)}')">Revoke</button>` : ''}
+                </td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+    `;
+  } catch (error) {
+    showError(error.message);
+    container.innerHTML = '<div class="error">Failed to load API keys</div>';
+  }
+}
+
+// Initialize
+loadTeams().then(() => loadKeys());
+</script>
+{% endblock %}

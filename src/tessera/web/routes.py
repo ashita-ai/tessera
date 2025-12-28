@@ -331,3 +331,32 @@ async def audit_log_page(
         "audit_log.html",
         make_context(request, "audit", current_user),
     )
+
+
+@router.get("/api-keys", response_class=HTMLResponse, response_model=None)
+async def api_keys_list(
+    request: Request,
+    current_user: dict[str, Any] = Depends(require_current_user),
+) -> Response:
+    """API keys management page (admin only)."""
+    if current_user.get("role") != "admin":
+        return RedirectResponse(url="/", status_code=302)
+    return templates.TemplateResponse(
+        "api_keys.html",
+        make_context(request, "api-keys", current_user),
+    )
+
+
+@router.get("/api-keys/{key_id}", response_class=HTMLResponse, response_model=None)
+async def api_key_detail(
+    request: Request,
+    key_id: str,
+    current_user: dict[str, Any] = Depends(require_current_user),
+) -> Response:
+    """API key detail page (admin only)."""
+    if current_user.get("role") != "admin":
+        return RedirectResponse(url="/", status_code=302)
+    return templates.TemplateResponse(
+        "api_key_detail.html",
+        make_context(request, "api-keys", current_user, key_id=key_id),
+    )

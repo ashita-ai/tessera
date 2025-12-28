@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+
+{% block title %}API Key - Tessera{% endblock %}
+
+{% block content %}
+<section>
+  <div id="key-detail">
+    <div class="loading">Loading...</div>
+  </div>
+</section>
+
+<section id="audit-section" style="display: none;">
+  <h2>Audit History</h2>
+  <div id="audit-history">
+    <div class="loading">Loading...</div>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const keyId = '{{ key_id }}';
+let keyData = null;
+let teamName = '';
+
+async function loadKeyDetail() {
+  try {
+    keyData = await api.getAPIKey(keyId);
+
+    // Get team name
+    try {
+      const team = await api.getTeam(keyData.team_id);
+      teamName = team.name;
+    } catch (e) {
+      teamName = keyData.team_id;
+    }
+
+    const isRevoked = keyData.revoked_at != null;
+    const isExpired = keyData.expires_at && new Date(keyData.expires_at) < new Date();
+    const status = isRevoked ? 'revoked' : (isExpired ? 'expired' : 'active');
+    const statusClass = status === 'active' ? 'status-active' : (status === 'expired' ? 'status-pending' : 'status-deprecated');
+
+    document.getElementById('key-detail').innerHTML = `
+      <h2>${escapeHtml(keyData.name)}</h2>
+      <span class="status ${statusClass}" style="margin-left: 0.5rem; vertical-align: middle;">${status}</span>
+
+      <div class="card">
+        <table>
+          <tr>
+            <td style="width: 150px;"><strong>ID</strong></td>
+            <td><code>${keyData.id}</code></td>
+          </tr>
+          <tr>
+            <td><strong>Key Prefix</strong></td>
+            <td><code>${escapeHtml(keyData.key_prefix)}...</code></td>
+          </tr>
+          <tr>
+            <td><strong>Team</strong></td>
+            <td><a href="/teams/${keyData.team_id}">${escapeHtml(teamName)}</a></td>
+          </tr>
+          <tr>
+            <td><strong>Scopes</strong></td>
+            <td>${keyData.scopes.map(s => `<span class="status">${s}</span>`).join(' ')}</td>
+          </tr>
+          <tr>
+            <td><strong>Created</strong></td>
+            <td>${formatDate(keyData.created_at)}</td>
+          </tr>
+          <tr>
+            <td><strong>Last Used</strong></td>
+            <td>${keyData.last_used_at ? formatDate(keyData.last_used_at) : '<span style="color: var(--gray);">Never</span>'}</td>
+          </tr>
+          <tr>
+            <td><strong>Expires</strong></td>
+            <td>${keyData.expires_at ? formatDate(keyData.expires_at) : '<span style="color: var(--gray);">Never</span>'}</td>
+          </tr>
+          ${isRevoked ? `
+          <tr>
+            <td><strong>Revoked</strong></td>
+            <td>${formatDate(keyData.revoked_at)}</td>
+          </tr>
+          ` : ''}
+        </table>
+      </div>
+
+      ${!isRevoked ? `
+      <div style="margin-top: 1rem;">
+        <button class="secondary" onclick="revokeKey()">Revoke Key</button>
+      </div>
+      ` : ''}
+
+      <div style="margin-top: 1rem;">
+        <a href="/api-keys">&larr; Back to API Keys</a>
+      </div>
+    `;
+
+    // Load audit history
+    loadAuditHistory();
+  } catch (error) {
+    showError(error.message);
+    document.getElementById('key-detail').innerHTML = '<div class="error">API key not found</div>';
+  }
+}
+
+async function revokeKey() {
+  if (!confirm(`Revoke API key "${keyData.name}"? This action cannot be undone.`)) return;
+
+  try {
+    await api.revokeAPIKey(keyId);
+    showSuccess(`API key "${keyData.name}" has been revoked`);
+    loadKeyDetail();
+  } catch (error) {
+    showError(error.message);
+  }
+}
+
+async function loadAuditHistory() {
+  const section = document.getElementById('audit-section');
+  const container = document.getElementById('audit-history');
+
+  try {
+    const data = await api.getEntityAuditHistory('api_key', keyId);
+
+    if (!data.results || data.results.length === 0) {
+      section.style.display = 'none';
+      return;
+    }
+
+    section.style.display = 'block';
+    container.innerHTML = `
+      <table>
+        <thead>
+          <tr>
+            <th>Event</th>
+            <th>Time</th>
+            <th>Details</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${data.results.map(event => `
+            <tr>
+              <td><span class="status">${event.action || event.event_type}</span></td>
+              <td>${formatDate(event.timestamp || event.created_at)}</td>
+              <td>${event.payload ? `<code>${JSON.stringify(event.payload)}</code>` : '-'}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+  } catch (error) {
+    section.style.display = 'none';
+  }
+}
+
+loadKeyDetail();
+</script>
+{% endblock %}

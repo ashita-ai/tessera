@@ -310,6 +310,29 @@ class TesseraAPI {
     const query = new URLSearchParams(params).toString();
     return this.request(`/audit/entities/${entityType}/${entityId}/history${query ? `?${query}` : ''}`);
   }
+
+  // API Keys
+  async listAPIKeys(params = {}) {
+    const query = new URLSearchParams(params).toString();
+    return this.request(`/api-keys${query ? `?${query}` : ''}`);
+  }
+
+  async getAPIKey(keyId) {
+    return this.request(`/api-keys/${keyId}`);
+  }
+
+  async createAPIKey(data) {
+    return this.request('/api-keys', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async revokeAPIKey(keyId) {
+    return this.request(`/api-keys/${keyId}`, {
+      method: 'DELETE',
+    });
+  }
 }
 
 class APIError extends Error {
