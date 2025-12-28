@@ -421,6 +421,10 @@ async def sync_from_dbt(
     assets_created = 0
     assets_updated = 0
 
+    # Track assets for per-asset audit logging
+    created_assets: list[AssetDB] = []
+    updated_assets: list[tuple[AssetDB, str]] = []  # (asset, fqn)
+
     # Process nodes (models, seeds, snapshots)
     nodes = manifest.get("nodes", {})
     tests_extracted = 0
@@ -465,6 +469,7 @@ async def sync_from_dbt(
         if existing:
             existing.metadata_ = metadata
             existing.resource_type = _map_dbt_resource_type(resource_type)
+            updated_assets.append((existing, fqn))
             assets_updated += 1
         else:
             new_asset = AssetDB(
@@ -474,6 +479,7 @@ async def sync_from_dbt(
                 metadata_=metadata,
             )
             session.add(new_asset)
+            created_assets.append(new_asset)
             assets_created += 1
 
     # Process sources
@@ -511,6 +517,7 @@ async def sync_from_dbt(
         if existing:
             existing.metadata_ = metadata
             existing.resource_type = ResourceType.SOURCE
+            updated_assets.append((existing, fqn))
             assets_updated += 1
         else:
             new_asset = AssetDB(
@@ -520,7 +527,31 @@ async def sync_from_dbt(
                 metadata_=metadata,
             )
             session.add(new_asset)
+            created_assets.append(new_asset)
             assets_created += 1
+
+    # Flush to ensure all asset IDs are available for per-asset audit logging
+    await session.flush()
+
+    # Log per-asset audit events
+    for asset in created_assets:
+        await audit.log_event(
+            session=session,
+            entity_type="asset",
+            entity_id=asset.id,
+            action=AuditAction.ASSET_CREATED,
+            actor_id=owner_team_id,
+            payload={"fqn": asset.fqn, "triggered_by": "dbt_sync"},
+        )
+    for asset, fqn in updated_assets:
+        await audit.log_event(
+            session=session,
+            entity_type="asset",
+            entity_id=asset.id,
+            action=AuditAction.ASSET_UPDATED,
+            actor_id=owner_team_id,
+            payload={"fqn": fqn, "triggered_by": "dbt_sync"},
+        )
 
     # Audit log dbt sync operation
     await audit.log_event(
@@ -656,6 +687,10 @@ async def upload_dbt_manifest(
     contract_warnings: list[str] = []
     registration_warnings: list[str] = []
     proposals_info: list[dict[str, Any]] = []
+
+    # Track assets for per-asset audit logging
+    created_assets_audit: list[tuple[AssetDB, UUID]] = []  # (asset, team_id)
+    updated_assets_audit: list[tuple[AssetDB, str, UUID]] = []  # (asset, fqn, team_id)
 
     # Track existing assets with breaking changes for proposal creation
     assets_for_proposals: list[
@@ -826,6 +861,7 @@ async def upload_dbt_manifest(
             if resolved_user_id:
                 existing.owner_user_id = resolved_user_id
             assets_updated += 1
+            updated_assets_audit.append((existing, fqn, resolved_team_id))
 
             # Check for breaking changes if auto_create_proposals is enabled
             if upload_req.auto_create_proposals and columns:
@@ -886,6 +922,7 @@ async def upload_dbt_manifest(
             )
             session.add(new_asset)
             assets_created += 1
+            created_assets_audit.append((new_asset, resolved_team_id))
 
             # Track for auto-publish if it has columns
             if upload_req.auto_publish_contracts and columns:
@@ -989,6 +1026,7 @@ async def upload_dbt_manifest(
             if resolved_user_id:
                 existing.owner_user_id = resolved_user_id
             assets_updated += 1
+            updated_assets_audit.append((existing, fqn, resolved_team_id))
 
             # Check for breaking changes if auto_create_proposals is enabled
             if upload_req.auto_create_proposals and columns:
@@ -1049,6 +1087,7 @@ async def upload_dbt_manifest(
             )
             session.add(new_asset)
             assets_created += 1
+            created_assets_audit.append((new_asset, resolved_team_id))
 
             # Track for auto-publish if it has columns
             if upload_req.auto_publish_contracts and columns:
@@ -1362,6 +1401,29 @@ async def upload_dbt_manifest(
                         "breaking_changes_count": len(breaking_changes_list),
                     }
                 )
+
+    # Flush to ensure all asset IDs are available for per-asset audit logging
+    await session.flush()
+
+    # Log per-asset audit events
+    for asset, team_id in created_assets_audit:
+        await audit.log_event(
+            session=session,
+            entity_type="asset",
+            entity_id=asset.id,
+            action=AuditAction.ASSET_CREATED,
+            actor_id=team_id,
+            payload={"fqn": asset.fqn, "triggered_by": "dbt_sync_upload"},
+        )
+    for asset, fqn, team_id in updated_assets_audit:
+        await audit.log_event(
+            session=session,
+            entity_type="asset",
+            entity_id=asset.id,
+            action=AuditAction.ASSET_UPDATED,
+            actor_id=team_id,
+            payload={"fqn": fqn, "triggered_by": "dbt_sync_upload"},
+        )
 
     # Audit log dbt sync upload operation
     await audit.log_event(
@@ -1812,6 +1874,16 @@ async def import_openapi(
                 existing_asset.resource_type = ResourceType.API_ENDPOINT
                 await session.flush()
 
+                # Log per-asset audit event
+                await audit.log_event(
+                    session=session,
+                    entity_type="asset",
+                    entity_id=existing_asset.id,
+                    action=AuditAction.ASSET_UPDATED,
+                    actor_id=import_req.owner_team_id,
+                    payload={"fqn": asset_def.fqn, "triggered_by": "import_openapi"},
+                )
+
                 endpoints_results.append(
                     OpenAPIEndpointResult(
                         fqn=asset_def.fqn,
@@ -1834,6 +1906,16 @@ async def import_openapi(
                 session.add(new_asset)
                 await session.flush()
                 await session.refresh(new_asset)
+
+                # Log per-asset audit event
+                await audit.log_event(
+                    session=session,
+                    entity_type="asset",
+                    entity_id=new_asset.id,
+                    action=AuditAction.ASSET_CREATED,
+                    actor_id=import_req.owner_team_id,
+                    payload={"fqn": asset_def.fqn, "triggered_by": "import_openapi"},
+                )
 
                 contract_id: str | None = None
 
@@ -2086,6 +2168,16 @@ async def import_graphql(
                 existing_asset.resource_type = ResourceType.GRAPHQL_QUERY
                 await session.flush()
 
+                # Log per-asset audit event
+                await audit.log_event(
+                    session=session,
+                    entity_type="asset",
+                    entity_id=existing_asset.id,
+                    action=AuditAction.ASSET_UPDATED,
+                    actor_id=import_req.owner_team_id,
+                    payload={"fqn": asset_def.fqn, "triggered_by": "import_graphql"},
+                )
+
                 operations_results.append(
                     GraphQLOperationResult(
                         fqn=asset_def.fqn,
@@ -2108,6 +2200,16 @@ async def import_graphql(
                 session.add(new_asset)
                 await session.flush()
                 await session.refresh(new_asset)
+
+                # Log per-asset audit event
+                await audit.log_event(
+                    session=session,
+                    entity_type="asset",
+                    entity_id=new_asset.id,
+                    action=AuditAction.ASSET_CREATED,
+                    actor_id=import_req.owner_team_id,
+                    payload={"fqn": asset_def.fqn, "triggered_by": "import_graphql"},
+                )
 
                 contract_id: str | None = None
 
