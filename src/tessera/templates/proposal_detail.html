@@ -212,40 +212,90 @@ async function submitForceApprove(event) {
   }
 }
 
+// Icons for different change types
+const CHANGE_ICONS = {
+  added: '+',
+  removed: '-',
+  modified: '~',
+  type_changed: 'T',
+  required_added: '!',
+  required_removed: '?',
+  enum_removed: 'E',
+  unchanged: '='
+};
+
+function getChangeBadge(type, label) {
+  const icon = CHANGE_ICONS[type] || '';
+  const cssClass = {
+    added: 'change-new',
+    removed: 'change-removed',
+    modified: 'change-modified',
+    type_changed: 'change-breaking',
+    required_added: 'change-breaking',
+    required_removed: 'change-compatible',
+    enum_removed: 'change-breaking',
+    unchanged: 'change-unchanged'
+  }[type] || 'change-unchanged';
+
+  return `<span class="change-badge ${cssClass}">${icon} ${label}</span>`;
+}
+
 function renderSchemaDiff(currentSchema, proposedSchema) {
   const currentProps = currentSchema?.properties || {};
   const proposedProps = proposedSchema?.properties || {};
+  const currentRequired = new Set(currentSchema?.required || []);
+  const proposedRequired = new Set(proposedSchema?.required || []);
 
   const allKeys = new Set([...Object.keys(currentProps), ...Object.keys(proposedProps)]);
 
-  let html = '<table><thead><tr><th>Column</th><th>Current</th><th>Proposed</th><th>Change</th></tr></thead><tbody>';
+  let html = '<table class="schema-diff-table"><thead><tr><th>Column</th><th>Current</th><th>Proposed</th><th>Change</th></tr></thead><tbody>';
 
   for (const key of [...allKeys].sort()) {
     const current = currentProps[key];
     const proposed = proposedProps[key];
+    const wasRequired = currentRequired.has(key);
+    const isRequired = proposedRequired.has(key);
 
-    let changeClass = '';
+    let rowClass = '';
     let changeLabel = '';
 
     if (!current && proposed) {
-      changeClass = 'added';
-      changeLabel = '<span style="color: green;">+ Added</span>';
+      rowClass = 'row-added';
+      changeLabel = getChangeBadge('added', 'Added');
     } else if (current && !proposed) {
-      changeClass = 'removed';
-      changeLabel = '<span style="color: red;">- Removed</span>';
+      rowClass = 'row-removed';
+      changeLabel = getChangeBadge('removed', 'Removed');
     } else if (current && proposed) {
-      if (JSON.stringify(current) !== JSON.stringify(proposed)) {
-        changeClass = 'modified';
-        changeLabel = '<span style="color: orange;">~ Modified</span>';
+      const typeChanged = current.type !== proposed.type;
+      const otherChanges = JSON.stringify(current) !== JSON.stringify(proposed);
+
+      if (typeChanged) {
+        rowClass = 'row-modified';
+        changeLabel = getChangeBadge('type_changed', 'Type Changed');
+      } else if (!wasRequired && isRequired) {
+        rowClass = 'row-modified';
+        changeLabel = getChangeBadge('required_added', 'Now Required');
+      } else if (wasRequired && !isRequired) {
+        rowClass = 'row-modified';
+        changeLabel = getChangeBadge('required_removed', 'Now Optional');
+      } else if (otherChanges) {
+        rowClass = 'row-modified';
+        changeLabel = getChangeBadge('modified', 'Modified');
       } else {
-        changeLabel = '<span style="color: gray;">No change</span>';
+        changeLabel = getChangeBadge('unchanged', 'Unchanged');
       }
     }
 
-    html += `<tr class="${changeClass}">
-      <td><code>${escapeHtml(key)}</code></td>
-      <td>${current ? `<code>${escapeHtml(current.type || 'unknown')}</code>${current.description ? `<br><small>${escapeHtml(current.description)}</small>` : ''}` : '<em>-</em>'}</td>
-      <td>${proposed ? `<code>${escapeHtml(proposed.type || 'unknown')}</code>${proposed.description ? `<br><small>${escapeHtml(proposed.description)}</small>` : ''}` : '<em>-</em>'}</td>
+    const formatType = (prop, required) => {
+      if (!prop) return '<em style="color: var(--gray);">-</em>';
+      const reqBadge = required ? '<span style="color: #c00; font-weight: bold;">*</span>' : '';
+      return `<span class="type-value">${escapeHtml(prop.type || 'unknown')}</span>${reqBadge}${prop.description ? `<br><small style="color: var(--gray);">${escapeHtml(prop.description)}</small>` : ''}`;
+    };
+
+    html += `<tr class="${rowClass}">
+      <td class="column-name"><code>${escapeHtml(key)}</code></td>
+      <td>${formatType(current, wasRequired)}</td>
+      <td>${formatType(proposed, isRequired)}</td>
       <td>${changeLabel}</td>
     </tr>`;
   }
@@ -273,7 +323,26 @@ async function loadProposalDetail() {
     const isApproved = proposal.status === 'approved';
     const allAcknowledged = status?.consumers?.pending === 0 && status?.consumers?.total > 0;
 
+    // Show warning banner for pending proposals with breaking changes
+    const breakingChanges = status?.breaking_changes || proposal.breaking_changes || [];
+    const warningBanner = isPending && breakingChanges.length > 0 ? `
+      <div class="warning-banner">
+        <div class="warning-banner-icon">!</div>
+        <div class="warning-banner-content">
+          <div class="warning-banner-title">Breaking Change Requires Acknowledgment</div>
+          <div class="warning-banner-message">
+            This proposal contains ${breakingChanges.length} breaking change${breakingChanges.length !== 1 ? 's' : ''}.
+            ${status?.consumers?.pending > 0
+              ? `Waiting for ${status.consumers.pending} of ${status.consumers.total} consumer${status.consumers.total !== 1 ? 's' : ''} to acknowledge.`
+              : 'All consumers have been notified.'
+            }
+          </div>
+        </div>
+      </div>
+    ` : '';
+
     document.getElementById('proposal-detail').innerHTML = `
+      ${warningBanner}
       <div style="display: flex; justify-content: space-between; align-items: flex-start;">
         <div>
           <h2 style="margin-bottom: 0.5rem;">Breaking Change Proposal</h2>
@@ -341,36 +410,59 @@ async function loadProposalDetail() {
       diffContainer.innerHTML = '<div class="empty">No schema information available.</div>';
     }
 
-    // Breaking changes
+    // Breaking changes (with improved visual styling)
     const changesContainer = document.getElementById('breaking-changes');
-    const breakingChanges = status?.breaking_changes || proposal.breaking_changes || [];
-    if (breakingChanges.length > 0) {
+    // Re-reference breakingChanges since it was already computed above for the warning banner
+    const displayedBreakingChanges = breakingChanges;
+    if (displayedBreakingChanges.length > 0) {
+      // Map change types to icons
+      const changeTypeIcons = {
+        'property_removed': '-',
+        'type_changed': 'T',
+        'type_narrowed': 'T',
+        'required_added': '!',
+        'enum_removed': 'E',
+        'constraint_added': 'C',
+        'removed': '-',
+        'modified': '~'
+      };
+
       changesContainer.innerHTML = `
-        <div class="card" style="border-left: 4px solid var(--error);">
+        <div class="card" style="border-left: 6px solid #c00; background: #fff5f5;">
+          <div style="margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+            <span style="font-size: 1.25rem; color: #c00;">!</span>
+            <strong style="color: #c00;">${displayedBreakingChanges.length} Breaking Change${displayedBreakingChanges.length !== 1 ? 's' : ''} Detected</strong>
+          </div>
           <table>
             <thead>
               <tr>
-                <th>Change Type</th>
-                <th>Location</th>
+                <th style="width: 120px;">Type</th>
+                <th style="width: 150px;">Location</th>
                 <th>Description</th>
-                <th>Impact</th>
+                <th style="width: 180px;">Value Change</th>
               </tr>
             </thead>
             <tbody>
-              ${breakingChanges.map(c => `
+              ${displayedBreakingChanges.map(c => {
+                const changeType = c.type || c.change_type || 'unknown';
+                const icon = changeTypeIcons[changeType] || '!';
+                return `
                 <tr>
-                  <td><strong style="color: var(--error);">${escapeHtml(c.type || c.change_type || 'Unknown')}</strong></td>
-                  <td><code>${escapeHtml(c.path || c.column || 'N/A')}</code></td>
+                  <td><span class="change-badge change-breaking">${icon} ${escapeHtml(changeType.replace(/_/g, ' '))}</span></td>
+                  <td><code style="font-weight: 600;">${escapeHtml(c.path || c.column || 'N/A')}</code></td>
                   <td>${escapeHtml(c.message || c.description || '')}</td>
-                  <td>${c.old_value ? `<code>${escapeHtml(String(c.old_value))}</code> → ` : ''}${c.new_value !== undefined ? `<code>${escapeHtml(String(c.new_value || 'removed'))}</code>` : ''}</td>
+                  <td>${c.old_value !== undefined || c.new_value !== undefined
+                    ? `<span class="type-value">${escapeHtml(String(c.old_value ?? '-'))}</span> → <span class="type-value">${escapeHtml(String(c.new_value ?? 'removed'))}</span>`
+                    : '<em style="color: var(--gray);">-</em>'
+                  }</td>
                 </tr>
-              `).join('')}
+              `}).join('')}
             </tbody>
           </table>
         </div>
       `;
     } else {
-      changesContainer.innerHTML = '<div class="empty">No breaking changes documented.</div>';
+      changesContainer.innerHTML = '<div class="card" style="border-left: 6px solid #080; background: #f5fff5;"><div style="display: flex; align-items: center; gap: 0.5rem;"><span style="font-size: 1.25rem; color: #080;">+</span><strong style="color: #080;">No Breaking Changes</strong></div><p style="margin: 0.5rem 0 0 2rem; color: var(--gray);">This proposal does not contain any breaking changes.</p></div>';
     }
 
     // Impacted consumers

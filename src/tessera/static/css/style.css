@@ -177,6 +177,110 @@ tr:hover {
 .status-pending { border: 1px dashed var(--black); }
 .status-deprecated { color: var(--gray); border: 1px solid var(--gray); }
 
+/* Change type badges for schema diff */
+.change-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border-radius: 3px;
+}
+
+.change-breaking {
+  background: #fce4e4;
+  color: #c00;
+  border: 1px solid #c00;
+}
+
+.change-compatible {
+  background: #e4fce4;
+  color: #080;
+  border: 1px solid #080;
+}
+
+.change-new {
+  background: #e4e8fc;
+  color: #008;
+  border: 1px solid #008;
+}
+
+.change-removed {
+  background: #fce4e4;
+  color: #c00;
+  border: 1px solid #c00;
+}
+
+.change-modified {
+  background: #fcf4e4;
+  color: #850;
+  border: 1px solid #850;
+}
+
+.change-unchanged {
+  background: var(--light-gray);
+  color: var(--gray);
+  border: 1px solid var(--gray);
+}
+
+/* Warning banner for breaking changes */
+.warning-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1.5rem;
+  background: #fff3e0;
+  border: 2px solid #e65100;
+  border-left-width: 6px;
+}
+
+.warning-banner-icon {
+  font-size: 1.5rem;
+  flex-shrink: 0;
+}
+
+.warning-banner-content {
+  flex: 1;
+}
+
+.warning-banner-title {
+  font-weight: 700;
+  color: #e65100;
+  margin-bottom: 0.25rem;
+}
+
+.warning-banner-message {
+  color: #bf360c;
+  font-size: 0.9rem;
+}
+
+/* Schema diff table styling */
+.schema-diff-table tr.row-added {
+  background: #e8f5e9;
+}
+
+.schema-diff-table tr.row-removed {
+  background: #ffebee;
+}
+
+.schema-diff-table tr.row-modified {
+  background: #fff8e1;
+}
+
+.schema-diff-table .column-name {
+  font-weight: 600;
+}
+
+.schema-diff-table .type-value {
+  font-family: 'SF Mono', 'Monaco', monospace;
+  font-size: 0.875rem;
+  background: var(--light-gray);
+  padding: 0.125rem 0.375rem;
+  border-radius: 2px;
+}
+
 /* Stats */
 .stats {
   display: grid;
