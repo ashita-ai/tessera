@@ -120,7 +120,13 @@ def validate_avro_schema(schema: dict[str, Any]) -> tuple[bool, list[str]]:
     if not isinstance(schema, dict):
         return False, ["Avro schema must be an object"]
 
-    # Use fastavro for full validation if available
+    # First run basic validation to catch structural issues that fastavro may be lenient about
+    # (e.g., fastavro accepts record without 'fields' but Avro spec requires it)
+    is_basic_valid, basic_errors = _validate_basic(schema)
+    if not is_basic_valid:
+        return False, basic_errors
+
+    # Use fastavro for additional validation if available
     if FASTAVRO_AVAILABLE and parse_schema is not None:
         try:
             parse_schema(schema)
@@ -128,8 +134,7 @@ def validate_avro_schema(schema: dict[str, Any]) -> tuple[bool, list[str]]:
         except Exception as e:
             return False, [str(e)]
 
-    # Fall back to basic validation
-    return _validate_basic(schema)
+    return True, []
 
 
 def validate_avro_schema_or_raise(schema: dict[str, Any]) -> None:
