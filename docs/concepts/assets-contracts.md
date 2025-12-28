@@ -30,6 +30,20 @@ curl -X POST http://localhost:8000/api/v1/assets \
 | `environment` | No | Environment name (default: `production`) |
 | `metadata` | No | Arbitrary metadata object |
 
+### Asset Resource Types
+
+Assets have a `resource_type` that indicates their origin:
+
+| Resource Type | Source | Schema Format |
+|--------------|--------|---------------|
+| `model` | dbt models | `json_schema` |
+| `seed` | dbt seeds | `json_schema` |
+| `source` | dbt sources | `json_schema` |
+| `snapshot` | dbt snapshots | `json_schema` |
+| `api_endpoint` | OpenAPI import | `openapi` |
+| `graphql_query` | GraphQL import | `graphql` |
+| `kafka_topic` | Avro import | `avro` |
+
 ### Metadata from dbt
 
 When syncing from dbt, metadata includes:
@@ -68,10 +82,24 @@ curl -X POST http://localhost:8000/api/v1/assets/{asset_id}/contracts \
 
 | Property | Required | Description |
 |----------|----------|-------------|
-| `schema` | Yes | JSON Schema definition |
+| `schema` | Yes | Schema definition (format depends on asset type) |
+| `schema_format` | No | Schema format: `json_schema`, `avro`, `openapi`, `graphql` |
 | `compatibility_mode` | No | How changes are evaluated (default: `backward`) |
 | `version` | No | Semantic version (auto-incremented if not provided) |
 | `guarantees` | No | SLAs and data quality rules |
+
+### Supported Schema Formats
+
+Tessera supports multiple schema formats for different asset types:
+
+| Format | Use Case | Example |
+|--------|----------|---------|
+| `json_schema` | dbt models, generic data assets | Default for warehouse tables |
+| `avro` | Kafka topics, event streams | Apache Avro schemas |
+| `openapi` | REST API endpoints | OpenAPI operation schemas |
+| `graphql` | GraphQL queries/mutations | GraphQL type definitions |
+
+The schema format is automatically detected when importing from external sources (OpenAPI specs, GraphQL introspection, Avro schema registries).
 
 ### Versioning
 

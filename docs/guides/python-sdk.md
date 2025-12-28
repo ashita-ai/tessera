@@ -35,7 +35,7 @@ asset = client.assets.create(
     owner_team_id=team.id
 )
 
-# Publish a contract
+# Publish a contract (JSON Schema - default for dbt models)
 result = client.assets.publish_contract(
     asset_id=asset.id,
     schema={
@@ -45,6 +45,14 @@ result = client.assets.publish_contract(
             "name": {"type": "string"}
         }
     },
+    version="1.0.0"
+)
+
+# Publish with explicit schema format (for non-dbt assets)
+result = client.assets.publish_contract(
+    asset_id=asset.id,
+    schema={"type": "record", "name": "User", "fields": [...]},
+    schema_format="avro",  # or "openapi", "graphql"
     version="1.0.0"
 )
 ```

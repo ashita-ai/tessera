@@ -41,11 +41,11 @@ uv run uvicorn tessera.main:app --reload
 
 ## Key Features
 
-- **Schema contracts** - JSON Schema definitions with semantic versioning
+- **Schema contracts** - JSON Schema, Avro, OpenAPI, and GraphQL support
 - **Breaking change detection** - Auto-detect incompatible changes
 - **Consumer registration** - Track who depends on what
 - **Proposal workflow** - Coordinate changes across teams
-- **dbt integration** - Sync contracts from your dbt manifest
+- **Multi-source imports** - dbt manifests, OpenAPI specs, GraphQL schemas, Avro registries
 - **Web UI** - Visual interface for managing contracts
 
 ## How It Works

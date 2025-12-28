@@ -62,6 +62,7 @@ GET /api/v1/contracts/{contract_id}
     },
     "required": ["id"]
   },
+  "schema_format": "json_schema",
   "guarantees": {
     "freshness": {
       "max_staleness_minutes": 60
@@ -74,6 +75,17 @@ GET /api/v1/contracts/{contract_id}
   "published_by": "team-uuid"
 }
 ```
+
+### Schema Format
+
+The `schema_format` field indicates the format of the `schema_def`:
+
+| Format | Description |
+|--------|-------------|
+| `json_schema` | JSON Schema (default for dbt models) |
+| `avro` | Apache Avro schema (Kafka topics) |
+| `openapi` | OpenAPI operation schema (REST APIs) |
+| `graphql` | GraphQL type definition (GraphQL APIs) |
 
 ## Get Contract Registrations
 
