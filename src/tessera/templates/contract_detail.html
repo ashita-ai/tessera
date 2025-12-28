@@ -48,12 +48,13 @@ async function loadContractDetail() {
       </div>
     `;
 
-    // Schema
+    // Schema (API returns schema_def, not schema)
     const schemaContainer = document.getElementById('contract-schema');
-    if (contract.schema) {
+    const schema = contract.schema_def || contract.schema;
+    if (schema) {
       schemaContainer.innerHTML = `
         <div class="card" style="background: var(--white);">
-          <pre class="json-highlighted">${highlightJson(contract.schema)}</pre>
+          <pre class="json-highlighted">${highlightJson(schema)}</pre>
         </div>
       `;
     } else {
