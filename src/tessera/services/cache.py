@@ -68,9 +68,21 @@ def _make_key(prefix: str, *parts: str) -> str:
     return f"tessera:{prefix}:{key_data}"
 
 
+def _type_aware_serializer(obj: Any) -> str:
+    """Serialize objects with type information to prevent collisions.
+
+    This ensures that {"id": 123} and {"id": "123"} produce different hashes.
+    """
+    return f"{type(obj).__name__}:{obj!r}"
+
+
 def _hash_dict(data: dict[str, Any]) -> str:
-    """Create a hash of a dictionary for cache key generation."""
-    serialized = json.dumps(data, sort_keys=True, default=str)
+    """Create a hash of a dictionary for cache key generation.
+
+    Uses type-aware serialization to prevent collisions between values that
+    stringify similarly (e.g., int 123 vs string "123").
+    """
+    serialized = json.dumps(data, sort_keys=True, default=_type_aware_serializer)
     return hashlib.sha256(serialized.encode()).hexdigest()[:16]
 
 

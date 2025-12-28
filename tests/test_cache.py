@@ -59,6 +59,18 @@ class TestCacheKeyHelpers:
         hash2 = _hash_dict({"x": 2})
         assert hash1 != hash2
 
+    def test_hash_dict_type_aware_int_vs_string(self):
+        """Int and string with same value produce different hashes."""
+        hash_int = _hash_dict({"id": 123})
+        hash_str = _hash_dict({"id": "123"})
+        assert hash_int != hash_str
+
+    def test_hash_dict_type_aware_nested(self):
+        """Nested structures with type differences produce different hashes."""
+        hash1 = _hash_dict({"data": {"value": 42}})
+        hash2 = _hash_dict({"data": {"value": "42"}})
+        assert hash1 != hash2
+
     def test_hash_dict_truncated(self):
         """Hash is truncated to 16 characters."""
         result = _hash_dict({"data": "value"})
