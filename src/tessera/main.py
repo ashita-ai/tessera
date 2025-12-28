@@ -1,17 +1,21 @@
 """FastAPI application entry point."""
 
 import logging
+import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.exceptions import HTTPException
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -41,10 +45,14 @@ from tessera.api.errors import (
 )
 from tessera.api.rate_limit import limiter, rate_limit_exceeded_handler
 from tessera.config import DEFAULT_SESSION_SECRET, settings
-from tessera.db import init_db
+from tessera.db import get_session, init_db
 from tessera.db.database import dispose_engine, get_async_session_maker
+from tessera.services.metrics import MetricsMiddleware, get_metrics, update_gauge_metrics
 from tessera.web import router as web_router
 from tessera.web.routes import register_login_required_handler
+
+# Track application start time for uptime calculation
+_app_start_time = time.time()
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +98,9 @@ app.add_middleware(SessionMiddleware, secret_key=settings.session_secret_key)
 
 # Request ID middleware (must be added first to wrap all other middleware)
 app.add_middleware(RequestIDMiddleware)
+
+# Prometheus metrics middleware
+app.add_middleware(MetricsMiddleware)
 
 # CORS middleware
 allow_methods = ["*"]
@@ -141,10 +152,53 @@ if static_dir.exists():
 app.include_router(web_router)
 
 
+@app.get("/metrics")
+async def metrics() -> PlainTextResponse:
+    """Prometheus metrics endpoint."""
+    return PlainTextResponse(get_metrics(), media_type="text/plain; charset=utf-8")
+
+
 @app.get("/health")
-async def health() -> dict[str, str]:
-    """Basic health check endpoint (liveness probe)."""
-    return {"status": "healthy"}
+async def health(
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Enhanced health check endpoint with dependency checks."""
+    uptime_seconds = time.time() - _app_start_time
+    checks: dict[str, dict[str, Any]] = {}
+
+    # Database check
+    db_status = "healthy"
+    db_latency_ms: float | None = None
+    try:
+        start = time.time()
+        await session.execute(text("SELECT 1"))
+        db_latency_ms = round((time.time() - start) * 1000, 2)
+    except Exception as e:
+        db_status = "unhealthy"
+        logger.error("Health check database failed: %s", e)
+
+    checks["database"] = {
+        "status": db_status,
+        "latency_ms": db_latency_ms,
+    }
+
+    # Overall status
+    overall_status = (
+        "healthy" if all(c["status"] == "healthy" for c in checks.values()) else "degraded"
+    )
+
+    # Update gauge metrics while we have a session
+    try:
+        await update_gauge_metrics(session)
+    except Exception:
+        pass  # Don't fail health check if metrics update fails
+
+    return {
+        "status": overall_status,
+        "version": "0.1.0",
+        "uptime_seconds": round(uptime_seconds, 1),
+        "checks": checks,
+    }
 
 
 @app.get("/health/ready")
