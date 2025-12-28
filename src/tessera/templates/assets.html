@@ -6,6 +6,45 @@
 <section>
   <h2>Assets</h2>
 
+  <div style="margin-bottom: 1rem;">
+    <button onclick="showCreateForm()">+ New Asset</button>
+  </div>
+
+  <div id="create-form" style="display: none; margin-bottom: 2rem;">
+    <div class="card">
+      <h3>Create Asset</h3>
+      <form onsubmit="createAsset(event)">
+        <label for="asset-fqn">Fully Qualified Name (FQN)</label>
+        <input type="text" id="asset-fqn" name="fqn" required placeholder="e.g., analytics.core.dim_customers">
+
+        <label for="asset-team">Owner Team</label>
+        <select id="asset-team" required>
+          <option value="">Loading teams...</option>
+        </select>
+
+        <label for="asset-type">Resource Type</label>
+        <select id="asset-type">
+          <option value="model">Model</option>
+          <option value="source">Source</option>
+          <option value="seed">Seed</option>
+          <option value="snapshot">Snapshot</option>
+          <option value="api_endpoint">API Endpoint</option>
+          <option value="grpc_service">gRPC Service</option>
+          <option value="graphql_query">GraphQL</option>
+          <option value="external">External</option>
+        </select>
+
+        <label for="asset-description">Description (optional)</label>
+        <textarea id="asset-description" name="description" rows="2" placeholder="Brief description of this asset"></textarea>
+
+        <div style="margin-top: 1rem;">
+          <button type="submit">Create Asset</button>
+          <button type="button" class="secondary" onclick="hideCreateForm()">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <div id="owner-filter-banner" style="display: none; margin-bottom: 1rem; padding: 0.75rem; background: var(--bg-secondary); border-radius: 4px;"></div>
 
   <!-- Filters -->
@@ -72,6 +111,49 @@ let currentSortBy = 'fqn';
 let currentSortOrder = 'asc';
 let selectedAssets = new Set();
 let allUsers = [];  // Store all users with team_id for intelligent filtering
+let allTeams = [];  // Store all teams for create form
+
+function showCreateForm() {
+  document.getElementById('create-form').style.display = 'block';
+  document.getElementById('asset-fqn').focus();
+}
+
+function hideCreateForm() {
+  document.getElementById('create-form').style.display = 'none';
+  document.getElementById('asset-fqn').value = '';
+  document.getElementById('asset-type').value = 'model';
+  document.getElementById('asset-description').value = '';
+}
+
+async function createAsset(event) {
+  event.preventDefault();
+
+  const fqn = document.getElementById('asset-fqn').value.trim();
+  const teamId = document.getElementById('asset-team').value;
+  const resourceType = document.getElementById('asset-type').value;
+  const description = document.getElementById('asset-description').value.trim();
+
+  if (!fqn || !teamId) return;
+
+  const data = {
+    fqn: fqn,
+    owner_team_id: teamId,
+    resource_type: resourceType,
+  };
+
+  if (description) {
+    data.description = description;
+  }
+
+  try {
+    const result = await api.createAsset(data);
+    hideCreateForm();
+    // Redirect to the new asset's detail page
+    window.location.href = `/assets/${result.id}`;
+  } catch (error) {
+    showError(error.message);
+  }
+}
 
 // Resource type badge styling
 const typeColors = {
@@ -377,14 +459,20 @@ async function loadFilterOptions() {
   try {
     // Load teams
     const teamsData = await api.listTeams({ limit: 100 });
+    allTeams = teamsData.results || [];
     const teamSelect = document.getElementById('filter-team');
     teamSelect.innerHTML = '<option value="">All teams</option>' +
-      teamsData.results.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
+      allTeams.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
 
     // Also populate bulk team select
     const bulkTeamSelect = document.getElementById('bulk-team-select');
     bulkTeamSelect.innerHTML = '<option value="">Select team...</option>' +
-      teamsData.results.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
+      allTeams.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
+
+    // Populate create form team select
+    const createTeamSelect = document.getElementById('asset-team');
+    createTeamSelect.innerHTML = '<option value="">Select a team...</option>' +
+      allTeams.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
 
     // Load users and store for intelligent filtering
     const usersData = await api.listUsers({ limit: 100 });
