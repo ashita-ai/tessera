@@ -25,14 +25,6 @@ Tessera is configured via environment variables.
 | `BOOTSTRAP_API_KEY` | Initial admin API key for setup | None |
 | `AUTH_DISABLED` | Disable auth (dev only) | `false` |
 
-### Server
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `API_HOST` | Server bind address | `0.0.0.0` |
-| `API_PORT` | Server port | `8000` |
-| `API_RELOAD` | Enable auto-reload | `false` |
-
 ### CORS
 
 | Variable | Description | Default |
@@ -139,7 +131,6 @@ services:
     environment:
       - ENVIRONMENT=development
       - AUTH_DISABLED=true
-      - API_RELOAD=true
     volumes:
       - ./src:/app/src
 ```

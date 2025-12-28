@@ -34,7 +34,7 @@ uv add tessera-contracts
 ```bash
 # Set required environment variables
 export DATABASE_URL="postgresql+asyncpg://user:pass@localhost:5432/tessera"
-export SECRET_KEY="your-secret-key-here"
+export SESSION_SECRET_KEY="your-secret-key-at-least-32-characters"
 
 # Run database migrations
 alembic upgrade head

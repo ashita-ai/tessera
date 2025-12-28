@@ -27,7 +27,7 @@ services:
       - "8000:8000"
     environment:
       - DATABASE_URL=postgresql+asyncpg://tessera:tessera@db:5432/tessera
-      - SECRET_KEY=${SECRET_KEY}
+      - SESSION_SECRET_KEY=${SESSION_SECRET_KEY}
       - BOOTSTRAP_API_KEY=${BOOTSTRAP_API_KEY}
     depends_on:
       db:
@@ -60,7 +60,7 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://tessera:tessera@db:5432/tessera
       - REDIS_URL=redis://redis:6379/0
-      - SECRET_KEY=${SECRET_KEY}
+      - SESSION_SECRET_KEY=${SESSION_SECRET_KEY}
     depends_on:
       - db
       - redis
@@ -101,7 +101,7 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://${DB_USER}:${DB_PASS}@db:5432/tessera
       - REDIS_URL=redis://redis:6379/0
-      - SECRET_KEY=${SECRET_KEY}
+      - SESSION_SECRET_KEY=${SESSION_SECRET_KEY}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -115,7 +115,7 @@ Create a `.env` file:
 
 ```bash
 # Required
-SECRET_KEY=your-secret-key-at-least-32-characters
+SESSION_SECRET_KEY=your-secret-key-at-least-32-characters
 BOOTSTRAP_API_KEY=tsk_your_bootstrap_key
 
 # Database

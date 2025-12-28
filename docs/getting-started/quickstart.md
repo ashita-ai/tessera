@@ -28,8 +28,8 @@ Tessera is now running at `http://localhost:8000`.
 Open [http://localhost:8000](http://localhost:8000) in your browser.
 
 Default credentials:
-- **Email**: `admin@example.com`
-- **Password**: `admin`
+- **Email**: `admin@tessera.dev`
+- **Password**: `adminpass123`
 
 ## Create Your First Contract
 
