@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.exceptions import HTTPException
 from starlette.middleware.sessions import SessionMiddleware
@@ -58,6 +58,64 @@ _app_start_time = time.time()
 logger = logging.getLogger(__name__)
 
 
+async def bootstrap_admin_user() -> None:
+    """Bootstrap an admin user from environment variables.
+
+    This is idempotent and safe for k8s rolling restarts:
+    - If the user doesn't exist, create them with admin role
+    - If the user exists, update their password and ensure admin role
+    """
+    if not settings.admin_email or not settings.admin_password:
+        return
+
+    from argon2 import PasswordHasher
+
+    from tessera.db import TeamDB, UserDB
+    from tessera.db.database import get_async_session_maker
+    from tessera.models.enums import UserRole
+
+    hasher = PasswordHasher()
+    async_session = get_async_session_maker()
+
+    async with async_session() as session:
+        # Check if user exists
+        result = await session.execute(select(UserDB).where(UserDB.email == settings.admin_email))
+        user = result.scalar_one_or_none()
+
+        if user:
+            # Update existing user
+            user.password_hash = hasher.hash(settings.admin_password)
+            user.role = UserRole.ADMIN
+            user.name = settings.admin_name
+            user.deactivated_at = None  # Re-activate if deactivated
+            logger.info(f"Updated bootstrap admin user: {settings.admin_email}")
+        else:
+            # Need a team for the user - get or create "admin" team
+            team_result = await session.execute(
+                select(TeamDB).where(TeamDB.name == "admin").where(TeamDB.deleted_at.is_(None))
+            )
+            team = team_result.scalar_one_or_none()
+
+            if not team:
+                team = TeamDB(name="admin", metadata_={"bootstrap": True})
+                session.add(team)
+                await session.flush()
+                logger.info("Created bootstrap admin team")
+
+            # Create new user
+            user = UserDB(
+                email=settings.admin_email,
+                name=settings.admin_name,
+                password_hash=hasher.hash(settings.admin_password),
+                role=UserRole.ADMIN,
+                team_id=team.id,
+            )
+            session.add(user)
+            logger.info(f"Created bootstrap admin user: {settings.admin_email}")
+
+        await session.commit()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan handler."""
@@ -77,6 +135,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         )
 
     await init_db()
+
+    # Bootstrap admin user if configured
+    await bootstrap_admin_user()
+
     yield
     # Clean up database connections on shutdown
     await dispose_engine()

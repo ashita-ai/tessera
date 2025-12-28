@@ -23,6 +23,7 @@
       <button type="submit" style="width: 100%; margin-top: 1rem;">Login</button>
     </form>
 
+    {% if demo_mode %}
     <div style="margin-top: 2rem; padding: 1rem; background: var(--light-gray); border-left: var(--border-thick);">
       <p style="margin-bottom: 0.5rem;"><strong>Demo Accounts:</strong></p>
       <ul style="list-style: none; padding: 0; margin: 0; font-size: 0.9rem;">
@@ -31,6 +32,7 @@
         <li style="padding: 0.25rem 0;"><code>user@test.com</code> / <code>user</code> (User)</li>
       </ul>
     </div>
+    {% endif %}
   </div>
 </section>
 {% endblock %}

@@ -262,6 +262,10 @@ async function loadKeys() {
         </tbody>
       </table>
     `;
+
+    // Results count (API keys typically don't need pagination, but show count)
+    const countHtml = `<div style="margin-top: 1rem;"><span style="color: var(--gray);">Showing ${data.keys.length} of ${data.keys.length} results</span></div>`;
+    container.insertAdjacentHTML('beforeend', countHtml);
   } catch (error) {
     showError(error.message);
     container.innerHTML = '<div class="error">Failed to load API keys</div>';

@@ -407,3 +407,32 @@ function showEmpty(elementId, message = 'No data found') {
     el.innerHTML = `<div class="empty">${escapeHtml(message)}</div>`;
   }
 }
+
+/**
+ * Syntax highlight JSON for display
+ * @param {object|string} json - JSON object or string to highlight
+ * @returns {string} HTML with syntax highlighting spans
+ */
+function highlightJson(json) {
+  const str = typeof json === 'string' ? json : JSON.stringify(json, null, 2);
+
+  // Escape HTML first
+  let escaped = str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+
+  // Apply syntax highlighting
+  // Keys (property names)
+  escaped = escaped.replace(/"([^"]+)":/g, '<span class="json-key">"$1"</span>:');
+  // String values
+  escaped = escaped.replace(/: "([^"]*)"/g, ': <span class="json-string">"$1"</span>');
+  // Numbers
+  escaped = escaped.replace(/: (-?\d+\.?\d*)/g, ': <span class="json-number">$1</span>');
+  // Booleans
+  escaped = escaped.replace(/: (true|false)/g, ': <span class="json-boolean">$1</span>');
+  // Null
+  escaped = escaped.replace(/: (null)/g, ': <span class="json-null">$1</span>');
+
+  return escaped;
+}

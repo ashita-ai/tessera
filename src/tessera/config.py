@@ -57,6 +57,14 @@ class Settings(BaseSettings):  # type: ignore[misc]
     bootstrap_api_key: str | None = None  # Initial admin API key for bootstrapping
     session_secret_key: str = DEFAULT_SESSION_SECRET  # Session signing key
 
+    # Admin bootstrap (for initial setup and k8s deployments)
+    admin_email: str | None = None  # Bootstrap admin email
+    admin_password: str | None = None  # Bootstrap admin password
+    admin_name: str = "Admin"  # Bootstrap admin display name
+
+    # Demo mode (shows demo credentials on login page)
+    demo_mode: bool = False
+
     # Redis cache (optional)
     redis_url: str | None = None  # e.g., redis://localhost:6379/0
     cache_ttl: int = 300  # Default cache TTL in seconds (5 minutes)

@@ -78,7 +78,20 @@ async def require_current_user(
     request: Request,
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    """Require a logged-in user, redirect to login if not authenticated."""
+    """Require a logged-in user, redirect to login if not authenticated.
+
+    When AUTH_DISABLED is true, returns a fake admin user for development.
+    """
+    # If auth is disabled, return a fake admin user
+    if settings.auth_disabled:
+        return {
+            "id": "00000000-0000-0000-0000-000000000000",
+            "email": "dev@tessera.local",
+            "name": "Dev User",
+            "role": "admin",
+            "team_id": None,
+        }
+
     user = await get_current_user(request, session)
     if not user:
         raise LoginRequiredError()
@@ -112,7 +125,7 @@ async def login_page(
     error = request.query_params.get("error")
     return templates.TemplateResponse(
         "login.html",
-        make_context(request, "login", error=error),
+        make_context(request, "login", error=error, demo_mode=settings.demo_mode),
     )
 
 

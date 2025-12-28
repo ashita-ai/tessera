@@ -1,3 +1,8 @@
+# Tessera - Production-ready docker-compose
+# Usage: docker compose up
+#
+# For demo with sample data: docker compose -f docker-compose.dev.yml -p tessera-dev up
+
 services:
   db:
     image: postgres:16-alpine
@@ -38,12 +43,11 @@ services:
       REDIS_URL: redis://redis:6379/0
       BOOTSTRAP_API_KEY: tessera-dev-key
       AUTH_DISABLED: "false"
+      ADMIN_EMAIL: admin@tessera.dev
+      ADMIN_PASSWORD: adminpass123
+      ADMIN_NAME: Admin
       API_HOST: "0.0.0.0"
       API_PORT: "8000"
-      RATE_LIMIT_WRITE: "1000/minute"  # Higher limit for dev/seeding
-      # Webhook configuration - sends events to the webhook-receiver service
-      WEBHOOK_URL: http://webhook-receiver:5555/webhooks
-      WEBHOOK_SECRET: dev-webhook-secret
     depends_on:
       db:
         condition: service_healthy
@@ -56,41 +60,6 @@ services:
       retries: 3
       start_period: 10s
 
-  webhook-receiver:
-    build: .
-    ports:
-      - "5555:5555"
-    environment:
-      WEBHOOK_SECRET: dev-webhook-secret
-    command: ["python", "/app/examples/webhook_receiver.py"]
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5555/health')"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-
-  dbt-builder:
-    build: .
-    volumes:
-      - dbt_manifests:/app/tests/fixtures/demo_dbt_projects
-    command: ["python", "/app/scripts/build_dbt_projects.py"]
-    restart: "no"
-
-  seeder:
-    build: .
-    depends_on:
-      api:
-        condition: service_healthy
-      dbt-builder:
-        condition: service_completed_successfully
-    environment:
-      BOOTSTRAP_API_KEY: tessera-dev-key
-    volumes:
-      - dbt_manifests:/app/tests/fixtures/demo_dbt_projects
-    command: ["python", "/app/scripts/seed_demo.py"]
-    restart: "no"
-
 volumes:
   postgres_data:
   redis_data:
-  dbt_manifests:

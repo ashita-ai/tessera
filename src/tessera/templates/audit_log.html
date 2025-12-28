@@ -6,37 +6,30 @@
 <section>
   <h2>Audit Log</h2>
 
-  <div style="margin-bottom: 1rem; display: flex; gap: 1rem; flex-wrap: wrap;">
-    <select id="filter-entity-type" style="width: auto;">
-      <option value="">All entity types</option>
-      <option value="team">Teams</option>
-      <option value="asset">Assets</option>
-      <option value="contract">Contracts</option>
-      <option value="proposal">Proposals</option>
-      <option value="registration">Registrations</option>
-      <option value="api_key">API Keys</option>
-    </select>
-    <select id="filter-action" style="width: auto;">
-      <option value="">All actions</option>
-      <option value="team.created">Team Created</option>
-      <option value="team.updated">Team Updated</option>
-      <option value="asset.created">Asset Created</option>
-      <option value="asset.updated">Asset Updated</option>
-      <option value="contract.published">Contract Published</option>
-      <option value="contract.deprecated">Contract Deprecated</option>
-      <option value="contract.force_published">Contract Force Published</option>
-      <option value="proposal.created">Proposal Created</option>
-      <option value="proposal.acknowledged">Proposal Acknowledged</option>
-      <option value="proposal.approved">Proposal Approved</option>
-      <option value="proposal.rejected">Proposal Rejected</option>
-      <option value="proposal.force_approved">Proposal Force Approved</option>
-      <option value="proposal.withdrawn">Proposal Withdrawn</option>
-      <option value="registration.created">Registration Created</option>
-      <option value="registration.deleted">Registration Deleted</option>
-      <option value="api_key.created">API Key Created</option>
-      <option value="api_key.revoked">API Key Revoked</option>
-    </select>
-    <button class="secondary" onclick="loadAuditEvents()">Filter</button>
+  <div class="filters" style="margin-bottom: 1rem; display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; padding: 0.75rem 1rem; background: var(--light-gray); border: 1px solid #ddd;">
+    <div style="display: flex; align-items: center; gap: 0.5rem;">
+      <label for="filter-entity-type" style="margin: 0; font-size: 0.875rem; white-space: nowrap;">Entity Type:</label>
+      <select id="filter-entity-type" style="width: 120px; padding: 0.4rem; margin: 0;" onchange="onEntityTypeChange()">
+        <option value="">All</option>
+        <option value="team">Teams</option>
+        <option value="asset">Assets</option>
+        <option value="contract">Contracts</option>
+        <option value="proposal">Proposals</option>
+        <option value="registration">Registrations</option>
+        <option value="api_key">API Keys</option>
+        <option value="sync">Sync</option>
+      </select>
+    </div>
+    <div style="display: flex; align-items: center; gap: 0.5rem;">
+      <label for="filter-action" style="margin: 0; font-size: 0.875rem; white-space: nowrap;">Action:</label>
+      <select id="filter-action" style="width: 180px; padding: 0.4rem; margin: 0;">
+        <option value="">All actions</option>
+      </select>
+    </div>
+    <div style="display: flex; gap: 0.5rem; margin-left: auto;">
+      <button onclick="loadAuditEvents()" style="padding: 0.4rem 1rem;">Filter</button>
+      <button class="secondary" onclick="clearFilters()" style="padding: 0.4rem 1rem;">Clear</button>
+    </div>
   </div>
 
   <div id="audit-list">
@@ -51,6 +44,78 @@
 <script>
 let currentOffset = 0;
 const limit = 50;
+
+// Mapping of entity types to their valid actions
+const entityTypeActions = {
+  'team': [
+    { value: 'team.created', label: 'Team Created' },
+    { value: 'team.updated', label: 'Team Updated' },
+    { value: 'team.deleted', label: 'Team Deleted' },
+  ],
+  'asset': [
+    { value: 'asset.created', label: 'Asset Created' },
+    { value: 'asset.updated', label: 'Asset Updated' },
+    { value: 'asset.deleted', label: 'Asset Deleted' },
+  ],
+  'contract': [
+    { value: 'contract.published', label: 'Contract Published' },
+    { value: 'contract.deprecated', label: 'Contract Deprecated' },
+    { value: 'contract.force_published', label: 'Contract Force Published' },
+  ],
+  'proposal': [
+    { value: 'proposal.created', label: 'Proposal Created' },
+    { value: 'proposal.acknowledged', label: 'Proposal Acknowledged' },
+    { value: 'proposal.approved', label: 'Proposal Approved' },
+    { value: 'proposal.rejected', label: 'Proposal Rejected' },
+    { value: 'proposal.force_approved', label: 'Proposal Force Approved' },
+    { value: 'proposal.withdrawn', label: 'Proposal Withdrawn' },
+  ],
+  'registration': [
+    { value: 'registration.created', label: 'Registration Created' },
+    { value: 'registration.deleted', label: 'Registration Deleted' },
+  ],
+  'api_key': [
+    { value: 'api_key.created', label: 'API Key Created' },
+    { value: 'api_key.revoked', label: 'API Key Revoked' },
+  ],
+  'sync': [
+    { value: 'sync.dbt', label: 'dbt Sync' },
+    { value: 'sync.dbt_upload', label: 'dbt Upload Sync' },
+    { value: 'sync.openapi', label: 'OpenAPI Import' },
+    { value: 'sync.graphql', label: 'GraphQL Import' },
+  ],
+};
+
+// All actions for when no entity type is selected
+const allActions = Object.values(entityTypeActions).flat();
+
+function onEntityTypeChange() {
+  const entityType = document.getElementById('filter-entity-type').value;
+  const actionSelect = document.getElementById('filter-action');
+
+  // Reset action selection
+  actionSelect.value = '';
+
+  // Populate action dropdown based on entity type
+  if (!entityType) {
+    // Show all actions
+    actionSelect.innerHTML = '<option value="">All actions</option>' +
+      allActions.map(a => `<option value="${a.value}">${escapeHtml(a.label)}</option>`).join('');
+  } else {
+    // Show only actions for this entity type
+    const actions = entityTypeActions[entityType] || [];
+    actionSelect.innerHTML = '<option value="">All actions</option>' +
+      actions.map(a => `<option value="${a.value}">${escapeHtml(a.label)}</option>`).join('');
+  }
+}
+
+function clearFilters() {
+  document.getElementById('filter-entity-type').value = '';
+  document.getElementById('filter-action').value = '';
+  currentOffset = 0;
+  onEntityTypeChange();
+  loadAuditEvents();
+}
 
 function getActionClass(action) {
   if (action.includes('force') || action.includes('rejected')) return 'status-deprecated';
@@ -84,6 +149,7 @@ async function loadAuditEvents() {
 
     if (!data.results || data.results.length === 0) {
       container.innerHTML = '<div class="empty">No audit events found.</div>';
+      document.getElementById('pagination').innerHTML = '';
       return;
     }
 
@@ -114,19 +180,26 @@ async function loadAuditEvents() {
       </table>
     `;
 
-    // Pagination
+    // Pagination and results count
     const paginationContainer = document.getElementById('pagination');
     const totalPages = Math.ceil(data.total / limit);
     const currentPage = Math.floor(currentOffset / limit) + 1;
+    const showingStart = currentOffset + 1;
+    const showingEnd = Math.min(currentOffset + data.results.length, data.total);
 
     if (totalPages > 1) {
       paginationContainer.innerHTML = `
-        <button class="secondary" ${currentOffset === 0 ? 'disabled' : ''} onclick="goToPage(${currentPage - 1})">Prev</button>
-        <span style="margin: 0 1rem;">Page ${currentPage} of ${totalPages} (${data.total} events)</span>
-        <button class="secondary" ${currentPage >= totalPages ? 'disabled' : ''} onclick="goToPage(${currentPage + 1})">Next</button>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span style="color: var(--gray);">Showing ${showingStart}-${showingEnd} of ${data.total} results</span>
+          <div>
+            <button class="secondary" ${currentOffset === 0 ? 'disabled' : ''} onclick="goToPage(${currentPage - 1})">Prev</button>
+            <span style="margin: 0 1rem;">Page ${currentPage} of ${totalPages}</span>
+            <button class="secondary" ${currentPage >= totalPages ? 'disabled' : ''} onclick="goToPage(${currentPage + 1})">Next</button>
+          </div>
+        </div>
       `;
     } else {
-      paginationContainer.innerHTML = `<span style="color: var(--gray);">${data.total} event(s)</span>`;
+      paginationContainer.innerHTML = `<span style="color: var(--gray);">Showing ${data.results.length} of ${data.total} results</span>`;
     }
   } catch (error) {
     showError(error.message);
@@ -139,6 +212,8 @@ function goToPage(page) {
   loadAuditEvents();
 }
 
+// Initialize action dropdown with all actions
+onEntityTypeChange();
 loadAuditEvents();
 </script>
 {% endblock %}

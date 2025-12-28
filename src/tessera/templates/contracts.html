@@ -75,19 +75,26 @@ async function loadContracts() {
       </table>
     `;
 
-    // Pagination
+    // Pagination and results count
     const paginationContainer = document.getElementById('pagination');
     const totalPages = Math.ceil(data.total / limit);
     const currentPage = Math.floor(currentOffset / limit) + 1;
+    const showingStart = currentOffset + 1;
+    const showingEnd = Math.min(currentOffset + data.results.length, data.total);
 
     if (totalPages > 1) {
       paginationContainer.innerHTML = `
-        <button class="secondary" ${currentOffset === 0 ? 'disabled' : ''} onclick="goToPage(${currentPage - 1})">Prev</button>
-        <span style="margin: 0 1rem;">Page ${currentPage} of ${totalPages}</span>
-        <button class="secondary" ${currentPage >= totalPages ? 'disabled' : ''} onclick="goToPage(${currentPage + 1})">Next</button>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span style="color: var(--gray);">Showing ${showingStart}-${showingEnd} of ${data.total} results</span>
+          <div>
+            <button class="secondary" ${currentOffset === 0 ? 'disabled' : ''} onclick="goToPage(${currentPage - 1})">Prev</button>
+            <span style="margin: 0 1rem;">Page ${currentPage} of ${totalPages}</span>
+            <button class="secondary" ${currentPage >= totalPages ? 'disabled' : ''} onclick="goToPage(${currentPage + 1})">Next</button>
+          </div>
+        </div>
       `;
     } else {
-      paginationContainer.innerHTML = '';
+      paginationContainer.innerHTML = `<span style="color: var(--gray);">Showing ${data.results.length} of ${data.total} results</span>`;
     }
   } catch (error) {
     showError(error.message);

@@ -53,7 +53,7 @@ async function loadContractDetail() {
     if (contract.schema) {
       schemaContainer.innerHTML = `
         <div class="card" style="background: var(--white);">
-          <pre style="overflow-x: auto; font-size: 0.875rem;">${escapeHtml(JSON.stringify(contract.schema, null, 2))}</pre>
+          <pre class="json-highlighted">${highlightJson(contract.schema)}</pre>
         </div>
       `;
     } else {
@@ -65,7 +65,7 @@ async function loadContractDetail() {
     if (contract.guarantees && Object.keys(contract.guarantees).length > 0) {
       guaranteesContainer.innerHTML = `
         <div class="card" style="background: var(--white);">
-          <pre style="overflow-x: auto; font-size: 0.875rem;">${escapeHtml(JSON.stringify(contract.guarantees, null, 2))}</pre>
+          <pre class="json-highlighted">${highlightJson(contract.guarantees)}</pre>
         </div>
       `;
     } else {

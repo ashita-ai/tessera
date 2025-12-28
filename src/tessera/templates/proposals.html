@@ -6,15 +6,36 @@
 <section>
   <h2>Proposals</h2>
 
-  <div style="margin-bottom: 1rem;">
-    <select id="filter-status" style="width: auto; display: inline-block;">
-      <option value="">All statuses</option>
-      <option value="pending" selected>Pending</option>
-      <option value="approved">Approved</option>
-      <option value="force_approved">Force Approved</option>
-      <option value="withdrawn">Withdrawn</option>
-    </select>
-    <button class="secondary" onclick="loadProposals()">Filter</button>
+  <div class="filters" style="margin-bottom: 1rem; display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; padding: 0.75rem 1rem; background: var(--light-gray); border: 1px solid #ddd;">
+    <div style="display: flex; align-items: center; gap: 0.5rem;">
+      <label for="filter-status" style="margin: 0; font-size: 0.875rem; white-space: nowrap;">Status:</label>
+      <select id="filter-status" style="width: 140px; padding: 0.4rem; margin: 0;" onchange="onStatusFilterChange()">
+        <option value="">All statuses</option>
+        <option value="pending" selected>Pending</option>
+        <option value="approved">Approved</option>
+        <option value="force_approved">Force Approved</option>
+        <option value="withdrawn">Withdrawn</option>
+      </select>
+    </div>
+    <div style="display: flex; align-items: center; gap: 0.5rem;">
+      <label for="filter-asset" style="margin: 0; font-size: 0.875rem; white-space: nowrap;">Asset:</label>
+      <select id="filter-asset" style="width: 200px; padding: 0.4rem; margin: 0;" onchange="onAssetFilterChange()">
+        <option value="">All assets</option>
+      </select>
+    </div>
+    <div style="display: flex; align-items: center; gap: 0.5rem;">
+      <label for="filter-change-type" style="margin: 0; font-size: 0.875rem; white-space: nowrap;">Change Type:</label>
+      <select id="filter-change-type" style="width: 120px; padding: 0.4rem; margin: 0;">
+        <option value="">All types</option>
+        <option value="patch">Patch</option>
+        <option value="minor">Minor</option>
+        <option value="major">Major</option>
+      </select>
+    </div>
+    <div style="display: flex; gap: 0.5rem; margin-left: auto;">
+      <button onclick="loadProposals()" style="padding: 0.4rem 1rem;">Filter</button>
+      <button class="secondary" onclick="clearFilters()" style="padding: 0.4rem 1rem;">Clear</button>
+    </div>
   </div>
 
   <div id="proposals-list">
@@ -29,6 +50,7 @@
 <script>
 let currentOffset = 0;
 const limit = 20;
+let allProposalsCache = [];  // Cache of all proposals for current status filter
 
 async function withdrawProposal(id) {
   if (!confirm('Withdraw this proposal?')) return;
@@ -41,15 +63,107 @@ async function withdrawProposal(id) {
   }
 }
 
+// When status changes, update asset dropdown with assets that have proposals with that status
+async function onStatusFilterChange() {
+  const status = document.getElementById('filter-status').value;
+  const assetSelect = document.getElementById('filter-asset');
+  const changeTypeSelect = document.getElementById('filter-change-type');
+
+  // Reset dependent filters
+  assetSelect.value = '';
+  changeTypeSelect.value = '';
+
+  // Fetch proposals with this status to get unique assets
+  try {
+    const params = { limit: 100 };
+    if (status) params.status = status;
+    const data = await api.listProposals(params);
+    allProposalsCache = data.results || [];
+
+    // Extract unique assets
+    const assetsMap = new Map();
+    allProposalsCache.forEach(p => {
+      if (!assetsMap.has(p.asset_id)) {
+        assetsMap.set(p.asset_id, p.asset_fqn || p.asset_id);
+      }
+    });
+
+    // Populate asset dropdown
+    assetSelect.innerHTML = '<option value="">All assets</option>' +
+      Array.from(assetsMap.entries())
+        .sort((a, b) => a[1].localeCompare(b[1]))
+        .map(([id, fqn]) => `<option value="${id}">${escapeHtml(fqn)}</option>`)
+        .join('');
+
+    // Update change type dropdown with all types from current status
+    updateChangeTypeDropdown();
+  } catch (error) {
+    console.error('Failed to update asset filter:', error);
+  }
+}
+
+// When asset changes, update change type dropdown with types for that asset
+function onAssetFilterChange() {
+  const assetId = document.getElementById('filter-asset').value;
+  const changeTypeSelect = document.getElementById('filter-change-type');
+
+  // Reset change type selection
+  changeTypeSelect.value = '';
+
+  updateChangeTypeDropdown();
+}
+
+// Update change type dropdown based on current filters
+function updateChangeTypeDropdown() {
+  const assetId = document.getElementById('filter-asset').value;
+  const changeTypeSelect = document.getElementById('filter-change-type');
+
+  // Filter proposals by selected asset
+  let filteredProposals = allProposalsCache;
+  if (assetId) {
+    filteredProposals = allProposalsCache.filter(p => p.asset_id === assetId);
+  }
+
+  // Extract unique change types
+  const changeTypes = new Set();
+  filteredProposals.forEach(p => {
+    if (p.change_type) changeTypes.add(p.change_type);
+  });
+
+  // Update dropdown - show only change types that exist in filtered results
+  const allTypes = ['patch', 'minor', 'major'];
+  changeTypeSelect.innerHTML = '<option value="">All types</option>' +
+    allTypes
+      .filter(t => changeTypes.size === 0 || changeTypes.has(t))
+      .map(t => `<option value="${t}">${t.charAt(0).toUpperCase() + t.slice(1)}</option>`)
+      .join('');
+}
+
+function clearFilters() {
+  document.getElementById('filter-status').value = '';
+  document.getElementById('filter-asset').value = '';
+  document.getElementById('filter-change-type').value = '';
+  currentOffset = 0;
+  allProposalsCache = [];
+  // Reset dropdowns
+  document.getElementById('filter-asset').innerHTML = '<option value="">All assets</option>';
+  document.getElementById('filter-change-type').innerHTML = '<option value="">All types</option><option value="patch">Patch</option><option value="minor">Minor</option><option value="major">Major</option>';
+  loadProposals();
+}
+
 async function loadProposals() {
   const container = document.getElementById('proposals-list');
   container.innerHTML = '<div class="loading">Loading...</div>';
 
   const status = document.getElementById('filter-status').value;
+  const assetId = document.getElementById('filter-asset').value;
+  const changeType = document.getElementById('filter-change-type').value;
 
   try {
     const params = { offset: currentOffset, limit };
     if (status) params.status = status;
+    if (assetId) params.asset_id = assetId;
+    if (changeType) params.change_type = changeType;
 
     const data = await api.listProposals(params);
 
@@ -97,19 +211,26 @@ async function loadProposals() {
       </table>
     `;
 
-    // Pagination
+    // Pagination and results count
     const paginationContainer = document.getElementById('pagination');
     const totalPages = Math.ceil(data.total / limit);
     const currentPage = Math.floor(currentOffset / limit) + 1;
+    const showingStart = currentOffset + 1;
+    const showingEnd = Math.min(currentOffset + data.results.length, data.total);
 
     if (totalPages > 1) {
       paginationContainer.innerHTML = `
-        <button class="secondary" ${currentOffset === 0 ? 'disabled' : ''} onclick="goToPage(${currentPage - 1})">Prev</button>
-        <span style="margin: 0 1rem;">Page ${currentPage} of ${totalPages}</span>
-        <button class="secondary" ${currentPage >= totalPages ? 'disabled' : ''} onclick="goToPage(${currentPage + 1})">Next</button>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span style="color: var(--gray);">Showing ${showingStart}-${showingEnd} of ${data.total} results</span>
+          <div>
+            <button class="secondary" ${currentOffset === 0 ? 'disabled' : ''} onclick="goToPage(${currentPage - 1})">Prev</button>
+            <span style="margin: 0 1rem;">Page ${currentPage} of ${totalPages}</span>
+            <button class="secondary" ${currentPage >= totalPages ? 'disabled' : ''} onclick="goToPage(${currentPage + 1})">Next</button>
+          </div>
+        </div>
       `;
     } else {
-      paginationContainer.innerHTML = '';
+      paginationContainer.innerHTML = `<span style="color: var(--gray);">Showing ${data.results.length} of ${data.total} results</span>`;
     }
   } catch (error) {
     showError(error.message);
@@ -122,6 +243,11 @@ function goToPage(page) {
   loadProposals();
 }
 
-loadProposals();
+// Initialize: populate asset dropdown for default "pending" status, then load
+async function init() {
+  await onStatusFilterChange();
+  loadProposals();
+}
+init();
 </script>
 {% endblock %}

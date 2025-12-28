@@ -1,7 +1,10 @@
-# Tessera Demo Mode - Includes sample dbt manifest data
-# Usage: docker compose -f docker-compose.demo.yml up
+# Tessera Development - Full environment with seeder and auth enabled
+# Usage: docker compose -f docker-compose.dev.yml --project-name tessera-dev up
 #
-# For production/empty mode, use: docker compose up
+# For quick start (regular mode): docker compose up
+# Run both simultaneously:
+#   docker compose up -d                                           # Regular on :8000
+#   docker compose -f docker-compose.dev.yml -p tessera-dev up -d  # Demo on :8001
 
 services:
   db:
@@ -11,9 +14,9 @@ services:
       POSTGRES_PASSWORD: tessera
       POSTGRES_DB: tessera
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - dev_postgres_data:/var/lib/postgresql/data
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U tessera"]
@@ -24,9 +27,9 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "6380:6379"
     volumes:
-      - redis_data:/data
+      - dev_redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -37,17 +40,22 @@ services:
   api:
     build: .
     ports:
-      - "8000:8000"
+      - "8001:8000"
     environment:
       DATABASE_URL: postgresql+asyncpg://tessera:tessera@db:5432/tessera
       REDIS_URL: redis://redis:6379/0
       BOOTSTRAP_API_KEY: tessera-dev-key
-      AUTH_DISABLED: "true"
+      AUTH_DISABLED: "false"
       API_HOST: "0.0.0.0"
       API_PORT: "8000"
-      RATE_LIMIT_WRITE: "1000/minute"
+      RATE_LIMIT_WRITE: "1000/minute"  # Higher limit for dev/seeding
+      DEMO_MODE: "true"  # Show demo credentials on login page
+      # Webhook configuration - sends events to the webhook-receiver service
       WEBHOOK_URL: http://webhook-receiver:5555/webhooks
       WEBHOOK_SECRET: dev-webhook-secret
+    volumes:
+      - ./src/tessera/templates:/app/src/tessera/templates:ro
+      - ./src/tessera/static:/app/src/tessera/static:ro
     depends_on:
       db:
         condition: service_healthy
@@ -63,7 +71,7 @@ services:
   webhook-receiver:
     build: .
     ports:
-      - "5555:5555"
+      - "5556:5555"
     environment:
       WEBHOOK_SECRET: dev-webhook-secret
     command: ["python", "/app/examples/webhook_receiver.py"]
@@ -73,17 +81,28 @@ services:
       timeout: 5s
       retries: 3
 
-  # Init container that imports sample dbt manifest after API is ready
-  init:
+  dbt-builder:
     build: .
-    environment:
-      API_URL: http://api:8000
+    volumes:
+      - dbt_manifests:/app/tests/fixtures/demo_dbt_projects
+    command: ["python", "/app/scripts/build_dbt_projects.py"]
+    restart: "no"
+
+  seeder:
+    build: .
     depends_on:
       api:
         condition: service_healthy
-    command: ["python", "/app/scripts/import_manifest.py"]
+      dbt-builder:
+        condition: service_completed_successfully
+    environment:
+      BOOTSTRAP_API_KEY: tessera-dev-key
+    volumes:
+      - dbt_manifests:/app/tests/fixtures/demo_dbt_projects
+    command: ["python", "/app/scripts/seed_demo.py"]
     restart: "no"
 
 volumes:
-  postgres_data:
-  redis_data:
+  dev_postgres_data:
+  dev_redis_data:
+  dbt_manifests:

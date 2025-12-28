@@ -318,6 +318,19 @@ input, select, textarea {
   margin-bottom: 1rem;
 }
 
+/* Style select dropdowns for better contrast */
+select option {
+  background: var(--white);
+  color: var(--black);
+  padding: 0.5rem;
+}
+
+select option:checked,
+select option:hover {
+  background: var(--light-gray);
+  color: var(--black);
+}
+
 input:focus, select:focus, textarea:focus {
   outline: 2px solid var(--black);
   outline-offset: 2px;
@@ -483,4 +496,33 @@ footer {
   border-top: var(--border);
   color: var(--gray);
   font-size: 0.75rem;
+}
+
+/* JSON Syntax Highlighting */
+.json-highlighted {
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  white-space: pre;
+  overflow-x: auto;
+}
+
+.json-key {
+  color: #881391;
+}
+
+.json-string {
+  color: #0451a5;
+}
+
+.json-number {
+  color: #098658;
+}
+
+.json-boolean {
+  color: #0000ff;
+}
+
+.json-null {
+  color: #0000ff;
 }

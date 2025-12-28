@@ -34,6 +34,7 @@ from tessera.models.enums import (
     AcknowledgmentResponseType,
     APIKeyScope,
     AuditRunStatus,
+    ChangeType,
     CompatibilityMode,
     ContractStatus,
     ProposalStatus,
@@ -148,6 +149,7 @@ async def list_proposals(
     auth: Auth,
     asset_id: UUID | None = Query(None, description="Filter by asset ID"),
     status: ProposalStatus | None = Query(None, description="Filter by status"),
+    change_type: ChangeType | None = Query(None, description="Filter by change type"),
     proposed_by: UUID | None = Query(None, description="Filter by proposer team ID"),
     limit: int = Query(50, ge=1, le=100, description="Results per page"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
@@ -164,6 +166,8 @@ async def list_proposals(
         base_query = base_query.where(ProposalDB.asset_id == asset_id)
     if status:
         base_query = base_query.where(ProposalDB.status == status)
+    if change_type:
+        base_query = base_query.where(ProposalDB.change_type == change_type)
     if proposed_by:
         base_query = base_query.where(ProposalDB.proposed_by == proposed_by)
 
@@ -178,6 +182,8 @@ async def list_proposals(
         query = query.where(ProposalDB.asset_id == asset_id)
     if status:
         query = query.where(ProposalDB.status == status)
+    if change_type:
+        query = query.where(ProposalDB.change_type == change_type)
     if proposed_by:
         query = query.where(ProposalDB.proposed_by == proposed_by)
     query = query.order_by(ProposalDB.proposed_at.desc()).limit(limit).offset(offset)
