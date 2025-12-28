@@ -25,6 +25,8 @@ from tessera.config import settings
 from tessera.db import AssetDB, TeamDB, UserDB, get_session
 from tessera.models import Team, TeamCreate, TeamUpdate, User
 from tessera.models.enums import APIKeyScope
+from tessera.services import audit
+from tessera.services.audit import AuditAction
 from tessera.services.cache import team_cache
 
 router = APIRouter()
@@ -98,6 +100,16 @@ async def create_team(
             f"Team with name '{team.name}' already exists",
         )
     await session.refresh(db_team)
+
+    # Audit log team creation
+    await audit.log_event(
+        session=session,
+        entity_type="team",
+        entity_id=db_team.id,
+        action=AuditAction.TEAM_CREATED,
+        payload={"name": team.name},
+    )
+
     return db_team
 
 
@@ -207,6 +219,19 @@ async def update_team(
 
     await session.flush()
     await session.refresh(team)
+
+    # Audit log team update
+    await audit.log_event(
+        session=session,
+        entity_type="team",
+        entity_id=team_id,
+        action=AuditAction.TEAM_UPDATED,
+        payload={
+            "name": update.name if update.name is not None else None,
+            "metadata_changed": update.metadata is not None,
+        },
+    )
+
     # Invalidate cache
     await team_cache.delete(str(team_id))
     return team
@@ -254,6 +279,15 @@ async def delete_team(
 
     team.deleted_at = datetime.now(UTC)
     await session.flush()
+
+    # Audit log team deletion
+    await audit.log_event(
+        session=session,
+        entity_type="team",
+        entity_id=team_id,
+        action=AuditAction.TEAM_DELETED,
+        payload={"name": team.name, "force": force, "asset_count": asset_count},
+    )
 
     # Invalidate cache
     await team_cache.delete(str(team_id))

@@ -18,6 +18,8 @@ from tessera.api.rate_limit import limit_read, limit_write
 from tessera.db import ContractDB, RegistrationDB, get_session
 from tessera.models import Registration, RegistrationCreate, RegistrationUpdate
 from tessera.models.enums import APIKeyScope, RegistrationStatus
+from tessera.services import audit
+from tessera.services.audit import AuditAction
 
 router = APIRouter()
 
@@ -57,6 +59,17 @@ async def create_registration(
     session.add(db_registration)
     await session.flush()
     await session.refresh(db_registration)
+
+    # Audit log registration creation
+    await audit.log_event(
+        session=session,
+        entity_type="registration",
+        entity_id=db_registration.id,
+        action=AuditAction.REGISTRATION_CREATED,
+        actor_id=registration.consumer_team_id,
+        payload={"contract_id": str(contract_id)},
+    )
+
     return db_registration
 
 
@@ -145,6 +158,20 @@ async def update_registration(
 
     await session.flush()
     await session.refresh(registration)
+
+    # Audit log registration update
+    await audit.log_event(
+        session=session,
+        entity_type="registration",
+        entity_id=registration_id,
+        action=AuditAction.REGISTRATION_UPDATED,
+        actor_id=auth.team_id,
+        payload={
+            "pinned_version_changed": update.pinned_version is not None,
+            "status_changed": update.status is not None,
+        },
+    )
+
     return registration
 
 
@@ -174,5 +201,15 @@ async def delete_registration(
             "You can only delete registrations belonging to your team",
             code=ErrorCode.UNAUTHORIZED_TEAM,
         )
+
+    # Audit log registration deletion
+    await audit.log_event(
+        session=session,
+        entity_type="registration",
+        entity_id=registration_id,
+        action=AuditAction.REGISTRATION_DELETED,
+        actor_id=auth.team_id,
+        payload={"contract_id": str(registration.contract_id)},
+    )
 
     await session.delete(registration)

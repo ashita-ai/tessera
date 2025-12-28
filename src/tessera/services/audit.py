@@ -16,13 +16,22 @@ from tessera.db import AuditEventDB
 class AuditAction(StrEnum):
     """Types of auditable actions."""
 
+    # User actions
+    USER_LOGIN = "user.login"
+    USER_LOGOUT = "user.logout"
+    USER_CREATED = "user.created"
+    USER_UPDATED = "user.updated"
+    USER_DELETED = "user.deleted"
+
     # Team actions
     TEAM_CREATED = "team.created"
     TEAM_UPDATED = "team.updated"
+    TEAM_DELETED = "team.deleted"
 
     # Asset actions
     ASSET_CREATED = "asset.created"
     ASSET_UPDATED = "asset.updated"
+    ASSET_DELETED = "asset.deleted"
 
     # Contract actions
     CONTRACT_PUBLISHED = "contract.published"
@@ -46,6 +55,11 @@ class AuditAction(StrEnum):
     # API Key actions
     API_KEY_CREATED = "api_key.created"
     API_KEY_REVOKED = "api_key.revoked"
+    API_KEY_USED = "api_key.used"
+
+    # Sync actions
+    DBT_SYNC = "dbt.sync"
+    DBT_SYNC_UPLOAD = "dbt.sync_upload"
 
 
 async def log_event(

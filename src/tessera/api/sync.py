@@ -20,8 +20,8 @@ from tessera.api.errors import BadRequestError, ErrorCode, NotFoundError
 from tessera.api.rate_limit import limit_admin
 from tessera.db import AssetDB, ContractDB, ProposalDB, RegistrationDB, TeamDB, UserDB, get_session
 from tessera.models.enums import CompatibilityMode, ContractStatus, RegistrationStatus, ResourceType
-from tessera.services import validate_json_schema
-from tessera.services.audit import log_contract_published, log_proposal_created
+from tessera.services import audit, validate_json_schema
+from tessera.services.audit import AuditAction, log_contract_published, log_proposal_created
 from tessera.services.graphql import GraphQLOperation, parse_graphql_introspection
 from tessera.services.graphql import operations_to_assets as graphql_operations_to_assets
 from tessera.services.openapi import (
@@ -521,6 +521,21 @@ async def sync_from_dbt(
             )
             session.add(new_asset)
             assets_created += 1
+
+    # Audit log dbt sync operation
+    await audit.log_event(
+        session=session,
+        entity_type="sync",
+        entity_id=owner_team_id,  # Use team ID as entity
+        action=AuditAction.DBT_SYNC,
+        actor_id=owner_team_id,
+        payload={
+            "manifest_path": str(manifest_path),
+            "assets_created": assets_created,
+            "assets_updated": assets_updated,
+            "guarantees_extracted": tests_extracted,
+        },
+    )
 
     return {
         "status": "success",
@@ -1347,6 +1362,24 @@ async def upload_dbt_manifest(
                         "breaking_changes_count": len(breaking_changes_list),
                     }
                 )
+
+    # Audit log dbt sync upload operation
+    await audit.log_event(
+        session=session,
+        entity_type="sync",
+        entity_id=auth.team_id,
+        action=AuditAction.DBT_SYNC_UPLOAD,
+        actor_id=auth.team_id,
+        payload={
+            "assets_created": assets_created,
+            "assets_updated": assets_updated,
+            "assets_skipped": assets_skipped,
+            "contracts_published": contracts_published,
+            "proposals_created": proposals_created,
+            "registrations_created": registrations_created,
+            "conflict_mode": conflict_mode,
+        },
+    )
 
     return {
         "status": "success",

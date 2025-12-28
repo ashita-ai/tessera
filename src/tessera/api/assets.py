@@ -47,12 +47,14 @@ from tessera.models.enums import (
     ResourceType,
 )
 from tessera.services import (
+    audit,
     check_compatibility,
     diff_schemas,
     log_contract_published,
     log_proposal_created,
     validate_json_schema,
 )
+from tessera.services.audit import AuditAction
 from tessera.services.cache import (
     asset_cache,
     cache_asset,
@@ -184,6 +186,17 @@ async def create_asset(
             ErrorCode.DUPLICATE_ASSET, f"Asset with FQN '{asset.fqn}' already exists"
         )
     await session.refresh(db_asset)
+
+    # Audit log asset creation
+    await audit.log_event(
+        session=session,
+        entity_type="asset",
+        entity_id=db_asset.id,
+        action=AuditAction.ASSET_CREATED,
+        actor_id=asset.owner_team_id,
+        payload={"fqn": asset.fqn, "environment": asset.environment},
+    )
+
     return db_asset
 
 
@@ -513,6 +526,19 @@ async def update_asset(
     await session.flush()
     await session.refresh(asset)
 
+    # Audit log asset update
+    await audit.log_event(
+        session=session,
+        entity_type="asset",
+        entity_id=asset_id,
+        action=AuditAction.ASSET_UPDATED,
+        actor_id=auth.team_id,
+        payload={
+            "fqn_changed": update.fqn is not None,
+            "owner_changed": update.owner_team_id is not None or update.owner_user_id is not None,
+        },
+    )
+
     # Invalidate asset and contract caches
     await invalidate_asset(str(asset_id))
 
@@ -552,6 +578,16 @@ async def delete_asset(
 
     asset.deleted_at = datetime.now(UTC)
     await session.flush()
+
+    # Audit log asset deletion
+    await audit.log_event(
+        session=session,
+        entity_type="asset",
+        entity_id=asset_id,
+        action=AuditAction.ASSET_DELETED,
+        actor_id=auth.team_id,
+        payload={"fqn": asset.fqn},
+    )
 
     # Invalidate cache
     await asset_cache.delete(str(asset_id))

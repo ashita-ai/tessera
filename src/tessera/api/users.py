@@ -15,6 +15,8 @@ from tessera.api.pagination import PaginationParams, pagination_params
 from tessera.api.rate_limit import limit_read, limit_write
 from tessera.db import AssetDB, TeamDB, UserDB, get_session
 from tessera.models import User, UserCreate, UserUpdate, UserWithTeam
+from tessera.services import audit
+from tessera.services.audit import AuditAction
 
 _hasher = PasswordHasher()
 
@@ -64,6 +66,20 @@ async def create_user(
             status_code=409, detail=f"User with email '{user.email}' already exists"
         )
     await session.refresh(db_user)
+
+    # Audit log user creation
+    await audit.log_event(
+        session=session,
+        entity_type="user",
+        entity_id=db_user.id,
+        action=AuditAction.USER_CREATED,
+        payload={
+            "email": user.email,
+            "name": user.name,
+            "team_id": str(user.team_id) if user.team_id else None,
+        },
+    )
+
     return db_user
 
 
@@ -225,6 +241,21 @@ async def update_user(
             status_code=409, detail=f"User with email '{update.email}' already exists"
         )
     await session.refresh(user)
+
+    # Audit log user update
+    await audit.log_event(
+        session=session,
+        entity_type="user",
+        entity_id=user_id,
+        action=AuditAction.USER_UPDATED,
+        payload={
+            "email_changed": update.email is not None,
+            "name_changed": update.name is not None,
+            "team_changed": update.team_id is not None,
+            "role_changed": update.role is not None,
+        },
+    )
+
     return user
 
 
@@ -250,6 +281,15 @@ async def deactivate_user(
 
     user.deactivated_at = datetime.now(UTC)
     await session.flush()
+
+    # Audit log user deletion (deactivation)
+    await audit.log_event(
+        session=session,
+        entity_type="user",
+        entity_id=user_id,
+        action=AuditAction.USER_DELETED,
+        payload={"email": user.email, "name": user.name},
+    )
 
 
 @router.post("/{user_id}/reactivate", response_model=User)
