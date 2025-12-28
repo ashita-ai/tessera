@@ -73,7 +73,7 @@ GET /api/v1/audit/events/{event_id}
 ## Get Entity History
 
 ```http
-GET /api/v1/audit/entity/{entity_type}/{entity_id}/events
+GET /api/v1/audit/entities/{entity_type}/{entity_id}/history
 ```
 
 Get all audit events for a specific entity.
@@ -82,7 +82,7 @@ Get all audit events for a specific entity.
 
 ```bash
 # Get all events for an asset
-curl http://localhost:8000/api/v1/audit/entity/asset/asset-uuid/events
+curl http://localhost:8000/api/v1/audit/entities/asset/asset-uuid/history
 ```
 
 ### Response

@@ -68,7 +68,7 @@ def verify_signature(payload: bytes, signature: str, secret: str) -> bool:
 ### List Deliveries
 
 ```http
-GET /api/v1/deliveries
+GET /api/v1/webhooks/deliveries
 ```
 
 ### Query Parameters
@@ -101,7 +101,7 @@ GET /api/v1/deliveries
 ### Get Delivery Details
 
 ```http
-GET /api/v1/deliveries/{delivery_id}
+GET /api/v1/webhooks/deliveries/{delivery_id}
 ```
 
 ### Response
