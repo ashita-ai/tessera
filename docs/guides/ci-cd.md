@@ -142,7 +142,31 @@ sync-contracts:
 
 ## Pre-commit Hooks
 
-Catch issues locally before pushing:
+Catch issues locally before pushing using Tessera's built-in pre-commit hook:
+
+```yaml
+# .pre-commit-config.yaml
+repos:
+  - repo: https://github.com/ashita-ai/tessera
+    rev: v0.1.2  # Use the latest version
+    hooks:
+      - id: tessera-check
+        args: [--manifest, target/manifest.json, --team, your-team-id]
+```
+
+The hook runs `tessera dbt check` which:
+- Compares your dbt manifest against registered contracts
+- Exits with error if breaking changes are detected
+- Works on both pre-commit and pre-push stages
+
+Environment variables required:
+- `TESSERA_URL` - Your Tessera API URL
+- `TESSERA_API_KEY` - API key for authentication (optional if auth disabled)
+- `TESSERA_TEAM_ID` - Default team ID (can also pass via `--team` arg)
+
+### Alternative: Local Hook
+
+If you prefer a local hook without installing Tessera:
 
 ```yaml
 # .pre-commit-config.yaml
