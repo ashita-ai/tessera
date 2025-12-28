@@ -35,6 +35,17 @@ from tessera.services.schema_diff import check_compatibility, diff_schemas
 router = APIRouter()
 
 
+def _map_dbt_resource_type(dbt_type: str) -> ResourceType:
+    """Map dbt resource type string to ResourceType enum."""
+    mapping = {
+        "model": ResourceType.MODEL,
+        "source": ResourceType.SOURCE,
+        "seed": ResourceType.SEED,
+        "snapshot": ResourceType.SNAPSHOT,
+    }
+    return mapping.get(dbt_type, ResourceType.UNKNOWN)
+
+
 class TesseraMetaConfig:
     """Parsed tessera configuration from dbt model meta."""
 
@@ -453,11 +464,13 @@ async def sync_from_dbt(
 
         if existing:
             existing.metadata_ = metadata
+            existing.resource_type = _map_dbt_resource_type(resource_type)
             assets_updated += 1
         else:
             new_asset = AssetDB(
                 fqn=fqn,
                 owner_team_id=owner_team_id,
+                resource_type=_map_dbt_resource_type(resource_type),
                 metadata_=metadata,
             )
             session.add(new_asset)
@@ -497,11 +510,13 @@ async def sync_from_dbt(
 
         if existing:
             existing.metadata_ = metadata
+            existing.resource_type = ResourceType.SOURCE
             assets_updated += 1
         else:
             new_asset = AssetDB(
                 fqn=fqn,
                 owner_team_id=owner_team_id,
+                resource_type=ResourceType.SOURCE,
                 metadata_=metadata,
             )
             session.add(new_asset)
@@ -792,6 +807,7 @@ async def upload_dbt_manifest(
         if existing:
             existing.metadata_ = metadata
             existing.owner_team_id = resolved_team_id
+            existing.resource_type = _map_dbt_resource_type(resource_type)
             if resolved_user_id:
                 existing.owner_user_id = resolved_user_id
             assets_updated += 1
@@ -850,6 +866,7 @@ async def upload_dbt_manifest(
                 fqn=fqn,
                 owner_team_id=resolved_team_id,
                 owner_user_id=resolved_user_id,
+                resource_type=_map_dbt_resource_type(resource_type),
                 metadata_=metadata,
             )
             session.add(new_asset)
@@ -953,6 +970,7 @@ async def upload_dbt_manifest(
         if existing:
             existing.metadata_ = metadata
             existing.owner_team_id = resolved_team_id
+            existing.resource_type = ResourceType.SOURCE
             if resolved_user_id:
                 existing.owner_user_id = resolved_user_id
             assets_updated += 1
@@ -1011,6 +1029,7 @@ async def upload_dbt_manifest(
                 fqn=fqn,
                 owner_team_id=resolved_team_id,
                 owner_user_id=resolved_user_id,
+                resource_type=ResourceType.SOURCE,
                 metadata_=metadata,
             )
             session.add(new_asset)
