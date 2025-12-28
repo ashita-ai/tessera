@@ -329,9 +329,7 @@ class TestGetAuthContext:
             assert "Invalid format" in str(exc_info.value.message)
 
     async def test_bootstrap_key_no_teams(self):
-        """Raises 503 when using bootstrap key with no teams."""
-        from fastapi import HTTPException
-
+        """Bootstrap key works even when no teams exist (uses mock team)."""
         request = MagicMock()
         request.state = MagicMock()
         session = AsyncMock(spec=AsyncSession)
@@ -344,9 +342,10 @@ class TestGetAuthContext:
             mock_settings.auth_disabled = False
             mock_settings.bootstrap_api_key = "bootstrap-key-123"
 
-            with pytest.raises(HTTPException) as exc_info:
-                await get_auth_context(request, "Bearer bootstrap-key-123", session)
-            assert exc_info.value.status_code == 503
+            # Should succeed with a mock team for bootstrap operations
+            auth = await get_auth_context(request, "Bearer bootstrap-key-123", session)
+            assert auth.team.name == "bootstrap-placeholder"
+            assert auth.has_scope(APIKeyScope.ADMIN)
 
     async def test_bootstrap_key_success(self):
         """Bootstrap key returns admin auth context."""

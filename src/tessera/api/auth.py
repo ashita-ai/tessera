@@ -2,7 +2,7 @@
 
 from collections.abc import Awaitable, Callable
 from typing import Annotated
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import Depends, HTTPException, Request, Security
 from fastapi.security import APIKeyHeader
@@ -132,8 +132,6 @@ async def get_auth_context(
     # Check if auth is disabled (development only)
     if settings.auth_disabled:
         # Return a mock auth context for development
-        from uuid import uuid4
-
         from sqlalchemy import select
 
         result = await session.execute(select(TeamDB).limit(1))
@@ -187,19 +185,17 @@ async def get_auth_context(
 
     # Check bootstrap key
     if settings.bootstrap_api_key and api_key == settings.bootstrap_api_key:
-        # Bootstrap key has full admin access to the first team
+        # Bootstrap key has full admin access
         from sqlalchemy import select
 
         result = await session.execute(select(TeamDB).limit(1))
         team = result.scalar_one_or_none()
+
+        # If no team exists, create a mock team for bootstrap operations (like creating first team)
         if not team:
-            raise HTTPException(
-                status_code=503,
-                detail={
-                    "code": "NO_TEAMS",
-                    "message": "No teams exist. Create a team first using the bootstrap key.",
-                },
-            )
+            mock_team_id = uuid4()
+            team = TeamDB(id=mock_team_id, name="bootstrap-placeholder")
+
         mock_key = APIKeyDB(
             key_hash="bootstrap",
             key_prefix="bootstrap",

@@ -36,10 +36,6 @@
       <span class="quick-action-icon">+</span>
       <span>Create User</span>
     </a>
-    <a href="/assets" class="quick-action" onclick="event.preventDefault(); showQuickCreateAsset();">
-      <span class="quick-action-icon">+</span>
-      <span>Create Asset</span>
-    </a>
     {% if current_user and current_user.role == 'admin' %}
     <a href="/import" class="quick-action">
       <span class="quick-action-icon">&#8593;</span>
@@ -86,25 +82,6 @@
   </div>
 </div>
 
-<div id="quick-asset-modal" class="modal" style="display: none;">
-  <div class="modal-content">
-    <h3>Create Asset</h3>
-    <form onsubmit="quickCreateAsset(event)">
-      <label for="quick-asset-fqn">Fully Qualified Name</label>
-      <input type="text" id="quick-asset-fqn" required placeholder="e.g., warehouse.schema.table">
-      <label for="quick-asset-team">Owner Team</label>
-      <select id="quick-asset-team" required>
-        <option value="">Select team...</option>
-      </select>
-      <label for="quick-asset-description">Description (optional)</label>
-      <textarea id="quick-asset-description" rows="2" placeholder="Describe this asset..."></textarea>
-      <div style="margin-top: 1rem; display: flex; gap: 0.5rem;">
-        <button type="submit">Create</button>
-        <button type="button" class="secondary" onclick="closeQuickModal()">Cancel</button>
-      </div>
-    </form>
-  </div>
-</div>
 
 <style>
 .quick-actions {
@@ -303,7 +280,6 @@ function closeQuickModal() {
   document.getElementById('modal-overlay').style.display = 'none';
   document.getElementById('quick-team-modal').style.display = 'none';
   document.getElementById('quick-user-modal').style.display = 'none';
-  document.getElementById('quick-asset-modal').style.display = 'none';
 }
 
 function showQuickCreateTeam() {
@@ -324,20 +300,6 @@ async function showQuickCreateUser() {
   const teams = await loadTeamsCache();
   const select = document.getElementById('quick-user-team');
   select.innerHTML = '<option value="">No team</option>' +
-    teams.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
-}
-
-async function showQuickCreateAsset() {
-  document.getElementById('modal-overlay').style.display = 'block';
-  document.getElementById('quick-asset-modal').style.display = 'block';
-  document.getElementById('quick-asset-fqn').value = '';
-  document.getElementById('quick-asset-description').value = '';
-  document.getElementById('quick-asset-fqn').focus();
-
-  // Populate teams dropdown
-  const teams = await loadTeamsCache();
-  const select = document.getElementById('quick-asset-team');
-  select.innerHTML = '<option value="">Select team...</option>' +
     teams.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
 }
 
@@ -373,27 +335,5 @@ async function quickCreateUser(event) {
   }
 }
 
-async function quickCreateAsset(event) {
-  event.preventDefault();
-  const fqn = document.getElementById('quick-asset-fqn').value.trim();
-  const ownerTeamId = document.getElementById('quick-asset-team').value;
-  const description = document.getElementById('quick-asset-description').value.trim();
-  if (!fqn || !ownerTeamId) return;
-
-  try {
-    const asset = await api.createAsset({
-      fqn,
-      owner_team_id: ownerTeamId,
-      description: description || undefined,
-    });
-    closeQuickModal();
-    showSuccess(`Asset "${fqn}" created successfully`);
-    loadDashboard(); // Refresh stats
-    // Redirect to asset detail to publish contract
-    window.location.href = `/assets/${asset.id}`;
-  } catch (error) {
-    showError(error.message);
-  }
-}
 </script>
 {% endblock %}
