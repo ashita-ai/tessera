@@ -1,0 +1,20 @@
+# Pre-commit hooks for Tessera schema validation
+# Usage in your .pre-commit-config.yaml:
+#
+#   repos:
+#     - repo: https://github.com/ashita-ai/tessera
+#       rev: v0.1.2
+#       hooks:
+#         - id: tessera-check
+#           args: [--manifest, target/manifest.json, --team, your-team-id]
+
+- id: tessera-check
+  name: Tessera Schema Check
+  description: Check dbt models for breaking schema changes against Tessera contracts
+  entry: tessera dbt check
+  language: python
+  types: [json]
+  files: manifest\.json$
+  pass_filenames: false
+  additional_dependencies: ["tessera-contracts"]
+  stages: [pre-commit, pre-push]
