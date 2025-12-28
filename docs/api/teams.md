@@ -113,49 +113,22 @@ GET /api/v1/teams/{team_id}/registrations
 
 List all contracts the team is registered as a consumer of.
 
-## Create API Key
+## API Keys
+
+API keys are managed via the dedicated [API Keys endpoint](api-keys.md).
+
+Create keys with the team ID:
 
 ```http
-POST /api/v1/teams/{team_id}/api-keys
+POST /api/v1/api-keys
 ```
-
-### Request Body
 
 ```json
 {
   "name": "CI Pipeline Key",
+  "team_id": "team-uuid",
   "scopes": ["read", "write"]
 }
 ```
 
-### Response
-
-```json
-{
-  "id": "key-uuid",
-  "name": "CI Pipeline Key",
-  "key": "tsk_abc123...",
-  "key_prefix": "tsk_abc1",
-  "scopes": ["read", "write"],
-  "created_at": "2025-01-15T10:00:00Z"
-}
-```
-
-!!! warning
-    The full `key` is only returned once. Store it securely.
-
-## List API Keys
-
-```http
-GET /api/v1/teams/{team_id}/api-keys
-```
-
-Returns API keys (without the full key value).
-
-## Revoke API Key
-
-```http
-DELETE /api/v1/teams/{team_id}/api-keys/{key_id}
-```
-
-Returns `204 No Content` on success.
+See [API Keys](api-keys.md) for full documentation.

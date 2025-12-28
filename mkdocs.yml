@@ -97,6 +97,11 @@ nav:
     - Contracts: api/contracts.md
     - Teams: api/teams.md
     - Proposals: api/proposals.md
+    - Registrations: api/registrations.md
+    - API Keys: api/api-keys.md
+    - Webhooks: api/webhooks.md
+    - Audit: api/audit.md
+    - Sync: api/sync.md
   - Contributing: contributing.md
 
 extra:

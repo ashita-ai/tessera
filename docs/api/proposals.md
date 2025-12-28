@@ -129,7 +129,7 @@ Quick check of acknowledgment progress.
 ## Force Publish
 
 ```http
-POST /api/v1/proposals/{proposal_id}/force-publish
+POST /api/v1/proposals/{proposal_id}/force
 ```
 
 Publish without waiting for all acknowledgments (admin only).
@@ -144,24 +144,30 @@ Publish without waiting for all acknowledgments (admin only).
 
 ### Response
 
-```json
-{
-  "published": true,
-  "contract_id": "new-contract-uuid",
-  "contract_version": "2.0.0"
-}
-```
+Returns the updated proposal with status `force_published`.
 
 !!! warning "Audit Trail"
     Force publishing is logged with the reason. Use sparingly.
 
-## Reject Proposal
+## Publish Proposal
 
 ```http
-POST /api/v1/proposals/{proposal_id}/reject
+POST /api/v1/proposals/{proposal_id}/publish
 ```
 
-Reject a proposal (producer only).
+Publish a proposal after all consumers have acknowledged.
+
+### Response
+
+Returns the published contract details.
+
+## Withdraw Proposal
+
+```http
+POST /api/v1/proposals/{proposal_id}/withdraw
+```
+
+Withdraw a pending proposal (producer only).
 
 ### Request Body
 
@@ -171,12 +177,6 @@ Reject a proposal (producer only).
 }
 ```
 
-## Withdraw Proposal
+### Response
 
-```http
-DELETE /api/v1/proposals/{proposal_id}
-```
-
-Withdraw a pending proposal (producer only).
-
-Returns `204 No Content` on success.
+Returns the updated proposal with status `withdrawn`.

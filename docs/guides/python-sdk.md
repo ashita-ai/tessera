@@ -3,6 +3,7 @@
 The official Python SDK for Tessera provides a type-safe client for interacting with the Tessera API.
 
 **Repository:** [github.com/ashita-ai/tessera-python](https://github.com/ashita-ai/tessera-python)
+**PyPI:** [pypi.org/project/tessera-sdk](https://pypi.org/project/tessera-sdk/)
 
 ## Installation
 
@@ -15,6 +16,8 @@ Or with uv:
 ```bash
 uv add tessera-sdk
 ```
+
+**Note:** The package is installed as `tessera-sdk` but imported as `tessera_sdk`.
 
 ## Quick Start
 

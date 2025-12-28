@@ -85,7 +85,17 @@ Interactive API documentation is available at:
 
 ## Endpoints
 
+### Core Resources
+
 - [Assets](assets.md) - Manage data assets
 - [Contracts](contracts.md) - Publish and manage contracts
 - [Teams](teams.md) - Team management
 - [Proposals](proposals.md) - Breaking change proposals
+
+### Additional Resources
+
+- [Registrations](registrations.md) - Consumer registration
+- [API Keys](api-keys.md) - API key management
+- [Webhooks](webhooks.md) - Webhook delivery tracking
+- [Audit](audit.md) - Audit event history
+- [Sync](sync.md) - Schema sync (dbt, OpenAPI, GraphQL)
