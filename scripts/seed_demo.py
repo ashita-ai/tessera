@@ -9,16 +9,14 @@ Creates:
 - Kafka topics with Avro schemas (demonstrating schema_format="avro")
 - REST API endpoints via /sync/openapi (demonstrating OpenAPI import)
 - GraphQL operations via /sync/graphql (demonstrating GraphQL introspection import)
-- Audit results for WAP demo (dbt test results on dbt models only)
+- REAL audit results from dbt test runs (WAP pattern - not fake seeded data!)
 - A handful of proposals (breaking changes in progress)
 """
 
 import json
 import os
-import random
 import sys
 import time
-from datetime import datetime, timedelta
 from pathlib import Path
 
 import httpx
@@ -923,170 +921,190 @@ def import_graphql_schema(team_ids: dict[str, str]) -> int:
     return assets_created
 
 
-def create_audit_results(team_ids: dict[str, str]) -> int:
-    """Create sample audit results to demonstrate WAP (Write-Audit-Publish) pattern.
+def get_model_fqn_for_test(test_node: dict, manifest: dict) -> str | None:
+    """Get the FQN of the model that a test depends on.
 
-    Creates realistic dbt test results for dbt models/sources only.
-    (Kafka topics, APIs, and GraphQL assets don't have dbt tests.)
-
-    Creates different asset health patterns:
-    - Healthy: 90% pass rate (8 assets)
-    - Flaky: 70% pass rate with intermittent failures (4 assets)
-    - Degrading: 50% pass rate with recent failures (4 assets)
-    - Failing: 20% pass rate (4 assets)
+    Uses database.schema.name format which matches how Tessera stores FQNs
+    from dbt manifest imports.
     """
-    print("\nCreating audit results for WAP demo...")
-    audits_created = 0
+    depends_on = test_node.get("depends_on", {}).get("nodes", [])
 
-    # Get only dbt assets (models, sources, seeds, snapshots) to add audit results to
-    # dbt tests only make sense for dbt resources, not for Kafka topics or APIs
-    try:
-        assets_resp = httpx.get(
-            f"{API_URL}/api/v1/assets?limit=100",
-            headers=get_headers(),
-            timeout=10,
-        )
-        if assets_resp.status_code != 200:
-            print("  Could not fetch assets")
-            return 0
+    for node_id in depends_on:
+        if node_id.startswith("model.") or node_id.startswith("source."):
+            node = manifest.get("nodes", {}).get(node_id) or manifest.get("sources", {}).get(
+                node_id
+            )
+            if node:
+                # Use database.schema.name format (matches Tessera's FQN storage)
+                database = node.get("database", "")
+                schema = node.get("schema", "")
+                name = node.get("name", "")
+                return f"{database}.{schema}.{name}".lower()
+    return None
 
-        all_assets = assets_resp.json().get("results", [])
-        # Filter to only dbt resource types (model, source, seed, snapshot)
-        dbt_resource_types = {"model", "source", "seed", "snapshot"}
-        assets = [a for a in all_assets if a.get("resource_type") in dbt_resource_types]
-        if not assets:
-            print("  No dbt assets found for audit results")
-            return 0
 
-        print(f"  Found {len(assets)} dbt assets to audit (filtering out APIs, Kafka, etc.)")
+def extract_test_results_from_run(run_results: dict, manifest: dict) -> dict[str, dict]:
+    """Extract test results grouped by model FQN from dbt run_results.json.
 
-        # Define test patterns for different scenarios
-        test_patterns = {
-            "healthy": {  # Mostly passing, occasional failure
-                "pass_rate": 0.9,
-                "run_count": 10,
-            },
-            "flaky": {  # Intermittent failures
-                "pass_rate": 0.7,
-                "run_count": 15,
-            },
-            "degrading": {  # Started good, recent failures
-                "pass_rate": 0.5,
-                "run_count": 12,
-                "recent_failures": True,
-            },
-            "failing": {  # Consistent failures
-                "pass_rate": 0.2,
-                "run_count": 8,
-            },
+    Returns:
+        Dict mapping model FQN to {
+            "passed": int,
+            "failed": int,
+            "errored": int,
+            "skipped": int,
+            "failed_tests": [{"name": str, "message": str}]
         }
+    """
+    from collections import defaultdict
 
-        # Common dbt test types
-        dbt_test_types = [
-            "not_null",
-            "unique",
-            "accepted_values",
-            "relationships",
-            "dbt_utils.expression_is_true",
-            "dbt_utils.at_least_one",
-            "dbt_expectations.expect_column_values_to_be_between",
-            "dbt_expectations.expect_column_values_to_not_be_null",
-        ]
+    results_by_model: dict[str, dict] = defaultdict(
+        lambda: {"passed": 0, "failed": 0, "errored": 0, "skipped": 0, "failed_tests": []}
+    )
 
-        # Assign patterns to assets
-        pattern_assignments = {}
-        for i, asset in enumerate(assets[:20]):  # Audit first 20 assets
-            if i < 8:
-                pattern_assignments[asset["id"]] = "healthy"
-            elif i < 12:
-                pattern_assignments[asset["id"]] = "flaky"
-            elif i < 16:
-                pattern_assignments[asset["id"]] = "degrading"
-            else:
-                pattern_assignments[asset["id"]] = "failing"
+    for result in run_results.get("results", []):
+        unique_id = result.get("unique_id", "")
+        if not unique_id.startswith("test."):
+            continue
 
-        # Generate audit results
-        # For dbt models, the triggered_by is always dbt_test since these come from `dbt test`
-        # Great Expectations and Soda are separate tools that don't test dbt models directly
+        test_node = manifest.get("nodes", {}).get(unique_id, {})
+        if not test_node:
+            continue
 
-        for asset_id, pattern_name in pattern_assignments.items():
-            pattern = test_patterns[pattern_name]
-            fqn = next((a["fqn"] for a in assets if a["id"] == asset_id), "unknown")
+        model_fqn = get_model_fqn_for_test(test_node, manifest)
+        if not model_fqn:
+            continue
 
-            # Generate runs spread over the last 30 days
-            now = datetime.utcnow()
-            for run_idx in range(pattern["run_count"]):
-                # Distribute runs over time (more recent = more runs)
-                hours_ago = random.randint(1, 720)  # Up to 30 days
-                run_at = now - timedelta(hours=hours_ago)
+        status = result.get("status", "").lower()
+        model_results = results_by_model[model_fqn]
 
-                # Determine if this run passes
-                if pattern.get("recent_failures") and hours_ago < 48:
-                    passed = random.random() < 0.2  # Recent runs mostly fail
-                else:
-                    passed = random.random() < pattern["pass_rate"]
-
-                # Generate guarantee results
-                num_guarantees = random.randint(3, 8)
-                guarantee_results = []
-                guarantees_passed = 0
-                guarantees_failed = 0
-
-                for g_idx in range(num_guarantees):
-                    test_type = random.choice(dbt_test_types)
-                    guarantee_id = f"{test_type}_{fqn.split('.')[-1]}"
-
-                    if passed or random.random() < 0.7:  # Even failed runs have some passing tests
-                        guarantee_results.append(
-                            {
-                                "guarantee_id": guarantee_id,
-                                "passed": True,
-                                "rows_checked": random.randint(1000, 100000),
-                                "rows_failed": 0,
-                            }
-                        )
-                        guarantees_passed += 1
-                    else:
-                        rows_checked = random.randint(1000, 100000)
-                        rows_failed = random.randint(1, min(100, rows_checked // 10))
-                        guarantee_results.append(
-                            {
-                                "guarantee_id": guarantee_id,
-                                "passed": False,
-                                "error_message": f"Found {rows_failed} rows failing {test_type}",
-                                "rows_checked": rows_checked,
-                                "rows_failed": rows_failed,
-                            }
-                        )
-                        guarantees_failed += 1
-
-                # Determine overall status
-                if guarantees_failed == 0:
-                    status = "passed"
-                elif guarantees_failed < num_guarantees:
-                    status = "partial"
-                else:
-                    status = "failed"
-
-                # Build payload
-                triggered_by = "dbt_test"  # Always dbt_test for dbt models
-                payload = {
-                    "status": status,
-                    "guarantees_checked": num_guarantees,
-                    "guarantees_passed": guarantees_passed,
-                    "guarantees_failed": guarantees_failed,
-                    "triggered_by": triggered_by,
-                    "run_id": (
-                        f"{triggered_by}-{run_at.strftime('%Y%m%d%H%M%S')}-"
-                        f"{random.randint(1000, 9999)}"
-                    ),
-                    "guarantee_results": guarantee_results,
-                    "run_at": run_at.isoformat() + "Z",
-                    "details": {"source": triggered_by, "pattern": pattern_name},
+        if status == "pass":
+            model_results["passed"] += 1
+        elif status == "fail":
+            model_results["failed"] += 1
+            model_results["failed_tests"].append(
+                {
+                    "name": test_node.get("name", unique_id),
+                    "message": result.get("message", "Test failed"),
+                    "unique_id": unique_id,
                 }
+            )
+        elif status == "error":
+            model_results["errored"] += 1
+            model_results["failed_tests"].append(
+                {
+                    "name": test_node.get("name", unique_id),
+                    "message": result.get("message", "Test errored"),
+                    "unique_id": unique_id,
+                }
+            )
+        elif status == "skipped":
+            model_results["skipped"] += 1
 
-                # Submit audit result
+    return dict(results_by_model)
+
+
+def report_dbt_test_results() -> int:
+    """Report REAL dbt test results from run_results.json to Tessera.
+
+    This reads the actual test outcomes from dbt build runs and reports
+    them to Tessera's audit endpoint. This is the proper WAP pattern -
+    real test results, not fake seeded data.
+    """
+    print("\nReporting dbt test results (WAP demo)...")
+    audits_reported = 0
+
+    for project_name, config in DBT_PROJECTS.items():
+        manifest_path = config["manifest_path"]
+        run_results_path = manifest_path.parent / "run_results.json"
+
+        if not manifest_path.exists():
+            print(f"  Skipping {project_name}: no manifest.json")
+            continue
+
+        if not run_results_path.exists():
+            print(f"  Skipping {project_name}: no run_results.json")
+            continue
+
+        print(f"\n  Processing {project_name} project...")
+
+        try:
+            manifest = json.loads(manifest_path.read_text())
+            run_results = json.loads(run_results_path.read_text())
+
+            invocation_id = run_results.get("metadata", {}).get("invocation_id", "unknown")
+            results_by_model = extract_test_results_from_run(run_results, manifest)
+
+            if not results_by_model:
+                print(f"    No test results found in {project_name}")
+                continue
+
+            print(f"    Found test results for {len(results_by_model)} models")
+
+            for model_fqn, results in results_by_model.items():
+                # Look up asset by FQN
                 try:
+                    asset_resp = httpx.get(
+                        f"{API_URL}/api/v1/assets",
+                        params={"fqn": model_fqn, "limit": 1},
+                        headers=get_headers(),
+                        timeout=10,
+                    )
+                    if asset_resp.status_code != 200:
+                        print(f"      Lookup failed for {model_fqn}: {asset_resp.status_code}")
+                        continue
+
+                    assets = asset_resp.json().get("results", [])
+                    if not assets:
+                        # Try partial match (search for model name anywhere in FQN)
+                        parts = model_fqn.split(".")
+                        model_name = parts[-1] if parts else model_fqn
+                        asset_resp = httpx.get(
+                            f"{API_URL}/api/v1/assets",
+                            params={"search": model_name, "resource_type": "model", "limit": 5},
+                            headers=get_headers(),
+                            timeout=10,
+                        )
+                        if asset_resp.status_code == 200:
+                            all_assets = asset_resp.json().get("results", [])
+                            # Find exact match by model name
+                            assets = [
+                                a for a in all_assets if a.get("fqn", "").endswith(f".{model_name}")
+                            ]
+                        if not assets:
+                            print(f"      Asset not found: {model_fqn}")
+                            continue
+
+                    asset_id = assets[0]["id"]
+
+                    # Calculate totals
+                    total_checked = results["passed"] + results["failed"] + results["errored"]
+                    total_failed = results["failed"] + results["errored"]
+
+                    if total_checked == 0:
+                        continue
+
+                    # Determine status
+                    if total_failed > 0:
+                        status = "failed"
+                    elif results["skipped"] > 0 and results["passed"] == 0:
+                        status = "partial"
+                    else:
+                        status = "passed"
+
+                    payload = {
+                        "status": status,
+                        "guarantees_checked": total_checked,
+                        "guarantees_passed": results["passed"],
+                        "guarantees_failed": total_failed,
+                        "triggered_by": "dbt_test",
+                        "run_id": invocation_id,
+                        "details": {
+                            "failed_tests": results["failed_tests"],
+                            "skipped": results["skipped"],
+                            "project": project_name,
+                        },
+                    }
+
                     resp = httpx.post(
                         f"{API_URL}/api/v1/assets/{asset_id}/audit-results",
                         json=payload,
@@ -1094,18 +1112,20 @@ def create_audit_results(team_ids: dict[str, str]) -> int:
                         timeout=10,
                     )
                     if resp.status_code in (200, 201):
-                        audits_created += 1
+                        audits_reported += 1
+                        print(
+                            f"      {model_fqn}: {status} "
+                            f"({results['passed']}/{total_checked} passed)"
+                        )
+
                 except httpx.RequestError:
-                    pass  # Silently skip failures
+                    continue
 
-            # Progress indicator
-            if audits_created % 20 == 0:
-                print(f"  Created {audits_created} audit results...")
+        except (json.JSONDecodeError, OSError) as e:
+            print(f"    Error reading artifacts: {e}")
+            continue
 
-    except httpx.RequestError as e:
-        print(f"  Error creating audit results: {e}")
-
-    return audits_created
+    return audits_reported
 
 
 def create_proposals(team_ids: dict[str, str]) -> int:
@@ -1317,10 +1337,10 @@ def main() -> int:
     graphql_assets = import_graphql_schema(team_ids)
     print(f"  Total: {graphql_assets} GraphQL assets")
 
-    # Create audit results (WAP demo)
-    print("\n[8/9] Creating audit results (WAP demo)...")
-    audit_results = create_audit_results(team_ids)
-    print(f"  Total: {audit_results} audit results")
+    # Report real dbt test results (WAP demo)
+    print("\n[8/9] Reporting dbt test results (WAP demo)...")
+    audit_results = report_dbt_test_results()
+    print(f"  Total: {audit_results} audit results reported")
 
     # Create proposals
     print("\n[9/9] Creating sample proposals...")

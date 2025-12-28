@@ -119,20 +119,35 @@ class SchemaFormat(StrEnum):
 class ResourceType(StrEnum):
     """Type of asset resource.
 
-    Supports both data warehouse assets (dbt) and external services (APIs).
+    Tessera supports data warehouse assets (via dbt sync) and API assets
+    (via OpenAPI/GraphQL sync). The resource type is set during import
+    and used for filtering/display - all types follow the same contract
+    and compatibility workflows.
+
+    Implemented types have dedicated sync endpoints:
+    - dbt: POST /sync/dbt with manifest.json
+    - OpenAPI: POST /sync/openapi with OpenAPI spec
+    - GraphQL: POST /sync/graphql with introspection query result
+
+    For streaming assets (Kafka), use schema_format="avro" when publishing
+    contracts. The resource_type is just metadata - Avro schema validation
+    and conversion happens based on schema_format, not resource_type.
     """
 
-    # Data warehouse types (dbt)
-    MODEL = "model"  # dbt model
-    SOURCE = "source"  # dbt source
-    SEED = "seed"  # dbt seed
-    SNAPSHOT = "snapshot"  # dbt snapshot
+    # Data warehouse types (dbt) - IMPLEMENTED via /sync/dbt
+    MODEL = "model"  # dbt model (SELECT-based transformation)
+    SOURCE = "source"  # dbt source (external table reference)
+    SEED = "seed"  # dbt seed (CSV-loaded reference data)
+    SNAPSHOT = "snapshot"  # dbt snapshot (SCD Type 2)
 
-    # API types
-    API_ENDPOINT = "api_endpoint"  # REST API endpoint
-    GRPC_SERVICE = "grpc_service"  # gRPC service
-    GRAPHQL_QUERY = "graphql_query"  # GraphQL query/mutation
+    # API types - IMPLEMENTED via /sync/openapi and /sync/graphql
+    API_ENDPOINT = "api_endpoint"  # REST API endpoint (from OpenAPI spec)
+    GRAPHQL_QUERY = "graphql_query"  # GraphQL query/mutation (from introspection)
 
-    # Other
-    EXTERNAL = "external"  # Generic external asset
-    UNKNOWN = "unknown"  # Unclassified
+    # Streaming types - use schema_format="avro" for Kafka schemas
+    # Resource type is metadata only; no special handling
+    KAFKA_TOPIC = "kafka_topic"  # Kafka topic with Avro/JSON schema
+    EVENT_STREAM = "event_stream"  # Generic event stream (Pulsar, Kinesis, etc.)
+
+    # Catch-all for manual registration or unrecognized types
+    OTHER = "other"

@@ -133,6 +133,70 @@ function formatPayload(payload) {
   return items || '-';
 }
 
+function formatAuditDetails(event) {
+  const parts = [];
+
+  // Add entity ID with copy button
+  parts.push(`<div class="audit-detail-row"><span class="audit-label">ID:</span> <code class="copyable" onclick="copyToClipboard('${event.entity_id}')" title="Click to copy">${event.entity_id.substring(0, 8)}...</code></div>`);
+
+  // Add actor info if present
+  if (event.actor_id) {
+    parts.push(`<div class="audit-detail-row"><span class="audit-label">Actor:</span> <code class="copyable" onclick="copyToClipboard('${event.actor_id}')" title="Click to copy">${event.actor_id.substring(0, 8)}...</code></div>`);
+  }
+
+  // Format payload based on entity type
+  if (event.payload && Object.keys(event.payload).length > 0) {
+    const payload = event.payload;
+
+    // FQN is the most important - show prominently
+    if (payload.fqn) {
+      parts.push(`<div class="audit-detail-row"><span class="audit-label">FQN:</span> <span class="audit-fqn">${escapeHtml(payload.fqn)}</span></div>`);
+    }
+
+    // Version info
+    if (payload.version) {
+      parts.push(`<div class="audit-detail-row"><span class="audit-label">Version:</span> ${escapeHtml(payload.version)}</div>`);
+    }
+
+    // Force flag
+    if (payload.force !== undefined) {
+      parts.push(`<div class="audit-detail-row"><span class="audit-label">Force:</span> ${payload.force ? 'yes' : 'no'}</div>`);
+    }
+
+    // Triggered by
+    if (payload.triggered_by) {
+      parts.push(`<div class="audit-detail-row"><span class="audit-label">Source:</span> ${escapeHtml(payload.triggered_by)}</div>`);
+    }
+
+    // Other payload items (exclude ones we already showed)
+    const shown = ['fqn', 'version', 'force', 'triggered_by'];
+    const other = Object.entries(payload)
+      .filter(([k, v]) => !shown.includes(k) && v !== null && v !== undefined)
+      .map(([k, v]) => `${escapeHtml(k)}: ${escapeHtml(String(v).substring(0, 50))}${String(v).length > 50 ? '...' : ''}`)
+      .join(', ');
+    if (other) {
+      parts.push(`<div class="audit-detail-row audit-detail-other">${other}</div>`);
+    }
+  }
+
+  return parts.join('');
+}
+
+function copyToClipboard(text) {
+  navigator.clipboard.writeText(text).then(() => {
+    showSuccess('Copied to clipboard');
+  }).catch(() => {
+    // Fallback for older browsers
+    const textArea = document.createElement('textarea');
+    textArea.value = text;
+    document.body.appendChild(textArea);
+    textArea.select();
+    document.execCommand('copy');
+    document.body.removeChild(textArea);
+    showSuccess('Copied to clipboard');
+  });
+}
+
 async function loadAuditEvents() {
   const container = document.getElementById('audit-list');
   container.innerHTML = '<div class="loading">Loading...</div>';
@@ -154,26 +218,22 @@ async function loadAuditEvents() {
     }
 
     container.innerHTML = `
-      <table>
+      <table class="audit-table">
         <thead>
           <tr>
-            <th>Timestamp</th>
-            <th>Entity Type</th>
-            <th>Action</th>
-            <th>Entity ID</th>
-            <th>Actor ID</th>
-            <th>Details</th>
+            <th style="width: 140px;">Timestamp</th>
+            <th style="width: 100px;">Type</th>
+            <th style="width: 160px;">Action</th>
+            <th style="min-width: 200px;">Details</th>
           </tr>
         </thead>
         <tbody>
           ${data.results.map(e => `
             <tr>
-              <td style="white-space: nowrap;">${formatDate(e.occurred_at)}</td>
-              <td><span class="status">${escapeHtml(e.entity_type)}</span></td>
-              <td><span class="status ${getActionClass(e.action)}">${escapeHtml(e.action)}</span></td>
-              <td style="font-size: 0.75rem; font-family: monospace;">${escapeHtml(e.entity_id.substring(0, 8))}...</td>
-              <td style="font-size: 0.75rem; font-family: monospace;">${e.actor_id ? escapeHtml(e.actor_id.substring(0, 8)) + '...' : '-'}</td>
-              <td style="font-size: 0.75rem;">${formatPayload(e.payload)}</td>
+              <td style="white-space: nowrap; font-size: 0.8rem;">${formatDate(e.occurred_at)}</td>
+              <td><span class="status">${escapeHtml(e.entity_type.toUpperCase())}</span></td>
+              <td><span class="status ${getActionClass(e.action)}">${escapeHtml(e.action.toUpperCase())}</span></td>
+              <td style="font-size: 0.8rem;">${formatAuditDetails(e)}</td>
             </tr>
           `).join('')}
         </tbody>

@@ -28,6 +28,7 @@ from tessera.models.enums import (
     ProposalStatus,
     RegistrationStatus,
     ResourceType,
+    SchemaFormat,
     UserRole,
     WebhookDeliveryStatus,
 )
@@ -104,7 +105,7 @@ class AssetDB(Base):
         String(50), nullable=False, default="production", index=True
     )
     resource_type: Mapped[ResourceType] = mapped_column(
-        Enum(ResourceType), default=ResourceType.UNKNOWN, nullable=False, index=True
+        Enum(ResourceType), default=ResourceType.OTHER, nullable=False, index=True
     )
     guarantee_mode: Mapped[GuaranteeMode] = mapped_column(
         Enum(GuaranteeMode), default=GuaranteeMode.NOTIFY
@@ -135,6 +136,11 @@ class ContractDB(Base):
     )
     version: Mapped[str] = mapped_column(String(50), nullable=False)
     schema_def: Mapped[dict[str, Any]] = mapped_column("schema", JSON, nullable=False)
+    schema_format: Mapped[SchemaFormat] = mapped_column(
+        Enum(SchemaFormat, values_callable=lambda x: [e.value for e in x]),
+        default=SchemaFormat.JSON_SCHEMA,
+        nullable=False,
+    )
     compatibility_mode: Mapped[CompatibilityMode] = mapped_column(
         Enum(CompatibilityMode), default=CompatibilityMode.BACKWARD
     )

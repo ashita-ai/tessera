@@ -67,7 +67,7 @@ async def list_contracts(
 ) -> dict[str, Any]:
     """List all contracts with filtering and pagination.
 
-    Requires read scope. Returns contracts with asset FQN for display.
+    Requires read scope. Returns contracts with asset FQN and publisher team name.
     """
     from sqlalchemy import func
 
@@ -85,10 +85,16 @@ async def list_contracts(
     total_result = await session.execute(count_query)
     total = total_result.scalar() or 0
 
-    # Query with join to get asset FQN and apply identical filters
+    # Query with joins to get asset FQN and publisher team name
+    publisher_team = TeamDB.__table__.alias("publisher_team")
     query = (
-        select(ContractDB, AssetDB.fqn.label("asset_fqn"))
+        select(
+            ContractDB,
+            AssetDB.fqn.label("asset_fqn"),
+            publisher_team.c.name.label("publisher_name"),
+        )
         .outerjoin(AssetDB, ContractDB.asset_id == AssetDB.id)
+        .outerjoin(publisher_team, ContractDB.published_by == publisher_team.c.id)
         .where(*filters)
         .order_by(ContractDB.published_at.desc())
     )
@@ -98,9 +104,10 @@ async def list_contracts(
     rows = result.all()
 
     results = []
-    for contract_db, asset_fqn in rows:
+    for contract_db, asset_fqn, publisher_name in rows:
         contract_dict = Contract.model_validate(contract_db).model_dump()
         contract_dict["asset_fqn"] = asset_fqn
+        contract_dict["publisher_name"] = publisher_name
         results.append(contract_dict)
 
     return {
@@ -196,7 +203,7 @@ async def compare_contracts(
     )
 
 
-@router.get("/{contract_id}", response_model=Contract)
+@router.get("/{contract_id}")
 @limit_read
 async def get_contract(
     request: Request,
@@ -204,29 +211,45 @@ async def get_contract(
     auth: Auth,
     _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
-) -> ContractDB | dict[str, Any]:
+) -> dict[str, Any]:
     """Get a contract by ID.
 
-    Requires read scope.
+    Requires read scope. Returns contract with asset FQN and publisher team name.
     """
     # Try cache first
     cached = await get_cached_contract(str(contract_id))
     if cached:
         return cached
 
-    result = await session.execute(select(ContractDB).where(ContractDB.id == contract_id))
-    contract = result.scalar_one_or_none()
-    if not contract:
+    # Query with joins to get asset FQN and publisher team name
+    publisher_team = TeamDB.__table__.alias("publisher_team")
+    result = await session.execute(
+        select(
+            ContractDB,
+            AssetDB.fqn.label("asset_fqn"),
+            publisher_team.c.name.label("publisher_name"),
+        )
+        .outerjoin(AssetDB, ContractDB.asset_id == AssetDB.id)
+        .outerjoin(publisher_team, ContractDB.published_by == publisher_team.c.id)
+        .where(ContractDB.id == contract_id)
+    )
+    row = result.one_or_none()
+    if not row:
         raise NotFoundError(
             code=ErrorCode.CONTRACT_NOT_FOUND,
             message=f"Contract with ID '{contract_id}' not found",
             details={"contract_id": str(contract_id)},
         )
 
-    # Cache result
-    await cache_contract(str(contract_id), Contract.model_validate(contract).model_dump())
+    contract_db, asset_fqn, publisher_name = row
+    contract_dict = Contract.model_validate(contract_db).model_dump()
+    contract_dict["asset_fqn"] = asset_fqn
+    contract_dict["publisher_name"] = publisher_name
 
-    return contract
+    # Cache result
+    await cache_contract(str(contract_id), contract_dict)
+
+    return contract_dict
 
 
 @router.patch("/{contract_id}/guarantees", response_model=Contract)

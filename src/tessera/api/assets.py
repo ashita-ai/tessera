@@ -843,6 +843,7 @@ async def create_contract(
                 asset_id=asset_id,
                 version=version,
                 schema_def=schema_to_store,
+                schema_format=original_format,
                 compatibility_mode=contract.compatibility_mode,
                 guarantees=contract.guarantees.model_dump() if contract.guarantees else None,
                 published_by=published_by,

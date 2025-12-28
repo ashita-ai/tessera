@@ -81,28 +81,30 @@ services:
       timeout: 5s
       retries: 3
 
-  dbt-builder:
-    build: .
-    volumes:
-      - dbt_manifests:/app/tests/fixtures/demo_dbt_projects
-    command: ["python", "/app/scripts/build_dbt_projects.py"]
-    restart: "no"
+  # Note: dbt-builder is disabled because dbt build runs in-memory DuckDB
+  # without persistent data, causing tests to fail/skip. We use pre-committed
+  # manifest.json and run_results.json files instead (with passing tests).
+  # Uncomment if you need to regenerate manifests for schema changes.
+  #
+  # dbt-builder:
+  #   build: .
+  #   volumes:
+  #     - dbt_manifests:/app/tests/fixtures/demo_dbt_projects
+  #   command: ["python", "/app/scripts/build_dbt_projects.py"]
+  #   restart: "no"
 
   seeder:
     build: .
     depends_on:
       api:
         condition: service_healthy
-      dbt-builder:
-        condition: service_completed_successfully
     environment:
       BOOTSTRAP_API_KEY: tessera-dev-key
-    volumes:
-      - dbt_manifests:/app/tests/fixtures/demo_dbt_projects
+    # Uses pre-committed manifest.json and run_results.json from Docker image
+    # (not a volume) because dbt build in Docker can't load seed data properly
     command: ["python", "/app/scripts/seed_demo.py"]
     restart: "no"
 
 volumes:
   dev_postgres_data:
   dev_redis_data:
-  dbt_manifests:

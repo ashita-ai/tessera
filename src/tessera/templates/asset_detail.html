@@ -23,7 +23,7 @@
   </div>
 </section>
 
-<section>
+<section id="audit-history-section">
   <h2>Audit History (Data Quality)</h2>
   <div id="audit-history">
     <div class="loading">Loading...</div>
@@ -225,8 +225,25 @@ function toggleSql(id) {
   }
 }
 
-async function loadAuditHistory() {
+// Asset types that support dbt test audit history
+const DBT_RESOURCE_TYPES = ['model', 'source', 'seed', 'snapshot'];
+
+function isAuditableAssetType(resourceType) {
+  return DBT_RESOURCE_TYPES.includes(resourceType);
+}
+
+async function loadAuditHistory(resourceType) {
+  const section = document.getElementById('audit-history-section');
   const container = document.getElementById('audit-history');
+
+  // Hide audit history section for non-dbt asset types
+  if (!isAuditableAssetType(resourceType)) {
+    section.style.display = 'none';
+    return;
+  }
+
+  section.style.display = 'block';
+
   try {
     const response = await fetch(`/api/v1/assets/${assetId}/audit-history?limit=10`);
     if (!response.ok) {
@@ -518,15 +535,19 @@ async function loadAssetDetail() {
     const description = metadata.description || asset.description || '';
     const dbtFqn = metadata.dbt_fqn || [];
     const path = metadata.path || '';
-    const resourceType = metadata.resource_type || 'model';
+    // Resource type is on the asset object, not metadata
+    const resourceType = asset.resource_type || metadata.resource_type || 'model';
     const isSeed = resourceType === 'seed';
 
-    // Resource type badge styling
+    // Resource type badge styling - support all asset types
     const typeColors = {
       'model': { bg: '#e3f2fd', color: '#1565c0', icon: '📊' },
       'seed': { bg: '#fff3e0', color: '#e65100', icon: '📁' },
       'source': { bg: '#f3e5f5', color: '#7b1fa2', icon: '🔌' },
       'snapshot': { bg: '#e8f5e9', color: '#2e7d32', icon: '📸' },
+      'api_endpoint': { bg: '#fff8e1', color: '#f57c00', icon: '🔗' },
+      'graphql_query': { bg: '#fce4ec', color: '#c2185b', icon: '◈' },
+      'kafka_topic': { bg: '#e0f2f1', color: '#00796b', icon: '📨' },
     };
     const typeStyle = typeColors[resourceType] || { bg: '#f5f5f5', color: '#616161', icon: '📦' };
 
@@ -680,9 +701,13 @@ async function loadAssetDetail() {
         </div>
       `;
 
-      // dbt-extracted guarantees (read-only)
+      // dbt-extracted guarantees (read-only) - only show for dbt asset types
+      const DBT_RESOURCE_TYPES = ['model', 'source', 'seed', 'snapshot'];
+      const isDbtAsset = DBT_RESOURCE_TYPES.includes(resourceType);
       const hasDbtGuarantees = g.nullability || g.accepted_values || (g.custom && g.custom.length > 0);
-      if (hasDbtGuarantees) {
+
+      // Only show this section for dbt assets with guarantees
+      if (hasDbtGuarantees && isDbtAsset) {
         html += `
           <div class="card">
             <div style="margin-bottom: 0.75rem;">
@@ -746,8 +771,8 @@ async function loadAssetDetail() {
       guaranteesContainer.innerHTML = '<div class="empty">No active contract. Publish a contract first to add guarantees.</div>';
     }
 
-    // Audit History
-    await loadAuditHistory();
+    // Audit History - only shown for dbt asset types
+    await loadAuditHistory(asset.resource_type);
 
     // Active Proposals
     const proposalsContainer = document.getElementById('active-proposals');

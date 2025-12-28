@@ -50,7 +50,7 @@ class AssetCreate(AssetBase):
 
     owner_team_id: UUID
     owner_user_id: UUID | None = None
-    resource_type: ResourceType = ResourceType.UNKNOWN
+    resource_type: ResourceType = ResourceType.OTHER
     guarantee_mode: GuaranteeMode = GuaranteeMode.NOTIFY
 
 
@@ -76,7 +76,7 @@ class Asset(BaseModel):
     owner_team_id: UUID
     owner_user_id: UUID | None = None
     environment: str
-    resource_type: ResourceType = ResourceType.UNKNOWN
+    resource_type: ResourceType = ResourceType.OTHER
     guarantee_mode: GuaranteeMode = GuaranteeMode.NOTIFY
     metadata: dict[str, Any] = Field(default_factory=dict, validation_alias="metadata_")
     created_at: datetime

@@ -89,6 +89,10 @@ class Contract(ContractBase):
     id: UUID
     asset_id: UUID
     version: str = Field(..., description="Semantic version")  # Required for stored contracts
+    schema_format: SchemaFormat = Field(
+        SchemaFormat.JSON_SCHEMA,
+        description="Original schema format submitted (json_schema or avro).",
+    )
     status: ContractStatus = ContractStatus.ACTIVE
     published_at: datetime
     published_by: UUID

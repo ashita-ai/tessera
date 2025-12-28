@@ -43,7 +43,7 @@ def _map_dbt_resource_type(dbt_type: str) -> ResourceType:
         "seed": ResourceType.SEED,
         "snapshot": ResourceType.SNAPSHOT,
     }
-    return mapping.get(dbt_type, ResourceType.UNKNOWN)
+    return mapping.get(dbt_type, ResourceType.OTHER)
 
 
 class TesseraMetaConfig:
