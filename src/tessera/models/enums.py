@@ -109,6 +109,13 @@ class AuditRunStatus(StrEnum):
     PARTIAL = "partial"  # Some guarantees skipped or errored
 
 
+class SchemaFormat(StrEnum):
+    """Schema format for contracts."""
+
+    JSON_SCHEMA = "json_schema"  # JSON Schema (default)
+    AVRO = "avro"  # Apache Avro schema
+
+
 class ResourceType(StrEnum):
     """Type of asset resource.
 

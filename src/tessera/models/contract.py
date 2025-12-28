@@ -8,7 +8,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from tessera.config import settings
-from tessera.models.enums import CompatibilityMode, ContractStatus
+from tessera.models.enums import CompatibilityMode, ContractStatus, SchemaFormat
 
 
 class Guarantees(BaseModel):
@@ -43,6 +43,11 @@ class ContractBase(BaseModel):
         description="Semantic version (e.g., '1.0.0'). Auto-incremented if not provided.",
     )
     schema_def: dict[str, Any] = Field(..., alias="schema", description="JSON Schema definition")
+    schema_format: SchemaFormat = Field(
+        SchemaFormat.JSON_SCHEMA,
+        description="Schema format: 'json_schema' (default) or 'avro'. Avro schemas are "
+        "validated and converted to JSON Schema for storage.",
+    )
     compatibility_mode: CompatibilityMode = CompatibilityMode.BACKWARD
     guarantees: Guarantees | None = None
 

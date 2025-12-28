@@ -45,6 +45,7 @@ from tessera.models.enums import (
     ContractStatus,
     RegistrationStatus,
     ResourceType,
+    SchemaFormat,
 )
 from tessera.services import (
     audit,
@@ -55,6 +56,11 @@ from tessera.services import (
     validate_json_schema,
 )
 from tessera.services.audit import AuditAction
+from tessera.services.avro import (
+    AvroConversionError,
+    avro_to_json_schema,
+    validate_avro_schema,
+)
 from tessera.services.cache import (
     asset_cache,
     cache_asset,
@@ -749,14 +755,39 @@ async def create_contract(
             code=ErrorCode.UNAUTHORIZED_TEAM,
         )
 
-    # Validate schema is valid JSON Schema
-    is_valid, errors = validate_json_schema(contract.schema_def)
-    if not is_valid:
-        raise BadRequestError(
-            "Invalid JSON Schema",
-            code=ErrorCode.INVALID_SCHEMA,
-            details={"errors": errors},
-        )
+    # Validate and normalize schema based on format
+    # If Avro: validate, convert to JSON Schema, then store the converted schema
+    # If JSON Schema: validate directly
+    schema_to_store = contract.schema_def
+    original_format = contract.schema_format
+
+    if contract.schema_format == SchemaFormat.AVRO:
+        # Validate Avro schema
+        is_valid, avro_errors = validate_avro_schema(contract.schema_def)
+        if not is_valid:
+            raise BadRequestError(
+                "Invalid Avro schema",
+                code=ErrorCode.INVALID_SCHEMA,
+                details={"errors": avro_errors, "schema_format": "avro"},
+            )
+        # Convert Avro to JSON Schema for storage
+        try:
+            schema_to_store = avro_to_json_schema(contract.schema_def)
+        except AvroConversionError as e:
+            raise BadRequestError(
+                f"Failed to convert Avro schema: {e.message}",
+                code=ErrorCode.INVALID_SCHEMA,
+                details={"path": e.path, "schema_format": "avro"},
+            )
+    else:
+        # Validate JSON Schema
+        is_valid, errors = validate_json_schema(contract.schema_def)
+        if not is_valid:
+            raise BadRequestError(
+                "Invalid JSON Schema",
+                code=ErrorCode.INVALID_SCHEMA,
+                details={"errors": errors},
+            )
 
     # Get current active contract first (needed for version auto-generation)
     contract_result = await session.execute(
@@ -779,7 +810,7 @@ async def create_contract(
             # Determine bump type based on compatibility
             is_compatible, _unused = check_compatibility(
                 current_contract.schema_def,
-                contract.schema_def,
+                schema_to_store,
                 current_contract.compatibility_mode,
             )
             bump_type = "minor" if is_compatible else "major"
@@ -811,7 +842,7 @@ async def create_contract(
             db_contract = ContractDB(
                 asset_id=asset_id,
                 version=version,
-                schema_def=contract.schema_def,
+                schema_def=schema_to_store,
                 compatibility_mode=contract.compatibility_mode,
                 guarantees=contract.guarantees.model_dump() if contract.guarantees else None,
                 published_by=published_by,
@@ -846,6 +877,8 @@ async def create_contract(
         }
         if version_auto_generated:
             response["version_auto_generated"] = True
+        if original_format == SchemaFormat.AVRO:
+            response["schema_converted_from"] = "avro"
         if audit_warning:
             response["audit_warning"] = audit_warning
         return response
@@ -853,10 +886,10 @@ async def create_contract(
     # Diff schemas and check compatibility
     is_compatible, breaking_changes = check_compatibility(
         current_contract.schema_def,
-        contract.schema_def,
+        schema_to_store,
         current_contract.compatibility_mode,
     )
-    diff_result = diff_schemas(current_contract.schema_def, contract.schema_def)
+    diff_result = diff_schemas(current_contract.schema_def, schema_to_store)
 
     # Compatible change = auto-publish
     if is_compatible:
@@ -879,6 +912,8 @@ async def create_contract(
         }
         if version_auto_generated:
             response["version_auto_generated"] = True
+        if original_format == SchemaFormat.AVRO:
+            response["schema_converted_from"] = "avro"
         if audit_warning:
             response["audit_warning"] = audit_warning
         return response
@@ -907,6 +942,8 @@ async def create_contract(
         }
         if version_auto_generated:
             response["version_auto_generated"] = True
+        if original_format == SchemaFormat.AVRO:
+            response["schema_converted_from"] = "avro"
         if audit_warning:
             response["audit_warning"] = audit_warning
         return response
@@ -914,7 +951,7 @@ async def create_contract(
     # Breaking change without force = create proposal
     db_proposal = ProposalDB(
         asset_id=asset_id,
-        proposed_schema=contract.schema_def,
+        proposed_schema=schema_to_store,
         change_type=diff_result.change_type,
         breaking_changes=[bc.to_dict() for bc in breaking_changes],
         proposed_by=published_by,
