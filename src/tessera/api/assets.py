@@ -73,11 +73,22 @@ router = APIRouter()
 
 
 def parse_semver(version: str) -> tuple[int, int, int]:
-    """Parse a semantic version string into (major, minor, patch)."""
-    # Strip any prerelease/build metadata
-    base = version.split("-")[0].split("+")[0]
-    parts = base.split(".")
-    return (int(parts[0]), int(parts[1]), int(parts[2]))
+    """Parse a semantic version string into (major, minor, patch).
+
+    Raises ValueError if the version string is not valid semver format.
+    """
+    try:
+        # Strip any prerelease/build metadata
+        base = version.split("-")[0].split("+")[0]
+        parts = base.split(".")
+        if len(parts) != 3:
+            raise ValueError(f"Invalid semver format: expected 3 parts, got {len(parts)}")
+        major, minor, patch = int(parts[0]), int(parts[1]), int(parts[2])
+        if major < 0 or minor < 0 or patch < 0:
+            raise ValueError("Version numbers cannot be negative")
+        return (major, minor, patch)
+    except (ValueError, IndexError) as e:
+        raise ValueError(f"Cannot parse version '{version}': {e}") from e
 
 
 def bump_version(current: str, bump_type: str) -> str:

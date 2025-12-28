@@ -156,7 +156,10 @@ async def health_ready() -> dict[str, str | bool]:
             await session.execute(text("SELECT 1"))
         return {"status": "ready", "database": True}
     except Exception as e:
-        return {"status": "not_ready", "database": False, "error": str(e)}
+        # Log full error details server-side, return generic message to client
+        # to avoid leaking internal hostnames, connection strings, or credentials
+        logger.error("Readiness check failed: %s", e)
+        return {"status": "not_ready", "database": False}
 
 
 @app.get("/health/live")

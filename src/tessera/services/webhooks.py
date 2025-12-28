@@ -3,9 +3,12 @@
 import asyncio
 import hashlib
 import hmac
+import ipaddress
 import logging
+import socket
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlparse
 from uuid import UUID
 
 import httpx
@@ -32,6 +35,73 @@ logger = logging.getLogger(__name__)
 MAX_RETRIES = 3
 RETRY_DELAYS = [1, 5, 30]  # seconds between retries
 
+# Backpressure: limit concurrent webhook deliveries to prevent resource exhaustion
+MAX_CONCURRENT_WEBHOOKS = 10
+_webhook_semaphore: asyncio.Semaphore | None = None
+
+
+def _get_webhook_semaphore() -> asyncio.Semaphore:
+    """Get or create the webhook semaphore for the current event loop."""
+    global _webhook_semaphore
+    if _webhook_semaphore is None:
+        _webhook_semaphore = asyncio.Semaphore(MAX_CONCURRENT_WEBHOOKS)
+    return _webhook_semaphore
+
+
+# Blocked IP ranges for SSRF protection
+BLOCKED_IP_RANGES = [
+    ipaddress.ip_network("10.0.0.0/8"),  # Private
+    ipaddress.ip_network("172.16.0.0/12"),  # Private
+    ipaddress.ip_network("192.168.0.0/16"),  # Private
+    ipaddress.ip_network("127.0.0.0/8"),  # Loopback
+    ipaddress.ip_network("169.254.0.0/16"),  # Link-local / cloud metadata
+    ipaddress.ip_network("0.0.0.0/8"),  # Current network
+]
+
+
+def validate_webhook_url(url: str) -> tuple[bool, str]:
+    """Validate a webhook URL for SSRF protection.
+
+    Returns:
+        Tuple of (is_valid, error_message). If valid, error_message is empty.
+    """
+    try:
+        parsed = urlparse(url)
+
+        # Require HTTPS in production
+        if settings.environment == "production" and parsed.scheme != "https":
+            return False, "Webhook URL must use HTTPS in production"
+
+        # Must have a valid scheme
+        if parsed.scheme not in ("http", "https"):
+            return False, f"Invalid URL scheme: {parsed.scheme}"
+
+        # Must have a hostname
+        if not parsed.hostname:
+            return False, "Webhook URL must have a hostname"
+
+        # Resolve hostname and check for blocked IPs
+        try:
+            resolved_ip = socket.gethostbyname(parsed.hostname)
+            ip_obj = ipaddress.ip_address(resolved_ip)
+
+            for blocked_range in BLOCKED_IP_RANGES:
+                if ip_obj in blocked_range:
+                    logger.warning(
+                        "Webhook URL %s resolves to blocked IP range %s",
+                        url,
+                        blocked_range,
+                    )
+                    return False, "Webhook URL resolves to blocked IP range"
+        except socket.gaierror:
+            # DNS resolution failed - allow the request but log it
+            # The actual delivery will fail with a clearer error
+            logger.warning("Could not resolve webhook hostname: %s", parsed.hostname)
+
+        return True, ""
+    except Exception as e:
+        return False, f"Invalid URL: {e}"
+
 
 def _sign_payload(payload: str, secret: str) -> str:
     """Sign a payload with HMAC-SHA256."""
@@ -46,10 +116,26 @@ async def _deliver_webhook(event: WebhookEvent, delivery_id: UUID | None = None)
     """Deliver a webhook event to the configured URL.
 
     Returns True if delivery succeeded, False otherwise.
+
+    Uses a semaphore to limit concurrent deliveries (backpressure) and
+    validates URLs to prevent SSRF attacks.
     """
     if not settings.webhook_url:
         logger.debug("No webhook URL configured, skipping delivery")
         return True
+
+    # SSRF protection: validate the webhook URL
+    is_valid, error_msg = validate_webhook_url(settings.webhook_url)
+    if not is_valid:
+        logger.error("Webhook URL validation failed: %s", error_msg)
+        if delivery_id:
+            await _update_delivery_status(
+                delivery_id,
+                status=WebhookDeliveryStatus.FAILED,
+                attempts=0,
+                last_error=f"URL validation failed: {error_msg}",
+            )
+        return False
 
     payload = event.model_dump_json()
     headers: dict[str, str] = {
@@ -65,47 +151,50 @@ async def _deliver_webhook(event: WebhookEvent, delivery_id: UUID | None = None)
     last_error: str | None = None
     last_status_code: int | None = None
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        for attempt, delay in enumerate(RETRY_DELAYS):
-            try:
-                response = await client.post(
-                    settings.webhook_url,
-                    content=payload,
-                    headers=headers,
-                )
-                last_status_code = response.status_code
-                if response.status_code < 300:
-                    logger.info(
-                        "Webhook delivered: %s to %s",
-                        event.event.value,
+    # Backpressure: limit concurrent webhook deliveries
+    semaphore = _get_webhook_semaphore()
+    async with semaphore:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            for attempt, delay in enumerate(RETRY_DELAYS):
+                try:
+                    response = await client.post(
                         settings.webhook_url,
+                        content=payload,
+                        headers=headers,
                     )
-                    # Update delivery record on success
-                    if delivery_id:
-                        await _update_delivery_status(
-                            delivery_id,
-                            status=WebhookDeliveryStatus.DELIVERED,
-                            attempts=attempt + 1,
-                            last_status_code=response.status_code,
+                    last_status_code = response.status_code
+                    if response.status_code < 300:
+                        logger.info(
+                            "Webhook delivered: %s to %s",
+                            event.event.value,
+                            settings.webhook_url,
                         )
-                    return True
-                last_error = response.text[:500]
-                logger.warning(
-                    "Webhook delivery failed (attempt %d): %s %s",
-                    attempt + 1,
-                    response.status_code,
-                    response.text[:200],
-                )
-            except httpx.RequestError as e:
-                last_error = str(e)[:500]
-                logger.warning(
-                    "Webhook delivery error (attempt %d): %s",
-                    attempt + 1,
-                    str(e),
-                )
+                        # Update delivery record on success
+                        if delivery_id:
+                            await _update_delivery_status(
+                                delivery_id,
+                                status=WebhookDeliveryStatus.DELIVERED,
+                                attempts=attempt + 1,
+                                last_status_code=response.status_code,
+                            )
+                        return True
+                    last_error = response.text[:500]
+                    logger.warning(
+                        "Webhook delivery failed (attempt %d): %s %s",
+                        attempt + 1,
+                        response.status_code,
+                        response.text[:200],
+                    )
+                except httpx.RequestError as e:
+                    last_error = str(e)[:500]
+                    logger.warning(
+                        "Webhook delivery error (attempt %d): %s",
+                        attempt + 1,
+                        str(e),
+                    )
 
-            if attempt < MAX_RETRIES - 1:
-                await asyncio.sleep(delay)
+                if attempt < MAX_RETRIES - 1:
+                    await asyncio.sleep(delay)
 
     logger.error(
         "Webhook delivery failed after %d attempts: %s",

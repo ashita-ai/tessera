@@ -1,5 +1,7 @@
 """Rate limiting configuration and dependencies."""
 
+import hashlib
+
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 from slowapi import Limiter
@@ -11,16 +13,19 @@ from tessera.config import settings
 def get_rate_limit_key(request: Request) -> str:
     """Get a unique key for rate limiting.
 
-    Uses the API key if present in the Authorization header,
+    Uses a hash of the full API key if present in the Authorization header,
     otherwise falls back to remote IP address.
+
+    Note: We hash the full key to ensure each API key gets its own rate limit
+    bucket, preventing one noisy client from affecting others.
     """
     auth_header = request.headers.get("Authorization")
     if auth_header and auth_header.startswith("Bearer "):
         api_key = auth_header[7:]
-        # Use prefix if possible (first 10 chars)
-        if len(api_key) > 10:
-            return f"key:{api_key[:10]}"
-        return f"key:{api_key}"
+        # Hash the full API key to create a unique, stable bucket per key
+        # Using SHA256 and taking first 16 chars for a compact but unique key
+        key_hash = hashlib.sha256(api_key.encode()).hexdigest()[:16]
+        return f"key:{key_hash}"
 
     # Fallback to IP address
     return get_remote_address(request)

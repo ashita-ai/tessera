@@ -383,3 +383,179 @@ class TestWebhookServiceFunctions:
             producer_team_name="producer",
             from_proposal_id=None,
         )
+
+
+class TestWebhookURLValidation:
+    """Tests for webhook URL validation (SSRF protection)."""
+
+    def test_validate_valid_https_url(self):
+        """Valid HTTPS URL passes validation."""
+        from tessera.services.webhooks import validate_webhook_url
+
+        # External URLs should pass (DNS may fail, but URL is valid)
+        is_valid, error = validate_webhook_url("https://example.com/webhook")
+        # URL structure is valid even if DNS fails
+        assert is_valid or "resolve" in error.lower()
+
+    def test_validate_rejects_invalid_scheme(self):
+        """URLs with invalid schemes are rejected."""
+        from tessera.services.webhooks import validate_webhook_url
+
+        is_valid, error = validate_webhook_url("ftp://example.com/webhook")
+        assert not is_valid
+        assert "scheme" in error.lower()
+
+    def test_validate_rejects_no_hostname(self):
+        """URLs without hostname are rejected."""
+        from tessera.services.webhooks import validate_webhook_url
+
+        is_valid, error = validate_webhook_url("https:///path")
+        assert not is_valid
+        assert "hostname" in error.lower()
+
+    def test_validate_blocks_localhost(self):
+        """Localhost URLs are blocked (SSRF protection)."""
+        from tessera.services.webhooks import validate_webhook_url
+
+        is_valid, error = validate_webhook_url("http://127.0.0.1:8080/webhook")
+        assert not is_valid
+        assert "blocked" in error.lower()
+
+    def test_validate_blocks_private_ip_10(self):
+        """Private 10.x.x.x IPs are blocked."""
+        from tessera.services.webhooks import validate_webhook_url
+
+        is_valid, error = validate_webhook_url("http://10.0.0.1/webhook")
+        assert not is_valid
+        assert "blocked" in error.lower()
+
+    def test_validate_blocks_private_ip_172(self):
+        """Private 172.16.x.x IPs are blocked."""
+        from tessera.services.webhooks import validate_webhook_url
+
+        is_valid, error = validate_webhook_url("http://172.16.0.1/webhook")
+        assert not is_valid
+        assert "blocked" in error.lower()
+
+    def test_validate_blocks_private_ip_192(self):
+        """Private 192.168.x.x IPs are blocked."""
+        from tessera.services.webhooks import validate_webhook_url
+
+        is_valid, error = validate_webhook_url("http://192.168.1.1/webhook")
+        assert not is_valid
+        assert "blocked" in error.lower()
+
+    def test_validate_blocks_metadata_ip(self):
+        """Cloud metadata IP (169.254.x.x) is blocked."""
+        from tessera.services.webhooks import validate_webhook_url
+
+        is_valid, error = validate_webhook_url("http://169.254.169.254/latest/meta-data")
+        assert not is_valid
+        assert "blocked" in error.lower()
+
+
+class TestRateLimitKey:
+    """Tests for rate limiting key generation."""
+
+    def test_rate_limit_key_unique_per_api_key(self):
+        """Different API keys get different rate limit buckets."""
+        from unittest.mock import MagicMock
+
+        from tessera.api.rate_limit import get_rate_limit_key
+
+        request1 = MagicMock()
+        request1.headers = {"Authorization": "Bearer tess_live_key1_abc123"}
+
+        request2 = MagicMock()
+        request2.headers = {"Authorization": "Bearer tess_live_key2_xyz789"}
+
+        key1 = get_rate_limit_key(request1)
+        key2 = get_rate_limit_key(request2)
+
+        assert key1 != key2
+        assert key1.startswith("key:")
+        assert key2.startswith("key:")
+
+    def test_rate_limit_key_same_key_same_bucket(self):
+        """Same API key always gets the same bucket."""
+        from unittest.mock import MagicMock
+
+        from tessera.api.rate_limit import get_rate_limit_key
+
+        api_key = "tess_live_myapikey_abc123xyz"
+
+        request1 = MagicMock()
+        request1.headers = {"Authorization": f"Bearer {api_key}"}
+
+        request2 = MagicMock()
+        request2.headers = {"Authorization": f"Bearer {api_key}"}
+
+        key1 = get_rate_limit_key(request1)
+        key2 = get_rate_limit_key(request2)
+
+        assert key1 == key2
+
+    def test_rate_limit_key_uses_hash_not_prefix(self):
+        """Keys with same prefix get different buckets (fixed collision bug)."""
+        from unittest.mock import MagicMock
+
+        from tessera.api.rate_limit import get_rate_limit_key
+
+        # These keys have the same first 10 chars but should be different buckets
+        request1 = MagicMock()
+        request1.headers = {"Authorization": "Bearer tess_live_AAAA"}
+
+        request2 = MagicMock()
+        request2.headers = {"Authorization": "Bearer tess_live_BBBB"}
+
+        key1 = get_rate_limit_key(request1)
+        key2 = get_rate_limit_key(request2)
+
+        # Should be different because we hash the full key now
+        assert key1 != key2
+
+
+class TestSemverParsing:
+    """Tests for defensive semver parsing."""
+
+    def test_parse_valid_semver(self):
+        """Valid semver strings parse correctly."""
+        from tessera.api.assets import parse_semver
+
+        assert parse_semver("1.0.0") == (1, 0, 0)
+        assert parse_semver("2.3.4") == (2, 3, 4)
+        assert parse_semver("10.20.30") == (10, 20, 30)
+
+    def test_parse_semver_with_prerelease(self):
+        """Semver with prerelease suffix strips suffix."""
+        from tessera.api.assets import parse_semver
+
+        assert parse_semver("1.0.0-alpha") == (1, 0, 0)
+        assert parse_semver("2.0.0-beta.1") == (2, 0, 0)
+
+    def test_parse_semver_with_build(self):
+        """Semver with build metadata strips metadata."""
+        from tessera.api.assets import parse_semver
+
+        assert parse_semver("1.0.0+build123") == (1, 0, 0)
+
+    def test_parse_invalid_semver_two_parts(self):
+        """Invalid semver with only 2 parts raises ValueError."""
+        from tessera.api.assets import parse_semver
+
+        with pytest.raises(ValueError, match="expected 3 parts"):
+            parse_semver("1.0")
+
+    def test_parse_invalid_semver_non_numeric(self):
+        """Invalid semver with non-numeric parts raises ValueError."""
+        from tessera.api.assets import parse_semver
+
+        with pytest.raises(ValueError, match="Cannot parse"):
+            parse_semver("1.x.0")
+
+    def test_parse_invalid_semver_empty(self):
+        """Empty string raises ValueError."""
+        from tessera.api.assets import parse_semver
+
+        with pytest.raises(ValueError, match="expected 3 parts"):
+            parse_semver("")
