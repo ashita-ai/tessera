@@ -46,7 +46,7 @@ from tessera.api.errors import (
 from tessera.api.rate_limit import limiter, rate_limit_exceeded_handler
 from tessera.config import DEFAULT_SESSION_SECRET, settings
 from tessera.db import get_session, init_db
-from tessera.db.database import dispose_engine, get_async_session_maker
+from tessera.db.database import dispose_engine
 from tessera.services.metrics import MetricsMiddleware, get_metrics, update_gauge_metrics
 from tessera.web import router as web_router
 from tessera.web.routes import register_login_required_handler
@@ -202,12 +202,12 @@ async def health(
 
 
 @app.get("/health/ready")
-async def health_ready() -> dict[str, str | bool]:
+async def health_ready(
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, str | bool]:
     """Readiness probe - verifies database connectivity."""
     try:
-        async_session = get_async_session_maker()
-        async with async_session() as session:
-            await session.execute(text("SELECT 1"))
+        await session.execute(text("SELECT 1"))
         return {"status": "ready", "database": True}
     except Exception as e:
         # Log full error details server-side, return generic message to client
