@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+
+{% block title %}Notifications - Tessera{% endblock %}
+
+{% block content %}
+<section>
+  <h2>My Team's Notifications</h2>
+  <p style="color: var(--gray); margin-bottom: 1.5rem;">
+    Breaking changes that require your team's acknowledgment.
+  </p>
+
+  <div id="notifications-list">
+    <div class="loading">Loading...</div>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const teamId = '{{ current_user.team_id }}';
+
+async function acknowledgeProposal(proposalId) {
+  const response = prompt('Enter your response:\n- "approved" to approve\n- "blocked" to block\n- leave empty to cancel');
+  if (response === null || response === '') return;
+
+  const validResponses = ['approved', 'blocked', 'approved_with_deadline'];
+  const normalizedResponse = response.toLowerCase().trim();
+  if (!validResponses.includes(normalizedResponse)) {
+    alert('Invalid response. Use "approved" or "blocked".');
+    return;
+  }
+
+  try {
+    await api.acknowledgeProposal(proposalId, teamId, normalizedResponse);
+    showSuccess('Acknowledgment submitted successfully');
+    loadNotifications();
+  } catch (error) {
+    showError(error.message);
+  }
+}
+
+async function loadNotifications() {
+  const container = document.getElementById('notifications-list');
+
+  if (!teamId) {
+    container.innerHTML = '<div class="empty">You are not assigned to a team. Contact an admin to get assigned.</div>';
+    return;
+  }
+
+  container.innerHTML = '<div class="loading">Loading...</div>';
+
+  try {
+    const data = await api.listPendingProposalsForTeam(teamId);
+
+    if (!data.results || data.results.length === 0) {
+      container.innerHTML = '<div class="empty">No pending notifications. Your team is all caught up!</div>';
+      return;
+    }
+
+    container.innerHTML = `
+      <table>
+        <thead>
+          <tr>
+            <th>Asset</th>
+            <th>Change Type</th>
+            <th>Breaking Changes</th>
+            <th>Proposed</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${data.results.map(p => `
+            <tr>
+              <td><a href="/assets/${p.asset_id}">${escapeHtml(p.asset_fqn || p.asset_id)}</a></td>
+              <td><span class="status status-${p.change_type === 'major' ? 'deprecated' : 'active'}">${escapeHtml(p.change_type || 'unknown')}</span></td>
+              <td>${p.breaking_changes_count || 0}</td>
+              <td>${formatDate(p.proposed_at)}</td>
+              <td>
+                <div style="display: flex; gap: 0.5rem;">
+                  <a href="/proposals/${p.id}" class="btn-secondary" style="padding: 0.25rem 0.5rem;">View Details</a>
+                  <button onclick="acknowledgeProposal('${p.id}')" style="padding: 0.25rem 0.5rem;">Acknowledge</button>
+                </div>
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+      <p style="color: var(--gray); margin-top: 1rem; font-size: 0.875rem;">
+        ${data.results.length} pending notification(s) requiring your team's acknowledgment.
+      </p>
+    `;
+  } catch (error) {
+    showError(error.message);
+    container.innerHTML = '<div class="error">Failed to load notifications</div>';
+  }
+}
+
+loadNotifications();
+</script>
+{% endblock %}

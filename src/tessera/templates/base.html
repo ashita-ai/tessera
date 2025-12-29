@@ -24,6 +24,7 @@
       </div>
       <nav>
         <a href="/" {% if active_page == 'dashboard' %}class="active"{% endif %}>Dashboard</a>
+        <a href="/notifications" {% if active_page == 'notifications' %}class="active"{% endif %}>Notifications</a>
         <a href="/users" {% if active_page == 'users' %}class="active"{% endif %}>Users</a>
         <a href="/teams" {% if active_page == 'teams' %}class="active"{% endif %}>Teams</a>
         <a href="/assets" {% if active_page == 'assets' %}class="active"{% endif %}>Assets</a>

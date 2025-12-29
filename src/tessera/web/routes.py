@@ -328,6 +328,18 @@ async def import_page(
     )
 
 
+@router.get("/notifications", response_class=HTMLResponse)
+async def notifications_page(
+    request: Request,
+    current_user: dict[str, Any] = Depends(require_current_user),
+) -> HTMLResponse:
+    """Notifications page showing pending proposals requiring team acknowledgment."""
+    return templates.TemplateResponse(
+        "notifications.html",
+        make_context(request, "notifications", current_user),
+    )
+
+
 @router.get("/settings", response_class=HTMLResponse)
 async def settings_page(
     request: Request,

@@ -210,6 +210,11 @@ class TesseraAPI {
     return this.request(`/proposals${query ? `?${query}` : ''}`);
   }
 
+  async listPendingProposalsForTeam(teamId, params = {}) {
+    const query = new URLSearchParams({ pending_ack_for: teamId, ...params }).toString();
+    return this.request(`/proposals?${query}`);
+  }
+
   async getProposal(id) {
     return this.request(`/proposals/${id}`);
   }

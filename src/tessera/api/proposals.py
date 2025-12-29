@@ -151,6 +151,16 @@ async def list_proposals(
     status: ProposalStatus | None = Query(None, description="Filter by status"),
     change_type: ChangeType | None = Query(None, description="Filter by change type"),
     proposed_by: UUID | None = Query(None, description="Filter by proposer team ID"),
+    consumer_team_id: UUID | None = Query(
+        None,
+        description="Filter by consumer team (returns proposals affecting contracts "
+        "where this team is registered as a consumer)",
+    ),
+    pending_ack_for: UUID | None = Query(
+        None,
+        description="Filter to only pending proposals that need acknowledgment from this team "
+        "(not yet acknowledged by them)",
+    ),
     limit: int = Query(50, ge=1, le=100, description="Results per page"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
     _: None = RequireRead,
@@ -160,8 +170,64 @@ async def list_proposals(
 
     Requires read scope.
     """
+    # If filtering by consumer team or pending ack, we need to find proposals
+    # for contracts where this team has active registrations
+    filtered_proposal_ids: set[UUID] | None = None
+    if consumer_team_id or pending_ack_for:
+        team_filter = consumer_team_id or pending_ack_for
+        # Find all active registrations for this team
+        reg_result = await session.execute(
+            select(RegistrationDB.contract_id)
+            .where(RegistrationDB.consumer_team_id == team_filter)
+            .where(RegistrationDB.status == RegistrationStatus.ACTIVE)
+        )
+        registered_contract_ids = [r[0] for r in reg_result.all()]
+
+        if not registered_contract_ids:
+            # No registrations, return empty result
+            return {"results": [], "total": 0, "limit": limit, "offset": offset}
+
+        # Find assets that have these contracts as their active contract
+        asset_ids_result = await session.execute(
+            select(ContractDB.asset_id)
+            .where(ContractDB.id.in_(registered_contract_ids))
+            .where(ContractDB.status == ContractStatus.ACTIVE)
+        )
+        relevant_asset_ids = [a[0] for a in asset_ids_result.all()]
+
+        if not relevant_asset_ids:
+            return {"results": [], "total": 0, "limit": limit, "offset": offset}
+
+        # Get proposals for these assets
+        proposal_query = select(ProposalDB.id).where(ProposalDB.asset_id.in_(relevant_asset_ids))
+        if pending_ack_for:
+            # Further filter to only pending proposals not yet acknowledged by this team
+            proposal_query = proposal_query.where(ProposalDB.status == ProposalStatus.PENDING)
+            proposals_result = await session.execute(proposal_query)
+            candidate_proposal_ids = [p[0] for p in proposals_result.all()]
+
+            if not candidate_proposal_ids:
+                return {"results": [], "total": 0, "limit": limit, "offset": offset}
+
+            # Exclude proposals already acknowledged by this team
+            ack_result = await session.execute(
+                select(AcknowledgmentDB.proposal_id)
+                .where(AcknowledgmentDB.proposal_id.in_(candidate_proposal_ids))
+                .where(AcknowledgmentDB.consumer_team_id == pending_ack_for)
+            )
+            acknowledged_ids = {a[0] for a in ack_result.all()}
+            filtered_proposal_ids = set(candidate_proposal_ids) - acknowledged_ids
+        else:
+            proposals_result = await session.execute(proposal_query)
+            filtered_proposal_ids = {p[0] for p in proposals_result.all()}
+
+        if not filtered_proposal_ids:
+            return {"results": [], "total": 0, "limit": limit, "offset": offset}
+
     # Build base query with filters
     base_query = select(ProposalDB)
+    if filtered_proposal_ids is not None:
+        base_query = base_query.where(ProposalDB.id.in_(filtered_proposal_ids))
     if asset_id:
         base_query = base_query.where(ProposalDB.asset_id == asset_id)
     if status:
@@ -178,6 +244,8 @@ async def list_proposals(
 
     # Main query: join proposals with assets in single query (fixes N+1)
     query = select(ProposalDB, AssetDB).join(AssetDB, ProposalDB.asset_id == AssetDB.id)
+    if filtered_proposal_ids is not None:
+        query = query.where(ProposalDB.id.in_(filtered_proposal_ids))
     if asset_id:
         query = query.where(ProposalDB.asset_id == asset_id)
     if status:
