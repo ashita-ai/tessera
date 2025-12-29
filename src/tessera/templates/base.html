@@ -37,6 +37,13 @@
       </nav>
     </header>
 
+    {% if flash %}
+    <div class="flash-message flash-{{ flash.type }}" id="flash-message">
+      <span>{{ flash.message }}</span>
+      <button onclick="this.parentElement.remove()" class="flash-close">&times;</button>
+    </div>
+    {% endif %}
+
     <div id="error-container" style="display: none;"></div>
 
     <main>

@@ -98,6 +98,17 @@ async def require_current_user(
     return user
 
 
+def get_flash_message(request: Request) -> dict[str, str] | None:
+    """Get and clear flash message from session."""
+    flash: dict[str, str] | None = request.session.pop("flash", None)
+    return flash
+
+
+def set_flash_message(request: Request, message: str, type: str = "info") -> None:
+    """Set a flash message in session to display on next page load."""
+    request.session["flash"] = {"message": message, "type": type}
+
+
 def make_context(
     request: Request,
     active_page: str,
@@ -109,6 +120,7 @@ def make_context(
         "request": request,
         "active_page": active_page,
         "current_user": current_user,
+        "flash": get_flash_message(request),
         **kwargs,
     }
 
@@ -154,6 +166,14 @@ async def login_submit(
 
     # Set session
     request.session["user_id"] = str(user.id)
+
+    # Set welcome notification
+    set_flash_message(
+        request,
+        f"Welcome back, {user.name}! You are logged in as {user.role.value}.",
+        "success",
+    )
+
     return RedirectResponse(url="/", status_code=302)
 
 
