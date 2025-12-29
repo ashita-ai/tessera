@@ -1,16 +1,17 @@
 # Tessera Development - Full environment with seeder and auth enabled
 # Usage: docker compose -f docker-compose.dev.yml -p tessera-dev up
 #
-# This uses .env.docker (committed to git) - works on fresh clone!
-# For production: cp .env.example .env && docker compose up
+# Uses .env.docker for zero-config startup (works on fresh clone)
 #
 # Run both simultaneously:
-#   docker compose up -d                                           # Production on :8000 (requires .env)
-#   docker compose -f docker-compose.dev.yml -p tessera-dev up -d  # Demo on :8001 (uses .env.docker)
+#   docker compose up -d                                           # Production on :8000
+#   docker compose -f docker-compose.dev.yml -p tessera-dev up -d  # Demo on :8001
 
 services:
   db:
     image: postgres:16-alpine
+    env_file:
+      - .env.docker
     environment:
       POSTGRES_USER: tessera
       POSTGRES_PASSWORD: tessera
@@ -46,15 +47,9 @@ services:
     env_file:
       - .env.docker
     environment:
-      DATABASE_URL: postgresql+asyncpg://tessera:tessera@db:5432/tessera
-      REDIS_URL: redis://redis:6379/0
-      BOOTSTRAP_API_KEY: tessera-dev-key
-      AUTH_DISABLED: "false"
-      API_HOST: "0.0.0.0"
-      API_PORT: "8000"
-      RATE_LIMIT_WRITE: "1000/minute"  # Higher limit for dev/seeding
-      DEMO_MODE: "true"  # Show demo credentials on login page
-      # Webhook configuration - sends events to the webhook-receiver service
+      # Override for dev - these take precedence over .env.docker
+      RATE_LIMIT_WRITE: "1000/minute"
+      DEMO_MODE: "true"
       WEBHOOK_URL: http://webhook-receiver:5555/webhooks
       WEBHOOK_SECRET: dev-webhook-secret
     volumes:
@@ -85,27 +80,13 @@ services:
       timeout: 5s
       retries: 3
 
-  # Note: dbt-builder is disabled because dbt build runs in-memory DuckDB
-  # without persistent data, causing tests to fail/skip. We use pre-committed
-  # manifest.json and run_results.json files instead (with passing tests).
-  # Uncomment if you need to regenerate manifests for schema changes.
-  #
-  # dbt-builder:
-  #   build: .
-  #   volumes:
-  #     - dbt_manifests:/app/tests/fixtures/demo_dbt_projects
-  #   command: ["python", "/app/scripts/build_dbt_projects.py"]
-  #   restart: "no"
-
   seeder:
     build: .
     depends_on:
       api:
         condition: service_healthy
-    environment:
-      BOOTSTRAP_API_KEY: tessera-dev-key
-    # Uses pre-committed manifest.json and run_results.json from Docker image
-    # (not a volume) because dbt build in Docker can't load seed data properly
+    env_file:
+      - .env.docker
     command: ["python", "/app/scripts/seed_demo.py"]
     restart: "no"
 

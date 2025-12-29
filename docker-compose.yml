@@ -1,12 +1,14 @@
 # Tessera - Production-ready docker-compose
-# Usage: cp .env.example .env && docker compose up
+# Usage: docker compose up
 #
-# Requires: .env file (copy from .env.example and customize)
+# Uses .env.docker for zero-config startup (works on fresh clone)
 # For demo with sample data: docker compose -f docker-compose.dev.yml -p tessera-dev up
 
 services:
   db:
     image: postgres:16-alpine
+    env_file:
+      - .env.docker
     environment:
       POSTGRES_USER: tessera
       POSTGRES_PASSWORD: tessera
@@ -40,17 +42,7 @@ services:
     ports:
       - "8000:8000"
     env_file:
-      - .env
-    environment:
-      DATABASE_URL: postgresql+asyncpg://tessera:tessera@db:5432/tessera
-      REDIS_URL: redis://redis:6379/0
-      BOOTSTRAP_API_KEY: tessera-dev-key
-      AUTH_DISABLED: "false"
-      ADMIN_EMAIL: admin@tessera.dev
-      ADMIN_PASSWORD: adminpass123
-      ADMIN_NAME: Admin
-      API_HOST: "0.0.0.0"
-      API_PORT: "8000"
+      - .env.docker
     depends_on:
       db:
         condition: service_healthy
