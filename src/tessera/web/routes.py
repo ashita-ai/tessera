@@ -167,13 +167,6 @@ async def login_submit(
     # Set session
     request.session["user_id"] = str(user.id)
 
-    # Set welcome notification
-    set_flash_message(
-        request,
-        f"Welcome back, {user.name}! You are logged in as {user.role.value}.",
-        "success",
-    )
-
     return RedirectResponse(url="/", status_code=302)
 
 
