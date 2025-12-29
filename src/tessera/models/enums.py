@@ -43,6 +43,7 @@ class ProposalStatus(StrEnum):
     APPROVED = "approved"
     REJECTED = "rejected"
     WITHDRAWN = "withdrawn"
+    EXPIRED = "expired"
 
 
 class AcknowledgmentResponseType(StrEnum):

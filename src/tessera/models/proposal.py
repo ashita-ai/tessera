@@ -43,3 +43,5 @@ class Proposal(ProposalBase):
     proposed_by_user_id: UUID | None = None
     proposed_at: datetime
     resolved_at: datetime | None = None
+    expires_at: datetime | None = None
+    auto_expire: bool = False

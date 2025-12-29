@@ -212,6 +212,10 @@ class ProposalDB(Base):
         DateTime(timezone=True), default=_utcnow, index=True
     )
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    auto_expire: Mapped[bool] = mapped_column(default=False)
 
     # Relationships
     asset: Mapped["AssetDB"] = relationship(back_populates="proposals")

@@ -51,6 +51,7 @@ class AuditAction(StrEnum):
     PROPOSAL_FORCE_APPROVED = "proposal.force_approved"
     PROPOSAL_APPROVED = "proposal.approved"
     PROPOSAL_REJECTED = "proposal.rejected"
+    PROPOSAL_EXPIRED = "proposal.expired"
 
     # API Key actions
     API_KEY_CREATED = "api_key.created"

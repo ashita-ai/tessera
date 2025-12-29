@@ -1406,3 +1406,242 @@ class TestAcknowledgmentEdgeCases:
         assert resp.status_code == 201
         data = resp.json()
         assert data["migration_deadline"] is not None
+
+
+class TestProposalExpiration:
+    """Tests for proposal expiration functionality."""
+
+    async def test_manually_expire_proposal(self, client: AsyncClient):
+        """Producer can manually expire their own proposal."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "expire-team"})
+        team_id = team_resp.json()["id"]
+
+        asset_resp = await client.post(
+            "/api/v1/assets", json={"fqn": "expire.test.table", "owner_team_id": team_id}
+        )
+        asset_id = asset_resp.json()["id"]
+
+        # Create initial contract
+        await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            json={
+                "version": "1.0.0",
+                "schema": {
+                    "type": "object",
+                    "properties": {"id": {"type": "integer"}, "name": {"type": "string"}},
+                },
+                "compatibility_mode": "backward",
+            },
+        )
+
+        # Create breaking change
+        proposal_resp = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            json={
+                "version": "2.0.0",
+                "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
+                "compatibility_mode": "backward",
+            },
+        )
+        proposal_id = proposal_resp.json()["proposal"]["id"]
+
+        # Expire the proposal
+        resp = await client.post(f"/api/v1/proposals/{proposal_id}/expire")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "expired"
+
+    async def test_expire_nonpending_proposal_fails(self, client: AsyncClient):
+        """Cannot expire a non-pending proposal."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "expire-nonpend-team"})
+        team_id = team_resp.json()["id"]
+
+        asset_resp = await client.post(
+            "/api/v1/assets", json={"fqn": "expire.nonpend.table", "owner_team_id": team_id}
+        )
+        asset_id = asset_resp.json()["id"]
+
+        # Create initial contract
+        await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            json={
+                "version": "1.0.0",
+                "schema": {
+                    "type": "object",
+                    "properties": {"id": {"type": "integer"}, "name": {"type": "string"}},
+                },
+                "compatibility_mode": "backward",
+            },
+        )
+
+        # Create breaking change
+        proposal_resp = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            json={
+                "version": "2.0.0",
+                "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
+                "compatibility_mode": "backward",
+            },
+        )
+        proposal_id = proposal_resp.json()["proposal"]["id"]
+
+        # Withdraw it first
+        await client.post(f"/api/v1/proposals/{proposal_id}/withdraw")
+
+        # Try to expire
+        resp = await client.post(f"/api/v1/proposals/{proposal_id}/expire")
+        assert resp.status_code == 400
+
+    async def test_expire_not_found(self, client: AsyncClient):
+        """Expiring nonexistent proposal returns 404."""
+        resp = await client.post("/api/v1/proposals/00000000-0000-0000-0000-000000000000/expire")
+        assert resp.status_code == 404
+
+    async def test_proposal_includes_expiration_fields(self, client: AsyncClient):
+        """Proposal response includes expires_at and auto_expire fields."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "expiry-fields-team"})
+        team_id = team_resp.json()["id"]
+
+        asset_resp = await client.post(
+            "/api/v1/assets", json={"fqn": "expiry.fields.table", "owner_team_id": team_id}
+        )
+        asset_id = asset_resp.json()["id"]
+
+        # Create initial contract
+        await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            json={
+                "version": "1.0.0",
+                "schema": {
+                    "type": "object",
+                    "properties": {"id": {"type": "integer"}, "name": {"type": "string"}},
+                },
+                "compatibility_mode": "backward",
+            },
+        )
+
+        # Create breaking change
+        proposal_resp = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            json={
+                "version": "2.0.0",
+                "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
+                "compatibility_mode": "backward",
+            },
+        )
+        proposal_id = proposal_resp.json()["proposal"]["id"]
+
+        # Get the proposal
+        resp = await client.get(f"/api/v1/proposals/{proposal_id}")
+        assert resp.status_code == 200
+        data = resp.json()
+        # These fields should exist (may be null)
+        assert "expires_at" in data
+        assert "auto_expire" in data
+
+    async def test_filter_proposals_by_expired_status(self, client: AsyncClient):
+        """Can filter proposals by expired status."""
+        resp = await client.get("/api/v1/proposals?status=expired")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "results" in data
+        # All returned proposals should have expired status
+        for proposal in data["results"]:
+            assert proposal["status"] == "expired"
+
+    async def test_cannot_acknowledge_expired_proposal(self, client: AsyncClient):
+        """Cannot acknowledge an expired proposal."""
+        producer_resp = await client.post("/api/v1/teams", json={"name": "ack-expired-prod"})
+        consumer_resp = await client.post("/api/v1/teams", json={"name": "ack-expired-cons"})
+        producer_id = producer_resp.json()["id"]
+        consumer_id = consumer_resp.json()["id"]
+
+        asset_resp = await client.post(
+            "/api/v1/assets", json={"fqn": "ack.expired.table", "owner_team_id": producer_id}
+        )
+        asset_id = asset_resp.json()["id"]
+
+        # Create initial contract
+        contract_resp = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            json={
+                "version": "1.0.0",
+                "schema": {
+                    "type": "object",
+                    "properties": {"id": {"type": "integer"}, "name": {"type": "string"}},
+                },
+                "compatibility_mode": "backward",
+            },
+        )
+        contract_id = contract_resp.json()["contract"]["id"]
+
+        # Register consumer
+        await client.post(
+            f"/api/v1/registrations?contract_id={contract_id}",
+            json={"consumer_team_id": consumer_id},
+        )
+
+        # Create breaking change
+        proposal_resp = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            json={
+                "version": "2.0.0",
+                "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
+                "compatibility_mode": "backward",
+            },
+        )
+        proposal_id = proposal_resp.json()["proposal"]["id"]
+
+        # Expire the proposal
+        await client.post(f"/api/v1/proposals/{proposal_id}/expire")
+
+        # Try to acknowledge
+        resp = await client.post(
+            f"/api/v1/proposals/{proposal_id}/acknowledge",
+            json={"consumer_team_id": consumer_id, "response": "approved"},
+        )
+        assert resp.status_code == 400
+
+    async def test_cannot_publish_from_expired_proposal(self, client: AsyncClient):
+        """Cannot publish from an expired proposal."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "pub-expired-team"})
+        team_id = team_resp.json()["id"]
+
+        asset_resp = await client.post(
+            "/api/v1/assets", json={"fqn": "pub.expired.table", "owner_team_id": team_id}
+        )
+        asset_id = asset_resp.json()["id"]
+
+        # Create initial contract
+        await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            json={
+                "version": "1.0.0",
+                "schema": {
+                    "type": "object",
+                    "properties": {"id": {"type": "integer"}, "name": {"type": "string"}},
+                },
+                "compatibility_mode": "backward",
+            },
+        )
+
+        # Create breaking change
+        proposal_resp = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            json={
+                "version": "2.0.0",
+                "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
+                "compatibility_mode": "backward",
+            },
+        )
+        proposal_id = proposal_resp.json()["proposal"]["id"]
+
+        # Expire the proposal
+        await client.post(f"/api/v1/proposals/{proposal_id}/expire")
+
+        # Try to publish
+        resp = await client.post(
+            f"/api/v1/proposals/{proposal_id}/publish",
+            json={"version": "2.0.0", "published_by": team_id},
+        )
+        assert resp.status_code == 400

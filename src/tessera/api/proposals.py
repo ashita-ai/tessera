@@ -841,3 +841,86 @@ async def publish_from_proposal(
         )
 
     return response
+
+
+@router.post("/{proposal_id}/expire", response_model=Proposal)
+@limit_write
+async def expire_proposal(
+    request: Request,
+    auth: Auth,
+    proposal_id: UUID,
+    _: None = RequireWrite,
+    session: AsyncSession = Depends(get_session),
+) -> ProposalDB:
+    """Manually expire a pending proposal.
+
+    Requires write scope. Only pending proposals can be expired.
+    """
+    from tessera.services.expiration import expire_proposal as do_expire
+
+    result = await session.execute(
+        select(ProposalDB, AssetDB)
+        .join(AssetDB, ProposalDB.asset_id == AssetDB.id)
+        .where(ProposalDB.id == proposal_id)
+    )
+    row = result.one_or_none()
+    if not row:
+        raise NotFoundError(ErrorCode.PROPOSAL_NOT_FOUND, "Proposal not found")
+    proposal: ProposalDB = row[0]
+    asset: AssetDB = row[1]
+
+    # Resource-level auth: must own the proposer team or the asset team or be admin
+    if (
+        proposal.proposed_by != auth.team_id
+        and asset.owner_team_id != auth.team_id
+        and not auth.has_scope(APIKeyScope.ADMIN)
+    ):
+        raise ForbiddenError(
+            "You can only expire proposals you created or for assets you own",
+            code=ErrorCode.FORBIDDEN,
+            extra={"code": "INSUFFICIENT_PERMISSIONS"},
+        )
+
+    if proposal.status != ProposalStatus.PENDING:
+        raise BadRequestError(
+            f"Cannot expire proposal with status '{proposal.status}'. "
+            "Only pending proposals can be expired.",
+            code=ErrorCode.PROPOSAL_NOT_PENDING,
+        )
+
+    expired = await do_expire(proposal_id, session)
+    if not expired:
+        raise BadRequestError("Failed to expire proposal", code=ErrorCode.PROPOSAL_NOT_PENDING)
+
+    return expired
+
+
+@router.post("/expire-pending")
+@limit_write
+async def expire_pending_proposals(
+    request: Request,
+    auth: Auth,
+    _: None = RequireWrite,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Expire all pending proposals that have passed their expiration date.
+
+    This endpoint can be called periodically (e.g., via cron) to clean up stale proposals.
+    Requires write scope.
+    """
+    from tessera.services.expiration import expire_pending_proposals as do_expire_all
+
+    # Only allow admin to run bulk expiration
+    if not auth.has_scope(APIKeyScope.ADMIN):
+        raise ForbiddenError(
+            "Only admin can run bulk proposal expiration",
+            code=ErrorCode.FORBIDDEN,
+            extra={"code": "INSUFFICIENT_PERMISSIONS"},
+        )
+
+    expired_ids = await do_expire_all(session)
+
+    return {
+        "expired_count": len(expired_ids),
+        "expired_proposal_ids": [str(pid) for pid in expired_ids],
+    }

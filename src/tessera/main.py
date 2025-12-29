@@ -24,6 +24,7 @@ from tessera.api import (
     assets,
     audit,
     audits,
+    bulk,
     contracts,
     dependencies,
     impact,
@@ -204,6 +205,7 @@ api_v1.include_router(api_keys.router, prefix="/api-keys", tags=["api-keys"])
 api_v1.include_router(search.router)
 api_v1.include_router(webhooks.router)
 api_v1.include_router(audit.router)
+api_v1.include_router(bulk.router, prefix="/bulk", tags=["bulk"])
 
 app.include_router(api_v1)
 

@@ -86,6 +86,10 @@ class Settings(BaseSettings):  # type: ignore[misc]
     impact_depth_default: int = 5
     impact_depth_max: int = 10
 
+    # Proposal Expiration
+    proposal_default_expiration_days: int = 30
+    proposal_auto_expire_enabled: bool = True
+
     # Pagination Defaults
     pagination_limit_default: int = 50
     pagination_limit_max: int = 100
