@@ -90,10 +90,14 @@ async def validate_webhook_url(url: str) -> tuple[bool, str]:
         try:
             loop = asyncio.get_running_loop()
             # Use getaddrinfo which returns all addresses (IPv4 and IPv6)
-            addrinfo = await loop.getaddrinfo(
-                parsed.hostname,
-                parsed.port or (443 if parsed.scheme == "https" else 80),
-                family=socket.AF_UNSPEC,
+            # Wrap in wait_for to prevent slow DNS from stalling webhook delivery
+            addrinfo = await asyncio.wait_for(
+                loop.getaddrinfo(
+                    parsed.hostname,
+                    parsed.port or (443 if parsed.scheme == "https" else 80),
+                    family=socket.AF_UNSPEC,
+                ),
+                timeout=5.0,  # 5 second DNS timeout
             )
 
             for family, _, _, _, sockaddr in addrinfo:
@@ -110,6 +114,10 @@ async def validate_webhook_url(url: str) -> tuple[bool, str]:
                 except ValueError:
                     # Skip if not a valid IP (shouldn't happen)
                     continue
+        except TimeoutError:
+            # DNS resolution timed out
+            logger.warning("DNS resolution timed out for webhook hostname: %s", parsed.hostname)
+            return False, "DNS resolution timed out"
         except socket.gaierror:
             # DNS resolution failed - allow the request but log it
             # The actual delivery will fail with a clearer error

@@ -1,6 +1,6 @@
 """Application configuration."""
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Default session secret - MUST be overridden in production
@@ -108,6 +108,16 @@ class Settings(BaseSettings):  # type: ignore[misc]
     db_max_overflow: int = 10  # Additional connections under load
     db_pool_timeout: int = 30  # Seconds to wait for connection
     db_pool_recycle: int = 3600  # Recycle connections after 1 hour
+
+    @model_validator(mode="after")
+    def validate_production_secrets(self) -> "Settings":
+        """Fail fast if production uses default session secret."""
+        if self.environment == "production" and self.session_secret_key == DEFAULT_SESSION_SECRET:
+            raise ValueError(
+                "SESSION_SECRET_KEY must be set to a unique value in production. "
+                'Generate one with: python -c "import secrets; print(secrets.token_hex(32))"'
+            )
+        return self
 
 
 settings = Settings()

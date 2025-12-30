@@ -259,7 +259,9 @@ async def invalidate_asset(asset_id: str) -> bool:
     # Invalidate individual contract caches
     contracts_deleted = await invalidate_asset_contracts(asset_id)
     # Invalidate all search caches (search results may include this asset)
+    # Asset-specific searches are in asset_cache, global searches are in search_cache
     await asset_cache.invalidate_pattern("search:*")
+    await search_cache.invalidate_pattern("global:*")
     return asset_deleted or contracts_list_deleted or contracts_deleted > 0
 
 
