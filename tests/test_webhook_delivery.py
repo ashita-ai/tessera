@@ -212,7 +212,7 @@ class TestWebhookDelivery:
 class TestFireAndForget:
     """Tests for _fire_and_forget function."""
 
-    def test_fire_and_forget_no_loop(self):
+    async def test_fire_and_forget_no_loop(self):
         """Does not raise when no event loop is running."""
         # This should not raise
         event = WebhookEvent(
@@ -233,7 +233,7 @@ class TestFireAndForget:
     async def test_fire_and_forget_with_loop(self):
         """Schedules delivery task when loop is running."""
         with (
-            patch("tessera.services.webhooks._deliver_with_tracking"),
+            patch("tessera.services.webhooks._deliver_with_tracking", new_callable=MagicMock),
             patch("tessera.services.webhooks.asyncio.get_running_loop") as mock_loop,
         ):
             mock_task = MagicMock()
@@ -260,13 +260,13 @@ class TestFireAndForget:
 class TestSignPayload:
     """Tests for _sign_payload function."""
 
-    def test_sign_returns_hex(self):
+    async def test_sign_returns_hex(self):
         """Signature is a hex string."""
         sig = _sign_payload('{"test": true}', "secret")
         assert len(sig) == 64
         assert all(c in "0123456789abcdef" for c in sig)
 
-    def test_sign_consistent(self):
+    async def test_sign_consistent(self):
         """Same input produces same signature."""
         payload = '{"data": "test"}'
         secret = "my-secret"
@@ -274,14 +274,14 @@ class TestSignPayload:
         sig2 = _sign_payload(payload, secret)
         assert sig1 == sig2
 
-    def test_sign_different_secrets(self):
+    async def test_sign_different_secrets(self):
         """Different secrets produce different signatures."""
         payload = '{"data": "test"}'
         sig1 = _sign_payload(payload, "secret1")
         sig2 = _sign_payload(payload, "secret2")
         assert sig1 != sig2
 
-    def test_sign_different_payloads(self):
+    async def test_sign_different_payloads(self):
         """Different payloads produce different signatures."""
         secret = "my-secret"
         sig1 = _sign_payload('{"a": 1}', secret)
@@ -296,7 +296,9 @@ class TestSendWebhookFunctions:
         """send_proposal_created creates event and fires."""
         from tessera.services.webhooks import send_proposal_created
 
-        with patch("tessera.services.webhooks._fire_and_forget") as mock_fire:
+        with patch(
+            "tessera.services.webhooks._fire_and_forget", new_callable=MagicMock
+        ) as mock_fire:
             await send_proposal_created(
                 proposal_id=uuid4(),
                 asset_id=uuid4(),
@@ -322,7 +324,9 @@ class TestSendWebhookFunctions:
         """send_proposal_acknowledged creates event and fires."""
         from tessera.services.webhooks import send_proposal_acknowledged
 
-        with patch("tessera.services.webhooks._fire_and_forget") as mock_fire:
+        with patch(
+            "tessera.services.webhooks._fire_and_forget", new_callable=MagicMock
+        ) as mock_fire:
             await send_proposal_acknowledged(
                 proposal_id=uuid4(),
                 asset_id=uuid4(),
@@ -345,7 +349,9 @@ class TestSendWebhookFunctions:
         """send_proposal_status_change creates event and fires."""
         from tessera.services.webhooks import send_proposal_status_change
 
-        with patch("tessera.services.webhooks._fire_and_forget") as mock_fire:
+        with patch(
+            "tessera.services.webhooks._fire_and_forget", new_callable=MagicMock
+        ) as mock_fire:
             await send_proposal_status_change(
                 event_type=WebhookEventType.PROPOSAL_APPROVED,
                 proposal_id=uuid4(),
@@ -364,7 +370,9 @@ class TestSendWebhookFunctions:
         """send_contract_published creates event and fires."""
         from tessera.services.webhooks import send_contract_published
 
-        with patch("tessera.services.webhooks._fire_and_forget") as mock_fire:
+        with patch(
+            "tessera.services.webhooks._fire_and_forget", new_callable=MagicMock
+        ) as mock_fire:
             await send_contract_published(
                 contract_id=uuid4(),
                 asset_id=uuid4(),

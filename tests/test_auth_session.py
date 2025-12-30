@@ -22,7 +22,7 @@ pytestmark = pytest.mark.asyncio
 class TestAuthContext:
     """Tests for AuthContext class."""
 
-    def test_team_id_property(self):
+    async def test_team_id_property(self):
         """team_id property returns team's id."""
         team = TeamDB(id=uuid4(), name="test-team")
         api_key = APIKeyDB(
@@ -36,7 +36,7 @@ class TestAuthContext:
 
         assert ctx.team_id == team.id
 
-    def test_has_scope_direct_match(self):
+    async def test_has_scope_direct_match(self):
         """has_scope returns True for matching scope."""
         team = TeamDB(id=uuid4(), name="test-team")
         api_key = APIKeyDB(
@@ -52,7 +52,7 @@ class TestAuthContext:
         assert ctx.has_scope(APIKeyScope.WRITE) is True
         assert ctx.has_scope(APIKeyScope.ADMIN) is False
 
-    def test_has_scope_admin_has_all(self):
+    async def test_has_scope_admin_has_all(self):
         """Admin scope grants access to all scopes."""
         team = TeamDB(id=uuid4(), name="test-team")
         api_key = APIKeyDB(
@@ -68,7 +68,7 @@ class TestAuthContext:
         assert ctx.has_scope(APIKeyScope.WRITE) is True
         assert ctx.has_scope(APIKeyScope.ADMIN) is True
 
-    def test_require_scope_success(self):
+    async def test_require_scope_success(self):
         """require_scope passes for matching scope."""
         team = TeamDB(id=uuid4(), name="test-team")
         api_key = APIKeyDB(
@@ -83,7 +83,7 @@ class TestAuthContext:
         # Should not raise
         ctx.require_scope(APIKeyScope.READ)
 
-    def test_require_scope_failure(self):
+    async def test_require_scope_failure(self):
         """require_scope raises ForbiddenError for missing scope."""
         from tessera.api.errors import ForbiddenError
 
