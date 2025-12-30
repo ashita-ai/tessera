@@ -27,8 +27,8 @@ def generate_api_key(environment: str = "live") -> tuple[str, str, str]:
     random_part = secrets.token_hex(32)
     full_key = f"tess_{environment}_{random_part}"
     key_hash = _hasher.hash(full_key)
-    # Use 8 chars prefix to reduce collision candidates for argon2 verification
-    key_prefix = f"tess_{environment}_{random_part[:8]}"
+    # Use 12 chars prefix to reduce collision candidates for argon2 verification
+    key_prefix = f"tess_{environment}_{random_part[:12]}"
     return full_key, key_hash, key_prefix
 
 
@@ -114,18 +114,19 @@ async def validate_api_key(
     now = datetime.now(UTC)
 
     # Extract prefix from the key (e.g., "tess_live_abcd1234" from "tess_live_abcd1234...")
-    # Format: tess_{env}_{first 8 chars of random}
+    # Format: tess_{env}_{first N chars of random}
     parts = key.split("_")
     if len(parts) < 3:
         return None
-    key_prefix = f"{parts[0]}_{parts[1]}_{parts[2][:8]}"
+    prefix_lengths = (12, 8, 4)
+    prefix_candidates = [f"{parts[0]}_{parts[1]}_{parts[2][:length]}" for length in prefix_lengths]
 
     # Fetch candidate keys by prefix
     result = await session.execute(
         select(APIKeyDB, TeamDB)
         .join(TeamDB, APIKeyDB.team_id == TeamDB.id)
         .where(
-            APIKeyDB.key_prefix == key_prefix,
+            APIKeyDB.key_prefix.in_(prefix_candidates),
             APIKeyDB.revoked_at.is_(None),
             or_(
                 APIKeyDB.expires_at.is_(None),
