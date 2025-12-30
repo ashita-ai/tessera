@@ -294,7 +294,7 @@ class APIKeyDB(Base):
         String(128), nullable=False, unique=True
     )  # argon2 hashes are ~100 chars
     key_prefix: Mapped[str] = mapped_column(
-        String(20), nullable=False, index=True
+        String(32), nullable=False, index=True
     )  # indexed for prefix-based lookup
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     team_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("teams.id"), nullable=False, index=True)
