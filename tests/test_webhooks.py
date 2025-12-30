@@ -23,7 +23,7 @@ pytestmark = pytest.mark.asyncio
 class TestWebhookModels:
     """Tests for webhook models."""
 
-    def test_webhook_event_serialization(self):
+    async def test_webhook_event_serialization(self):
         """Test that webhook events serialize correctly."""
         proposal_id = uuid4()
         asset_id = uuid4()
@@ -62,7 +62,7 @@ class TestWebhookModels:
         assert "analytics.users" in json_str
         assert "dropped_column" in json_str
 
-    def test_contract_published_payload(self):
+    async def test_contract_published_payload(self):
         """Test contract published payload."""
         contract_id = uuid4()
         asset_id = uuid4()
@@ -86,7 +86,7 @@ class TestWebhookModels:
 class TestWebhookSigning:
     """Tests for webhook HMAC signing."""
 
-    def test_sign_payload(self):
+    async def test_sign_payload(self):
         """Test that payloads are signed correctly."""
         payload = '{"event": "test"}'
         secret = "test-secret"
@@ -97,7 +97,7 @@ class TestWebhookSigning:
         assert len(signature) == 64  # SHA-256 produces 64 hex chars
         assert all(c in "0123456789abcdef" for c in signature)
 
-    def test_sign_payload_consistency(self):
+    async def test_sign_payload_consistency(self):
         """Test that same payload+secret produces same signature."""
         payload = '{"data": "consistent"}'
         secret = "my-secret-key"
@@ -107,7 +107,7 @@ class TestWebhookSigning:
 
         assert sig1 == sig2
 
-    def test_sign_payload_different_secrets(self):
+    async def test_sign_payload_different_secrets(self):
         """Test that different secrets produce different signatures."""
         payload = '{"data": "test"}'
 
@@ -120,7 +120,7 @@ class TestWebhookSigning:
 class TestWebhookEventTypes:
     """Tests for webhook event types."""
 
-    def test_all_event_types_have_values(self):
+    async def test_all_event_types_have_values(self):
         """Test that all event types have string values."""
         expected_events = [
             "proposal.created",
@@ -139,7 +139,7 @@ class TestWebhookEventTypes:
 class TestAdditionalWebhookPayloads:
     """Tests for additional webhook payload types."""
 
-    def test_acknowledgment_payload(self):
+    async def test_acknowledgment_payload(self):
         """Test acknowledgment payload serialization."""
         proposal_id = uuid4()
         asset_id = uuid4()
@@ -163,7 +163,7 @@ class TestAdditionalWebhookPayloads:
         assert payload.acknowledged_count == 3
         assert payload.notes == "Will migrate by next sprint"
 
-    def test_acknowledgment_payload_optional_fields(self):
+    async def test_acknowledgment_payload_optional_fields(self):
         """Test acknowledgment payload with optional fields as None."""
         payload = AcknowledgmentPayload(
             proposal_id=uuid4(),
@@ -181,7 +181,7 @@ class TestAdditionalWebhookPayloads:
         assert payload.migration_deadline is None
         assert payload.notes is None
 
-    def test_proposal_status_payload(self):
+    async def test_proposal_status_payload(self):
         """Test proposal status payload."""
         proposal_id = uuid4()
         asset_id = uuid4()
@@ -199,7 +199,7 @@ class TestAdditionalWebhookPayloads:
         assert payload.status == "approved"
         assert payload.actor_team_id == actor_team_id
 
-    def test_proposal_status_payload_no_actor(self):
+    async def test_proposal_status_payload_no_actor(self):
         """Test proposal status payload without actor."""
         payload = ProposalStatusPayload(
             proposal_id=uuid4(),
@@ -213,7 +213,7 @@ class TestAdditionalWebhookPayloads:
         assert payload.actor_team_id is None
         assert payload.actor_team_name is None
 
-    def test_breaking_change_with_details(self):
+    async def test_breaking_change_with_details(self):
         """Test breaking change with extra details."""
         change = BreakingChange(
             change_type="type_narrowed",
@@ -225,7 +225,7 @@ class TestAdditionalWebhookPayloads:
         assert change.change_type == "type_narrowed"
         assert change.details["old_type"] == "number"
 
-    def test_impacted_consumer_without_pin(self):
+    async def test_impacted_consumer_without_pin(self):
         """Test impacted consumer without pinned version."""
         consumer = ImpactedConsumer(
             team_id=uuid4(),
@@ -239,7 +239,7 @@ class TestAdditionalWebhookPayloads:
 class TestWebhookEventCreation:
     """Tests for creating webhook events."""
 
-    def test_create_proposal_acknowledged_event(self):
+    async def test_create_proposal_acknowledged_event(self):
         """Create a proposal acknowledged event."""
         event = WebhookEvent(
             event=WebhookEventType.PROPOSAL_ACKNOWLEDGED,
@@ -261,7 +261,7 @@ class TestWebhookEventCreation:
         json_str = event.model_dump_json()
         assert "proposal.acknowledged" in json_str
 
-    def test_create_proposal_approved_event(self):
+    async def test_create_proposal_approved_event(self):
         """Create a proposal approved event."""
         event = WebhookEvent(
             event=WebhookEventType.PROPOSAL_APPROVED,
@@ -279,7 +279,7 @@ class TestWebhookEventCreation:
         json_str = event.model_dump_json()
         assert "proposal.approved" in json_str
 
-    def test_create_proposal_rejected_event(self):
+    async def test_create_proposal_rejected_event(self):
         """Create a proposal rejected event."""
         event = WebhookEvent(
             event=WebhookEventType.PROPOSAL_REJECTED,
@@ -297,7 +297,7 @@ class TestWebhookEventCreation:
         json_str = event.model_dump_json()
         assert "proposal.rejected" in json_str
 
-    def test_create_contract_published_event(self):
+    async def test_create_contract_published_event(self):
         """Create a contract published event."""
         event = WebhookEvent(
             event=WebhookEventType.CONTRACT_PUBLISHED,
@@ -457,7 +457,7 @@ class TestWebhookURLValidation:
 class TestRateLimitKey:
     """Tests for rate limiting key generation."""
 
-    def test_rate_limit_key_unique_per_api_key(self):
+    async def test_rate_limit_key_unique_per_api_key(self):
         """Different API keys get different rate limit buckets."""
         from unittest.mock import MagicMock
 
@@ -476,7 +476,7 @@ class TestRateLimitKey:
         assert key1.startswith("key:")
         assert key2.startswith("key:")
 
-    def test_rate_limit_key_same_key_same_bucket(self):
+    async def test_rate_limit_key_same_key_same_bucket(self):
         """Same API key always gets the same bucket."""
         from unittest.mock import MagicMock
 
@@ -495,7 +495,7 @@ class TestRateLimitKey:
 
         assert key1 == key2
 
-    def test_rate_limit_key_uses_hash_not_prefix(self):
+    async def test_rate_limit_key_uses_hash_not_prefix(self):
         """Keys with same prefix get different buckets (fixed collision bug)."""
         from unittest.mock import MagicMock
 
@@ -518,7 +518,7 @@ class TestRateLimitKey:
 class TestSemverParsing:
     """Tests for defensive semver parsing."""
 
-    def test_parse_valid_semver(self):
+    async def test_parse_valid_semver(self):
         """Valid semver strings parse correctly."""
         from tessera.api.assets import parse_semver
 
@@ -526,34 +526,34 @@ class TestSemverParsing:
         assert parse_semver("2.3.4") == (2, 3, 4)
         assert parse_semver("10.20.30") == (10, 20, 30)
 
-    def test_parse_semver_with_prerelease(self):
+    async def test_parse_semver_with_prerelease(self):
         """Semver with prerelease suffix strips suffix."""
         from tessera.api.assets import parse_semver
 
         assert parse_semver("1.0.0-alpha") == (1, 0, 0)
         assert parse_semver("2.0.0-beta.1") == (2, 0, 0)
 
-    def test_parse_semver_with_build(self):
+    async def test_parse_semver_with_build(self):
         """Semver with build metadata strips metadata."""
         from tessera.api.assets import parse_semver
 
         assert parse_semver("1.0.0+build123") == (1, 0, 0)
 
-    def test_parse_invalid_semver_two_parts(self):
+    async def test_parse_invalid_semver_two_parts(self):
         """Invalid semver with only 2 parts raises ValueError."""
         from tessera.api.assets import parse_semver
 
         with pytest.raises(ValueError, match="expected 3 parts"):
             parse_semver("1.0")
 
-    def test_parse_invalid_semver_non_numeric(self):
+    async def test_parse_invalid_semver_non_numeric(self):
         """Invalid semver with non-numeric parts raises ValueError."""
         from tessera.api.assets import parse_semver
 
         with pytest.raises(ValueError, match="Cannot parse"):
             parse_semver("1.x.0")
 
-    def test_parse_invalid_semver_empty(self):
+    async def test_parse_invalid_semver_empty(self):
         """Empty string raises ValueError."""
         from tessera.api.assets import parse_semver
 

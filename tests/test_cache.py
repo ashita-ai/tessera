@@ -30,48 +30,48 @@ pytestmark = pytest.mark.asyncio
 class TestCacheKeyHelpers:
     """Tests for cache key helper functions."""
 
-    def test_make_key_simple(self):
+    async def test_make_key_simple(self):
         """Make key combines prefix and parts."""
         key = _make_key("contracts", "abc123")
         assert key == "tessera:contracts:abc123"
 
-    def test_make_key_multiple_parts(self):
+    async def test_make_key_multiple_parts(self):
         """Make key joins multiple parts with colons."""
         key = _make_key("assets", "team1", "asset1")
         assert key == "tessera:assets:team1:asset1"
 
-    def test_hash_dict_consistent(self):
+    async def test_hash_dict_consistent(self):
         """Same dict produces same hash."""
         data = {"a": 1, "b": "two"}
         hash1 = _hash_dict(data)
         hash2 = _hash_dict(data)
         assert hash1 == hash2
 
-    def test_hash_dict_order_independent(self):
+    async def test_hash_dict_order_independent(self):
         """Dict key order doesn't affect hash."""
         data1 = {"a": 1, "b": 2}
         data2 = {"b": 2, "a": 1}
         assert _hash_dict(data1) == _hash_dict(data2)
 
-    def test_hash_dict_different_data(self):
+    async def test_hash_dict_different_data(self):
         """Different dicts produce different hashes."""
         hash1 = _hash_dict({"x": 1})
         hash2 = _hash_dict({"x": 2})
         assert hash1 != hash2
 
-    def test_hash_dict_type_aware_int_vs_string(self):
+    async def test_hash_dict_type_aware_int_vs_string(self):
         """Int and string with same value produce different hashes."""
         hash_int = _hash_dict({"id": 123})
         hash_str = _hash_dict({"id": "123"})
         assert hash_int != hash_str
 
-    def test_hash_dict_type_aware_nested(self):
+    async def test_hash_dict_type_aware_nested(self):
         """Nested structures with type differences produce different hashes."""
         hash1 = _hash_dict({"data": {"value": 42}})
         hash2 = _hash_dict({"data": {"value": "42"}})
         assert hash1 != hash2
 
-    def test_hash_dict_truncated(self):
+    async def test_hash_dict_truncated(self):
         """Hash is truncated to 16 characters."""
         result = _hash_dict({"data": "value"})
         assert len(result) == 16

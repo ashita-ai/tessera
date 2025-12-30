@@ -48,15 +48,9 @@ def _get_webhook_semaphore() -> asyncio.Semaphore:
     return _webhook_semaphore
 
 
-# Blocked IP ranges for SSRF protection
-BLOCKED_IP_RANGES = [
-    ipaddress.ip_network("10.0.0.0/8"),  # Private
-    ipaddress.ip_network("172.16.0.0/12"),  # Private
-    ipaddress.ip_network("192.168.0.0/16"),  # Private
-    ipaddress.ip_network("127.0.0.0/8"),  # Loopback
-    ipaddress.ip_network("169.254.0.0/16"),  # Link-local / cloud metadata
-    ipaddress.ip_network("0.0.0.0/8"),  # Current network
-]
+def _is_blocked_ip(ip_obj: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """Return True if the IP should be blocked for SSRF protection."""
+    return not ip_obj.is_global
 
 
 async def validate_webhook_url(url: str) -> tuple[bool, str]:
@@ -96,14 +90,13 @@ async def validate_webhook_url(url: str) -> tuple[bool, str]:
                 ip_str = sockaddr[0]
                 try:
                     ip_obj = ipaddress.ip_address(ip_str)
-                    for blocked_range in BLOCKED_IP_RANGES:
-                        if ip_obj in blocked_range:
-                            logger.warning(
-                                "Webhook URL %s resolves to blocked IP range %s",
-                                url,
-                                blocked_range,
-                            )
-                            return False, "Webhook URL resolves to blocked IP range"
+                    if _is_blocked_ip(ip_obj):
+                        logger.warning(
+                            "Webhook URL %s resolves to non-global IP %s",
+                            url,
+                            ip_obj,
+                        )
+                        return False, "Webhook URL resolves to blocked IP range"
                 except ValueError:
                     # Skip if not a valid IP (shouldn't happen)
                     continue
