@@ -48,6 +48,14 @@ uv run uvicorn tessera.main:app --reload
 - **Multi-source imports** - dbt manifests, OpenAPI specs, GraphQL schemas, Avro registries
 - **Web UI** - Visual interface for managing contracts
 
+## Configuration
+
+Webhook settings (optional):
+
+- `WEBHOOK_URL` - Destination for webhook events
+- `WEBHOOK_SECRET` - HMAC secret for webhook signatures
+- `WEBHOOK_ALLOWED_DOMAINS` - Comma-separated domain allowlist (e.g. `example.com,webhooks.mycorp.com`)
+
 ## How It Works
 
 1. **Producers** publish contracts (schema + guarantees) for their data assets

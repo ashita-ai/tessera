@@ -181,6 +181,7 @@ contract_cache = CacheService(prefix="contracts", ttl=settings.cache_ttl_contrac
 asset_cache = CacheService(prefix="assets", ttl=settings.cache_ttl_asset)
 team_cache = CacheService(prefix="teams", ttl=settings.cache_ttl_team)
 schema_cache = CacheService(prefix="schemas", ttl=settings.cache_ttl_schema)
+search_cache = CacheService(prefix="search", ttl=settings.cache_ttl)
 
 
 async def cache_contract(contract_id: str, contract_data: dict[str, Any]) -> bool:
@@ -275,6 +276,21 @@ async def get_cached_asset_search(query: str, filters: dict[str, Any]) -> dict[s
     filter_str = ":".join(f"{k}={v}" for k, v in sorted(filters.items()))
     cache_key = f"search:{_hash_dict({'q': query, 'filters': filter_str})}"
     result = await asset_cache.get(cache_key)
+    if isinstance(result, dict):
+        return result
+    return None
+
+
+async def cache_global_search(query: str, limit: int, results: dict[str, Any]) -> bool:
+    """Cache global search results."""
+    cache_key = f"global:{_hash_dict({'q': query, 'limit': limit})}"
+    return await search_cache.set(cache_key, results)
+
+
+async def get_cached_global_search(query: str, limit: int) -> dict[str, Any] | None:
+    """Get cached global search results."""
+    cache_key = f"global:{_hash_dict({'q': query, 'limit': limit})}"
+    result = await search_cache.get(cache_key)
     if isinstance(result, dict):
         return result
     return None
