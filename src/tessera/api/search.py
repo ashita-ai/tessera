@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tessera.api.auth import Auth, RequireRead
 from tessera.db import get_session
 from tessera.db.models import AssetDB, ContractDB, TeamDB, UserDB
 
@@ -14,8 +15,10 @@ router = APIRouter(prefix="/search", tags=["search"])
 
 @router.get("")
 async def search(
+    auth: Auth,
     q: str = Query(..., min_length=1, description="Search query"),
     limit: int = Query(10, ge=1, le=50, description="Max results per entity type"),
+    _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """Search across teams, users, assets, and contracts.
@@ -73,7 +76,7 @@ async def search(
                 {
                     "id": str(u.id),
                     "name": u.name,
-                    "email": u.email,
+                    "team_id": str(u.team_id) if u.team_id else None,
                     "type": "user",
                 }
                 for u in users

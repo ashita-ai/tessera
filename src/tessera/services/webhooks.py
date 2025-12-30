@@ -59,8 +59,10 @@ BLOCKED_IP_RANGES = [
 ]
 
 
-def validate_webhook_url(url: str) -> tuple[bool, str]:
+async def validate_webhook_url(url: str) -> tuple[bool, str]:
     """Validate a webhook URL for SSRF protection.
+
+    Uses async DNS resolution to avoid blocking the event loop.
 
     Returns:
         Tuple of (is_valid, error_message). If valid, error_message is empty.
@@ -80,19 +82,31 @@ def validate_webhook_url(url: str) -> tuple[bool, str]:
         if not parsed.hostname:
             return False, "Webhook URL must have a hostname"
 
-        # Resolve hostname and check for blocked IPs
+        # Resolve hostname and check for blocked IPs (async to not block event loop)
         try:
-            resolved_ip = socket.gethostbyname(parsed.hostname)
-            ip_obj = ipaddress.ip_address(resolved_ip)
+            loop = asyncio.get_running_loop()
+            # Use getaddrinfo which returns all addresses (IPv4 and IPv6)
+            addrinfo = await loop.getaddrinfo(
+                parsed.hostname,
+                parsed.port or (443 if parsed.scheme == "https" else 80),
+                family=socket.AF_UNSPEC,
+            )
 
-            for blocked_range in BLOCKED_IP_RANGES:
-                if ip_obj in blocked_range:
-                    logger.warning(
-                        "Webhook URL %s resolves to blocked IP range %s",
-                        url,
-                        blocked_range,
-                    )
-                    return False, "Webhook URL resolves to blocked IP range"
+            for family, _, _, _, sockaddr in addrinfo:
+                ip_str = sockaddr[0]
+                try:
+                    ip_obj = ipaddress.ip_address(ip_str)
+                    for blocked_range in BLOCKED_IP_RANGES:
+                        if ip_obj in blocked_range:
+                            logger.warning(
+                                "Webhook URL %s resolves to blocked IP range %s",
+                                url,
+                                blocked_range,
+                            )
+                            return False, "Webhook URL resolves to blocked IP range"
+                except ValueError:
+                    # Skip if not a valid IP (shouldn't happen)
+                    continue
         except socket.gaierror:
             # DNS resolution failed - allow the request but log it
             # The actual delivery will fail with a clearer error
@@ -125,7 +139,7 @@ async def _deliver_webhook(event: WebhookEvent, delivery_id: UUID | None = None)
         return True
 
     # SSRF protection: validate the webhook URL
-    is_valid, error_msg = validate_webhook_url(settings.webhook_url)
+    is_valid, error_msg = await validate_webhook_url(settings.webhook_url)
     if not is_valid:
         logger.error("Webhook URL validation failed: %s", error_msg)
         if delivery_id:

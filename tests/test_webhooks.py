@@ -388,68 +388,68 @@ class TestWebhookServiceFunctions:
 class TestWebhookURLValidation:
     """Tests for webhook URL validation (SSRF protection)."""
 
-    def test_validate_valid_https_url(self):
+    async def test_validate_valid_https_url(self):
         """Valid HTTPS URL passes validation."""
         from tessera.services.webhooks import validate_webhook_url
 
         # External URLs should pass (DNS may fail, but URL is valid)
-        is_valid, error = validate_webhook_url("https://example.com/webhook")
+        is_valid, error = await validate_webhook_url("https://example.com/webhook")
         # URL structure is valid even if DNS fails
         assert is_valid or "resolve" in error.lower()
 
-    def test_validate_rejects_invalid_scheme(self):
+    async def test_validate_rejects_invalid_scheme(self):
         """URLs with invalid schemes are rejected."""
         from tessera.services.webhooks import validate_webhook_url
 
-        is_valid, error = validate_webhook_url("ftp://example.com/webhook")
+        is_valid, error = await validate_webhook_url("ftp://example.com/webhook")
         assert not is_valid
         assert "scheme" in error.lower()
 
-    def test_validate_rejects_no_hostname(self):
+    async def test_validate_rejects_no_hostname(self):
         """URLs without hostname are rejected."""
         from tessera.services.webhooks import validate_webhook_url
 
-        is_valid, error = validate_webhook_url("https:///path")
+        is_valid, error = await validate_webhook_url("https:///path")
         assert not is_valid
         assert "hostname" in error.lower()
 
-    def test_validate_blocks_localhost(self):
+    async def test_validate_blocks_localhost(self):
         """Localhost URLs are blocked (SSRF protection)."""
         from tessera.services.webhooks import validate_webhook_url
 
-        is_valid, error = validate_webhook_url("http://127.0.0.1:8080/webhook")
+        is_valid, error = await validate_webhook_url("http://127.0.0.1:8080/webhook")
         assert not is_valid
         assert "blocked" in error.lower()
 
-    def test_validate_blocks_private_ip_10(self):
+    async def test_validate_blocks_private_ip_10(self):
         """Private 10.x.x.x IPs are blocked."""
         from tessera.services.webhooks import validate_webhook_url
 
-        is_valid, error = validate_webhook_url("http://10.0.0.1/webhook")
+        is_valid, error = await validate_webhook_url("http://10.0.0.1/webhook")
         assert not is_valid
         assert "blocked" in error.lower()
 
-    def test_validate_blocks_private_ip_172(self):
+    async def test_validate_blocks_private_ip_172(self):
         """Private 172.16.x.x IPs are blocked."""
         from tessera.services.webhooks import validate_webhook_url
 
-        is_valid, error = validate_webhook_url("http://172.16.0.1/webhook")
+        is_valid, error = await validate_webhook_url("http://172.16.0.1/webhook")
         assert not is_valid
         assert "blocked" in error.lower()
 
-    def test_validate_blocks_private_ip_192(self):
+    async def test_validate_blocks_private_ip_192(self):
         """Private 192.168.x.x IPs are blocked."""
         from tessera.services.webhooks import validate_webhook_url
 
-        is_valid, error = validate_webhook_url("http://192.168.1.1/webhook")
+        is_valid, error = await validate_webhook_url("http://192.168.1.1/webhook")
         assert not is_valid
         assert "blocked" in error.lower()
 
-    def test_validate_blocks_metadata_ip(self):
+    async def test_validate_blocks_metadata_ip(self):
         """Cloud metadata IP (169.254.x.x) is blocked."""
         from tessera.services.webhooks import validate_webhook_url
 
-        is_valid, error = validate_webhook_url("http://169.254.169.254/latest/meta-data")
+        is_valid, error = await validate_webhook_url("http://169.254.169.254/latest/meta-data")
         assert not is_valid
         assert "blocked" in error.lower()
 

@@ -6,7 +6,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.api.auth import Auth, RequireAdmin, RequireRead
@@ -65,14 +65,14 @@ async def list_deliveries(
     if event_type:
         query = query.where(WebhookDeliveryDB.event_type == event_type)
 
-    # Get total count
-    count_query = select(WebhookDeliveryDB.id)
+    # Get total count using COUNT(*) for efficiency
+    count_query = select(func.count()).select_from(WebhookDeliveryDB)
     if status:
         count_query = count_query.where(WebhookDeliveryDB.status == status)
     if event_type:
         count_query = count_query.where(WebhookDeliveryDB.event_type == event_type)
     count_result = await session.execute(count_query)
-    total = len(count_result.all())
+    total = count_result.scalar() or 0
 
     # Get paginated results
     query = query.order_by(WebhookDeliveryDB.created_at.desc())
