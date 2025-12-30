@@ -8,11 +8,17 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from tessera.db.models import Base, TeamDB
+from tessera.db.models import APIKeyDB, Base, TeamDB
 from tessera.main import app
 from tessera.models.api_key import APIKeyCreate
 from tessera.models.enums import APIKeyScope
-from tessera.services.auth import create_api_key, generate_api_key, hash_api_key, verify_api_key
+from tessera.services.auth import (
+    create_api_key,
+    generate_api_key,
+    hash_api_key,
+    validate_api_key,
+    verify_api_key,
+)
 
 # Test with auth enabled
 TEST_DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
@@ -180,6 +186,27 @@ class TestAPIKeyService:
         assert api_key.team_id == team.id
         assert APIKeyScope.READ in api_key.scopes
         assert APIKeyScope.WRITE in api_key.scopes
+
+    async def test_validate_api_key_accepts_legacy_prefix(self, auth_session: AsyncSession):
+        """Validate API key works with legacy prefix lengths."""
+        team = TeamDB(name="legacy-team")
+        auth_session.add(team)
+        await auth_session.flush()
+
+        key = f"tess_live_{'a' * 64}"
+        legacy_prefix = "tess_live_" + ("a" * 8)
+        api_key_db = APIKeyDB(
+            key_hash=hash_api_key(key),
+            key_prefix=legacy_prefix,
+            name="Legacy Key",
+            team_id=team.id,
+            scopes=[APIKeyScope.READ.value],
+        )
+        auth_session.add(api_key_db)
+        await auth_session.flush()
+
+        validated = await validate_api_key(auth_session, key)
+        assert validated is not None
 
     async def test_create_api_key_team_not_found(self, auth_session: AsyncSession):
         """Test creating an API key for non-existent team."""
