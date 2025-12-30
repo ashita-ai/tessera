@@ -126,6 +126,27 @@ class TestSearchEndpoint:
         data = response.json()
         assert len(data["results"]["teams"]) <= 2
 
+    async def test_search_filters_entity_types(self, client: AsyncClient):
+        """Search can limit results to specific entity types."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "TypeFilterTeam"})
+        assert team_resp.status_code == 201
+        team_id = team_resp.json()["id"]
+
+        user_resp = await client.post(
+            "/api/v1/users", json={"name": "TypeFilterUser", "email": "typefilter@test.com"}
+        )
+        assert user_resp.status_code == 201
+
+        response = await client.get("/api/v1/search?q=TypeFilter&types=teams")
+        assert response.status_code == 200
+
+        data = response.json()
+        team_ids = [t["id"] for t in data["results"]["teams"]]
+        assert team_id in team_ids
+        assert data["results"]["users"] == []
+        assert data["results"]["assets"] == []
+        assert data["results"]["contracts"] == []
+
     async def test_search_limit_validation(self, client: AsyncClient):
         """Search validates limit parameter."""
         # Too high
@@ -134,6 +155,11 @@ class TestSearchEndpoint:
 
         # Too low
         response = await client.get("/api/v1/search?q=test&limit=0")
+        assert response.status_code == 422
+
+    async def test_search_type_validation(self, client: AsyncClient):
+        """Search validates entity types parameter."""
+        response = await client.get("/api/v1/search?q=test&types=widgets")
         assert response.status_code == 422
 
     async def test_search_partial_match(self, client: AsyncClient):

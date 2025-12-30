@@ -48,6 +48,14 @@ uv run uvicorn tessera.main:app --reload
 - **Multi-source imports** - dbt manifests, OpenAPI specs, GraphQL schemas, Avro registries
 - **Web UI** - Visual interface for managing contracts
 
+## Global Search
+
+Search across teams, users, assets, and contracts:
+
+```bash
+curl "http://localhost:8000/api/v1/search?q=payments&types=assets&types=contracts&limit=5"
+```
+
 ## Configuration
 
 Webhook settings (optional):
