@@ -189,3 +189,30 @@ class TestSearchEndpoint:
         data = response.json()
         asset_ids = [a["id"] for a in data["results"]["assets"]]
         assert asset_id not in asset_ids
+
+    async def test_search_uses_cache(self, client: AsyncClient, monkeypatch):
+        """Search returns cached results when available."""
+        from tessera.api import search as search_module
+
+        cached = {
+            "query": "cached",
+            "results": {"teams": [], "users": [], "assets": [], "contracts": []},
+            "counts": {"teams": 0, "users": 0, "assets": 0, "contracts": 0, "total": 0},
+        }
+
+        async def fake_get_cached_global_search(_q: str, _limit: int):
+            return cached
+
+        async def fake_cache_global_search(_q: str, _limit: int, _results: dict):
+            return True
+
+        monkeypatch.setattr(
+            search_module,
+            "get_cached_global_search",
+            fake_get_cached_global_search,
+        )
+        monkeypatch.setattr(search_module, "cache_global_search", fake_cache_global_search)
+
+        response = await client.get("/api/v1/search?q=cached")
+        assert response.status_code == 200
+        assert response.json() == cached
