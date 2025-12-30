@@ -119,6 +119,21 @@ def _sign_payload(payload: str, secret: str) -> str:
     ).hexdigest()
 
 
+def _build_webhook_headers(event: WebhookEvent, payload: str) -> dict[str, str]:
+    """Build webhook delivery headers, including signature if configured."""
+    headers: dict[str, str] = {
+        "Content-Type": "application/json",
+        "X-Tessera-Event": event.event.value,
+        "X-Tessera-Timestamp": event.timestamp.isoformat(),
+    }
+
+    if settings.webhook_secret:
+        signature = _sign_payload(payload, settings.webhook_secret)
+        headers["X-Tessera-Signature"] = f"sha256={signature}"
+
+    return headers
+
+
 async def _deliver_webhook(event: WebhookEvent, delivery_id: UUID | None = None) -> bool:
     """Deliver a webhook event to the configured URL.
 
@@ -145,15 +160,7 @@ async def _deliver_webhook(event: WebhookEvent, delivery_id: UUID | None = None)
         return False
 
     payload = event.model_dump_json()
-    headers: dict[str, str] = {
-        "Content-Type": "application/json",
-        "X-Tessera-Event": event.event.value,
-        "X-Tessera-Timestamp": event.timestamp.isoformat(),
-    }
-
-    if settings.webhook_secret:
-        signature = _sign_payload(payload, settings.webhook_secret)
-        headers["X-Tessera-Signature"] = f"sha256={signature}"
+    headers = _build_webhook_headers(event, payload)
 
     last_error: str | None = None
     last_status_code: int | None = None
