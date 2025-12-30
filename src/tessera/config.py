@@ -43,6 +43,15 @@ class Settings(BaseSettings):  # type: ignore[misc]
     # Webhooks
     webhook_url: str | None = None
     webhook_secret: str | None = None
+    webhook_allowed_domains: list[str] = []  # Comma-separated allowlist (optional)
+
+    @field_validator("webhook_allowed_domains", mode="before")
+    @classmethod
+    def parse_webhook_allowed_domains(cls, v: str | list[str]) -> list[str]:
+        """Parse webhook allowed domains from comma-separated string or list."""
+        if isinstance(v, str):
+            return [domain.strip() for domain in v.split(",") if domain.strip()]
+        return v
 
     # Slack notifications
     slack_webhook_url: str | None = None

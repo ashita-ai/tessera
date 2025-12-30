@@ -12,12 +12,14 @@ from tessera.services.cache import (
     cache_asset_contracts_list,
     cache_asset_search,
     cache_contract,
+    cache_global_search,
     cache_schema_diff,
     close_redis,
     get_cached_asset,
     get_cached_asset_contracts_list,
     get_cached_asset_search,
     get_cached_contract,
+    get_cached_global_search,
     get_cached_schema_diff,
     get_redis_client,
     invalidate_asset,
@@ -161,6 +163,16 @@ class TestCacheConvenienceFunctions:
     async def test_get_cached_asset_search_without_redis(self):
         """Get cached asset search returns None without Redis."""
         result = await get_cached_asset_search("query", {"status": "active"})
+        assert result is None
+
+    async def test_cache_global_search_without_redis(self):
+        """Cache global search gracefully handles no Redis."""
+        result = await cache_global_search("query", 10, {"results": {}})
+        assert result is False
+
+    async def test_get_cached_global_search_without_redis(self):
+        """Get cached global search returns None without Redis."""
+        result = await get_cached_global_search("query", 10)
         assert result is None
 
 

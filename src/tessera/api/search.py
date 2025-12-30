@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from tessera.api.auth import Auth, RequireRead
 from tessera.db import get_session
 from tessera.db.models import AssetDB, ContractDB, TeamDB, UserDB
+from tessera.services.cache import cache_global_search, get_cached_global_search
 
 router = APIRouter(prefix="/search", tags=["search"])
 
@@ -26,6 +27,11 @@ async def search(
     Returns results grouped by entity type with matches highlighted.
     Search is case-insensitive and matches partial strings.
     """
+    if limit == 10:
+        cached = await get_cached_global_search(q, limit)
+        if cached:
+            return cached
+
     search_term = f"%{q.lower()}%"
 
     # Search teams by name
@@ -61,7 +67,7 @@ async def search(
     )
     contracts = contracts_result.scalars().all()
 
-    return {
+    response = {
         "query": q,
         "results": {
             "teams": [
@@ -109,3 +115,6 @@ async def search(
             "total": len(teams) + len(users) + len(assets) + len(contracts),
         },
     }
+    if limit == 10:
+        await cache_global_search(q, limit, response)
+    return response

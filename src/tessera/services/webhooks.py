@@ -76,6 +76,16 @@ async def validate_webhook_url(url: str) -> tuple[bool, str]:
         if not parsed.hostname:
             return False, "Webhook URL must have a hostname"
 
+        # Optional allowlist check (exact match or subdomain)
+        allowed_domains = getattr(settings, "webhook_allowed_domains", [])
+        if not isinstance(allowed_domains, list):
+            allowed_domains = []
+        if allowed_domains:
+            hostname = parsed.hostname.lower().rstrip(".")
+            allowed = [d.lower().rstrip(".") for d in allowed_domains]
+            if not any(hostname == d or hostname.endswith(f".{d}") for d in allowed):
+                return False, "Webhook URL hostname is not in allowlist"
+
         # Resolve hostname and check for blocked IPs (async to not block event loop)
         try:
             loop = asyncio.get_running_loop()
@@ -161,9 +171,14 @@ async def _deliver_webhook(event: WebhookEvent, delivery_id: UUID | None = None)
     # Backpressure: limit concurrent webhook deliveries
     semaphore = _get_webhook_semaphore()
     async with semaphore:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as client:
             for attempt, delay in enumerate(RETRY_DELAYS):
                 try:
+                    is_valid, error_msg = await validate_webhook_url(settings.webhook_url)
+                    if not is_valid:
+                        last_error = f"URL validation failed: {error_msg}"
+                        logger.error("Webhook URL validation failed: %s", error_msg)
+                        break
                     response = await client.post(
                         settings.webhook_url,
                         content=payload,

@@ -1,5 +1,7 @@
 """Tests for webhook functionality."""
 
+import asyncio
+import socket
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -450,6 +452,50 @@ class TestWebhookURLValidation:
         from tessera.services.webhooks import validate_webhook_url
 
         is_valid, error = await validate_webhook_url("http://169.254.169.254/latest/meta-data")
+        assert not is_valid
+        assert "blocked" in error.lower()
+
+    async def test_validate_blocks_ipv6_loopback(self):
+        """IPv6 loopback is blocked."""
+        from tessera.services.webhooks import validate_webhook_url
+
+        is_valid, error = await validate_webhook_url("http://[::1]/webhook")
+        assert not is_valid
+        assert "blocked" in error.lower()
+
+    async def test_validate_allows_allowed_domains(self, monkeypatch):
+        """Allowlisted domains pass validation."""
+        from tessera.config import settings
+        from tessera.services.webhooks import validate_webhook_url
+
+        monkeypatch.setattr(settings, "webhook_allowed_domains", ["example.com"])
+        is_valid, error = await validate_webhook_url("https://hooks.example.com/webhook")
+        assert is_valid
+        assert error == ""
+
+    async def test_validate_rejects_disallowed_domains(self, monkeypatch):
+        """Disallowed domains are rejected when allowlist is set."""
+        from tessera.config import settings
+        from tessera.services.webhooks import validate_webhook_url
+
+        monkeypatch.setattr(settings, "webhook_allowed_domains", ["example.com"])
+        is_valid, error = await validate_webhook_url("https://evil.com/webhook")
+        assert not is_valid
+        assert "allowlist" in error.lower()
+
+    async def test_validate_rejects_mixed_dns_results(self, monkeypatch):
+        """Any blocked IP in DNS results rejects the URL."""
+        from tessera.services.webhooks import validate_webhook_url
+
+        class StubLoop:
+            async def getaddrinfo(self, *_args, **_kwargs):
+                return [
+                    (socket.AF_INET, None, None, None, ("93.184.216.34", 443)),
+                    (socket.AF_INET, None, None, None, ("127.0.0.1", 443)),
+                ]
+
+        monkeypatch.setattr(asyncio, "get_running_loop", lambda: StubLoop())
+        is_valid, error = await validate_webhook_url("https://example.com/webhook")
         assert not is_valid
         assert "blocked" in error.lower()
 
