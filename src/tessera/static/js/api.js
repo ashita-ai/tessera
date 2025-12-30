@@ -264,6 +264,10 @@ class TesseraAPI {
     return this.request(`/assets/${assetId}/dependencies`);
   }
 
+  async getAssetLineage(assetId, depth = 1) {
+    return this.request(`/assets/${assetId}/lineage?depth=${depth}`);
+  }
+
   async createDependency(assetId, data) {
     return this.request(`/assets/${assetId}/dependencies`, {
       method: 'POST',
