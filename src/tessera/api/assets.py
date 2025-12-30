@@ -5,7 +5,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import func, select
+from sqlalchemy import Select, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -78,6 +78,21 @@ from tessera.services.slack import notify_proposal_created
 from tessera.services.webhooks import send_proposal_created
 
 router = APIRouter()
+
+
+def _apply_asset_search_filters(
+    query: Select[Any],
+    q: str,
+    owner: UUID | None,
+    environment: str | None,
+) -> Select[Any]:
+    """Apply common asset search filters to a query."""
+    filtered = query.where(AssetDB.fqn.ilike(f"%{q}%")).where(AssetDB.deleted_at.is_(None))
+    if owner:
+        filtered = filtered.where(AssetDB.owner_team_id == owner)
+    if environment:
+        filtered = filtered.where(AssetDB.environment == environment)
+    return filtered
 
 
 def parse_semver(version: str) -> tuple[int, int, int]:
@@ -363,13 +378,7 @@ async def search_assets(
         if cached:
             return cached
 
-    base_query = (
-        select(AssetDB).where(AssetDB.fqn.ilike(f"%{q}%")).where(AssetDB.deleted_at.is_(None))
-    )
-    if owner:
-        base_query = base_query.where(AssetDB.owner_team_id == owner)
-    if environment:
-        base_query = base_query.where(AssetDB.environment == environment)
+    base_query = _apply_asset_search_filters(select(AssetDB), q, owner, environment)
 
     # Get total count
     count_query = select(func.count()).select_from(base_query.subquery())
@@ -377,16 +386,12 @@ async def search_assets(
     total = total_result.scalar() or 0
 
     # JOIN with teams to get names in a single query (fixes N+1)
-    query = (
-        select(AssetDB, TeamDB)
-        .join(TeamDB, AssetDB.owner_team_id == TeamDB.id)
-        .where(AssetDB.fqn.ilike(f"%{q}%"))
-        .where(AssetDB.deleted_at.is_(None))
+    query = _apply_asset_search_filters(
+        select(AssetDB, TeamDB).join(TeamDB, AssetDB.owner_team_id == TeamDB.id),
+        q,
+        owner,
+        environment,
     )
-    if owner:
-        query = query.where(AssetDB.owner_team_id == owner)
-    if environment:
-        query = query.where(AssetDB.environment == environment)
     query = query.order_by(AssetDB.fqn).limit(limit).offset(offset)
 
     result = await session.execute(query)
