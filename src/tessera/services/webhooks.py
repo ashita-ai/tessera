@@ -77,9 +77,12 @@ async def validate_webhook_url(url: str) -> tuple[bool, str]:
             return False, "Webhook URL must have a hostname"
 
         # Optional allowlist check (exact match or subdomain)
-        if settings.webhook_allowed_domains:
+        allowed_domains = getattr(settings, "webhook_allowed_domains", [])
+        if not isinstance(allowed_domains, list):
+            allowed_domains = []
+        if allowed_domains:
             hostname = parsed.hostname.lower().rstrip(".")
-            allowed = [d.lower().rstrip(".") for d in settings.webhook_allowed_domains]
+            allowed = [d.lower().rstrip(".") for d in allowed_domains]
             if not any(hostname == d or hostname.endswith(f".{d}") for d in allowed):
                 return False, "Webhook URL hostname is not in allowlist"
 
