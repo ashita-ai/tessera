@@ -252,20 +252,26 @@ def _combine_schemas(
     """Combine request and response schemas into a single contract schema.
 
     Creates a JSON Schema with request and response as properties.
+    Both request and response are marked as required if present.
     """
     combined: dict[str, Any] = {
         "type": "object",
         "properties": {},
     }
+    required: list[str] = []
 
     if request_schema:
         combined["properties"]["request"] = request_schema
+        required.append("request")
 
     if response_schema:
         combined["properties"]["response"] = response_schema
+        required.append("response")
 
     # If we have at least one schema, return the combined schema
     if combined["properties"]:
+        if required:
+            combined["required"] = required
         return combined
 
     # If no schemas, return a minimal valid schema

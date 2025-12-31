@@ -215,12 +215,19 @@ def _extract_operations(
         return_schema, _ = _graphql_type_to_json_schema(return_type, types_map)
 
         # Combined schema for contract
+        # Response is always required (a query always returns something)
+        # Arguments is only required if it has required fields
+        combined_required = ["response"]
+        if args_required:
+            combined_required.insert(0, "arguments")
+
         combined: dict[str, Any] = {
             "type": "object",
             "properties": {
                 "arguments": args_schema,
                 "response": return_schema,
             },
+            "required": combined_required,
         }
 
         # Build guarantees from required args (NON_NULL in GraphQL)
