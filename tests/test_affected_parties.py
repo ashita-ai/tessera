@@ -409,3 +409,148 @@ class TestGetAffectedPartiesService:
         assert len(proposal["affected_assets"]) >= 1
         affected_fqns = [a["asset_fqn"] for a in proposal["affected_assets"]]
         assert "db.model.meta_model" in affected_fqns
+
+
+class TestDuplicateProposalPrevention:
+    """Test that the API prevents duplicate proposals for the same asset."""
+
+    @pytest.mark.asyncio
+    async def test_cannot_create_duplicate_proposal_for_same_asset(
+        self, client: AsyncClient
+    ) -> None:
+        """Test that a second breaking change while proposal pending fails."""
+        # Setup: create team and assets
+        owner_team = (await client.post("/api/v1/teams", json={"name": "dup-prop-owner"})).json()
+        consumer_team = (
+            await client.post("/api/v1/teams", json={"name": "dup-prop-consumer"})
+        ).json()
+
+        # Create asset with initial contract
+        upstream = (
+            await client.post(
+                "/api/v1/assets",
+                json={"fqn": "db.raw.dup_proposal_test", "owner_team_id": owner_team["id"]},
+            )
+        ).json()
+
+        schema_v1 = {
+            "type": "object",
+            "properties": {"id": {"type": "integer"}},
+            "required": ["id"],
+        }
+        await client.post(
+            f"/api/v1/assets/{upstream['id']}/contracts",
+            params={"published_by": owner_team["id"]},
+            json={"schema": schema_v1, "compatibility_mode": "backward"},
+        )
+
+        # Create downstream asset owned by different team and register dependency
+        downstream = (
+            await client.post(
+                "/api/v1/assets",
+                json={"fqn": "db.staging.dup_downstream", "owner_team_id": consumer_team["id"]},
+            )
+        ).json()
+
+        await client.post(
+            f"/api/v1/assets/{downstream['id']}/dependencies",
+            json={"depends_on_asset_id": upstream["id"]},
+        )
+
+        # First breaking change should create a proposal
+        schema_v2 = {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}
+        result1 = await client.post(
+            f"/api/v1/assets/{upstream['id']}/contracts",
+            params={"published_by": owner_team["id"]},
+            json={"schema": schema_v2, "compatibility_mode": "backward"},
+        )
+        assert result1.status_code == 201
+        data1 = result1.json()
+        assert data1.get("action") == "proposal_created"
+
+        # Second breaking change while first proposal is pending should fail
+        schema_v3 = {
+            "type": "object",
+            "properties": {"id": {"type": "boolean"}},
+            "required": ["id"],
+        }
+        result2 = await client.post(
+            f"/api/v1/assets/{upstream['id']}/contracts",
+            params={"published_by": owner_team["id"]},
+            json={"schema": schema_v3, "compatibility_mode": "backward"},
+        )
+        assert result2.status_code == 409  # Conflict/Duplicate
+        error_body = result2.json()
+        assert (
+            "pending proposal" in error_body.get("message", "").lower()
+            or "pending proposal" in str(error_body).lower()
+        )
+
+    @pytest.mark.asyncio
+    async def test_can_create_new_proposal_after_previous_resolved(
+        self, client: AsyncClient
+    ) -> None:
+        """Test that a new proposal can be created after the previous one is resolved."""
+        # Setup
+        owner_team = (
+            await client.post("/api/v1/teams", json={"name": "resolved-prop-owner"})
+        ).json()
+        consumer_team = (
+            await client.post("/api/v1/teams", json={"name": "resolved-prop-consumer"})
+        ).json()
+
+        upstream = (
+            await client.post(
+                "/api/v1/assets",
+                json={"fqn": "db.raw.resolved_proposal_test", "owner_team_id": owner_team["id"]},
+            )
+        ).json()
+
+        schema_v1 = {"type": "object", "properties": {"x": {"type": "integer"}}, "required": ["x"]}
+        await client.post(
+            f"/api/v1/assets/{upstream['id']}/contracts",
+            params={"published_by": owner_team["id"]},
+            json={"schema": schema_v1, "compatibility_mode": "backward"},
+        )
+
+        downstream = (
+            await client.post(
+                "/api/v1/assets",
+                json={
+                    "fqn": "db.staging.resolved_downstream",
+                    "owner_team_id": consumer_team["id"],
+                },
+            )
+        ).json()
+
+        await client.post(
+            f"/api/v1/assets/{downstream['id']}/dependencies",
+            json={"depends_on_asset_id": upstream["id"]},
+        )
+
+        # First breaking change creates proposal
+        schema_v2 = {"type": "object", "properties": {"x": {"type": "string"}}, "required": ["x"]}
+        result1 = await client.post(
+            f"/api/v1/assets/{upstream['id']}/contracts",
+            params={"published_by": owner_team["id"]},
+            json={"schema": schema_v2, "compatibility_mode": "backward"},
+        )
+        assert result1.status_code == 201
+        proposal_id = result1.json()["proposal"]["id"]
+
+        # Withdraw the proposal (resolve it)
+        withdraw_result = await client.post(
+            f"/api/v1/proposals/{proposal_id}/withdraw",
+            params={"actor_id": owner_team["id"]},
+        )
+        assert withdraw_result.status_code == 200
+
+        # Now we should be able to create a new proposal
+        schema_v3 = {"type": "object", "properties": {"x": {"type": "boolean"}}, "required": ["x"]}
+        result2 = await client.post(
+            f"/api/v1/assets/{upstream['id']}/contracts",
+            params={"published_by": owner_team["id"]},
+            json={"schema": schema_v3, "compatibility_mode": "backward"},
+        )
+        assert result2.status_code == 201
+        assert result2.json().get("action") == "proposal_created"

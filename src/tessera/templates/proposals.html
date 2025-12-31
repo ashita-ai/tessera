@@ -6,33 +6,34 @@
 <section>
   <h2>Proposals</h2>
 
-  <div class="filters" style="margin-bottom: 1rem; display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; padding: 0.75rem 1rem; background: var(--light-gray); border: 1px solid #ddd;">
-    <div style="display: flex; align-items: center; gap: 0.5rem;">
-      <label for="filter-status" style="margin: 0; font-size: 0.875rem; white-space: nowrap;">Status:</label>
-      <select id="filter-status" style="width: 140px; padding: 0.4rem; margin: 0;" onchange="onStatusFilterChange()">
+  <div class="filters" style="margin-bottom: 1rem; display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 0.75rem; align-items: end; padding: 0.75rem 1rem; background: var(--light-gray); border: 1px solid #ddd;">
+    <div style="display: flex; flex-direction: column; gap: 0.25rem;">
+      <label for="filter-status" style="margin: 0; font-size: 0.875rem;">Status</label>
+      <select id="filter-status" style="width: 100%; padding: 0.4rem; margin: 0; box-sizing: border-box;" onchange="onStatusFilterChange()">
         <option value="">All statuses</option>
         <option value="pending" selected>Pending</option>
         <option value="approved">Approved</option>
         <option value="force_approved">Force Approved</option>
+        <option value="rejected">Rejected</option>
         <option value="withdrawn">Withdrawn</option>
       </select>
     </div>
-    <div style="display: flex; align-items: center; gap: 0.5rem;">
-      <label for="filter-asset" style="margin: 0; font-size: 0.875rem; white-space: nowrap;">Asset:</label>
-      <select id="filter-asset" style="width: 200px; padding: 0.4rem; margin: 0;" onchange="onAssetFilterChange()">
+    <div style="display: flex; flex-direction: column; gap: 0.25rem;">
+      <label for="filter-asset" style="margin: 0; font-size: 0.875rem;">Asset</label>
+      <select id="filter-asset" style="width: 100%; padding: 0.4rem; margin: 0; box-sizing: border-box;" onchange="onAssetFilterChange()">
         <option value="">All assets</option>
       </select>
     </div>
-    <div style="display: flex; align-items: center; gap: 0.5rem;">
-      <label for="filter-change-type" style="margin: 0; font-size: 0.875rem; white-space: nowrap;">Change Type:</label>
-      <select id="filter-change-type" style="width: 120px; padding: 0.4rem; margin: 0;">
+    <div style="display: flex; flex-direction: column; gap: 0.25rem;">
+      <label for="filter-change-type" style="margin: 0; font-size: 0.875rem;">Change Type</label>
+      <select id="filter-change-type" style="width: 100%; padding: 0.4rem; margin: 0; box-sizing: border-box;">
         <option value="">All types</option>
         <option value="patch">Patch</option>
         <option value="minor">Minor</option>
         <option value="major">Major</option>
       </select>
     </div>
-    <div style="display: flex; gap: 0.5rem; margin-left: auto;">
+    <div style="display: flex; gap: 0.5rem; padding-bottom: 0.1rem;">
       <button onclick="loadProposals()" style="padding: 0.4rem 1rem;">Filter</button>
       <button class="secondary" onclick="clearFilters()" style="padding: 0.4rem 1rem;">Clear</button>
     </div>

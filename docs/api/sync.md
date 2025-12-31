@@ -22,16 +22,28 @@ Full manifest sync with automation options.
   "auto_publish_contracts": true,
   "auto_create_proposals": true,
   "auto_register_consumers": true,
-  "infer_consumers_from_refs": true
+  "infer_consumers_from_refs": true,
+  "auto_delete": false
 }
 ```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `manifest` | object | required | Contents of manifest.json |
+| `owner_team_id` | UUID | required | Default team for new assets |
+| `conflict_mode` | string | `"ignore"` | How to handle existing assets |
+| `auto_publish_contracts` | boolean | `false` | Auto-publish contracts |
+| `auto_create_proposals` | boolean | `false` | Create proposals for breaking changes |
+| `auto_register_consumers` | boolean | `false` | Register consumers from meta |
+| `infer_consumers_from_refs` | boolean | `false` | Infer consumers from ref() |
+| `auto_delete` | boolean | `false` | Soft-delete dbt-managed assets missing from manifest |
 
 #### Response
 
 ```json
 {
   "status": "success",
-  "assets": { "created": 10, "updated": 5, "skipped": 2 },
+  "assets": { "created": 10, "updated": 5, "skipped": 2, "deleted": 1, "deleted_fqns": ["db.schema.old_model"] },
   "contracts": { "published": 8 },
   "proposals": { "created": 2 },
   "registrations": { "created": 15 }
@@ -60,7 +72,13 @@ Preview impact without applying changes.
 POST /api/v1/sync/dbt/diff
 ```
 
-Dry-run for CI/CD pipelines.
+Dry-run for CI/CD pipelines. Detects:
+- New models (not in Tessera)
+- Modified models (schema changes)
+- Deleted models (in Tessera but missing from manifest)
+- Breaking changes
+
+Response includes `summary.deleted` count and models with `change_type: "deleted"`.
 
 See [dbt Integration Guide](../guides/dbt-integration.md) for full documentation.
 

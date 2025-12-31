@@ -254,21 +254,56 @@ function getChangeBadge(type, label) {
   return `<span class="change-badge ${cssClass}">${icon} ${label}</span>`;
 }
 
+// Recursively collect all properties from a schema, including nested objects
+function collectSchemaProperties(schema, prefix = '', requiredSet = new Set()) {
+  const results = [];
+  const props = schema?.properties || {};
+  const required = new Set(schema?.required || []);
+
+  for (const [key, prop] of Object.entries(props)) {
+    const fullPath = prefix ? `${prefix}.${key}` : key;
+    const isRequired = required.has(key);
+
+    results.push({
+      path: fullPath,
+      key: key,
+      depth: prefix.split('.').filter(Boolean).length,
+      prop: prop,
+      required: isRequired
+    });
+
+    // Recurse into nested objects
+    if (prop.type === 'object' && prop.properties) {
+      results.push(...collectSchemaProperties(prop, fullPath, new Set(prop.required || [])));
+    }
+
+    // Handle items in arrays
+    if (prop.type === 'array' && prop.items && prop.items.type === 'object' && prop.items.properties) {
+      results.push(...collectSchemaProperties(prop.items, `${fullPath}[]`, new Set(prop.items.required || [])));
+    }
+  }
+
+  return results;
+}
+
 function renderSchemaDiff(currentSchema, proposedSchema) {
-  const currentProps = currentSchema?.properties || {};
-  const proposedProps = proposedSchema?.properties || {};
-  const currentRequired = new Set(currentSchema?.required || []);
-  const proposedRequired = new Set(proposedSchema?.required || []);
+  const currentFlat = collectSchemaProperties(currentSchema);
+  const proposedFlat = collectSchemaProperties(proposedSchema);
 
-  const allKeys = new Set([...Object.keys(currentProps), ...Object.keys(proposedProps)]);
+  const currentMap = new Map(currentFlat.map(p => [p.path, p]));
+  const proposedMap = new Map(proposedFlat.map(p => [p.path, p]));
 
-  let html = '<table class="schema-diff-table"><thead><tr><th>Column</th><th>Current</th><th>Proposed</th><th>Change</th></tr></thead><tbody>';
+  const allPaths = new Set([...currentMap.keys(), ...proposedMap.keys()]);
+  const sortedPaths = [...allPaths].sort();
 
-  for (const key of [...allKeys].sort()) {
-    const current = currentProps[key];
-    const proposed = proposedProps[key];
-    const wasRequired = currentRequired.has(key);
-    const isRequired = proposedRequired.has(key);
+  let html = '<table class="schema-diff-table"><thead><tr><th>Field Path</th><th>Current Type</th><th>Proposed Type</th><th>Change</th></tr></thead><tbody>';
+
+  for (const path of sortedPaths) {
+    const current = currentMap.get(path);
+    const proposed = proposedMap.get(path);
+
+    const depth = (path.match(/\./g) || []).length;
+    const indent = '&nbsp;&nbsp;'.repeat(depth);
 
     let rowClass = '';
     let changeLabel = '';
@@ -280,16 +315,17 @@ function renderSchemaDiff(currentSchema, proposedSchema) {
       rowClass = 'row-removed';
       changeLabel = getChangeBadge('removed', 'Removed');
     } else if (current && proposed) {
-      const typeChanged = current.type !== proposed.type;
-      const otherChanges = JSON.stringify(current) !== JSON.stringify(proposed);
+      const typeChanged = current.prop.type !== proposed.prop.type;
+      const otherChanges = JSON.stringify(current.prop) !== JSON.stringify(proposed.prop);
+      const reqChanged = current.required !== proposed.required;
 
       if (typeChanged) {
         rowClass = 'row-modified';
         changeLabel = getChangeBadge('type_changed', 'Type Changed');
-      } else if (!wasRequired && isRequired) {
+      } else if (!current.required && proposed.required) {
         rowClass = 'row-modified';
         changeLabel = getChangeBadge('required_added', 'Now Required');
-      } else if (wasRequired && !isRequired) {
+      } else if (current.required && !proposed.required) {
         rowClass = 'row-modified';
         changeLabel = getChangeBadge('required_removed', 'Now Optional');
       } else if (otherChanges) {
@@ -300,16 +336,24 @@ function renderSchemaDiff(currentSchema, proposedSchema) {
       }
     }
 
-    const formatType = (prop, required) => {
-      if (!prop) return '<em style="color: var(--gray);">-</em>';
-      const reqBadge = required ? '<span style="color: #c00; font-weight: bold;">*</span>' : '';
-      return `<span class="type-value">${escapeHtml(prop.type || 'unknown')}</span>${reqBadge}${prop.description ? `<br><small style="color: var(--gray);">${escapeHtml(prop.description)}</small>` : ''}`;
+    const formatType = (item) => {
+      if (!item) return '<em style="color: var(--gray);">-</em>';
+      const prop = item.prop;
+      const reqBadge = item.required ? '<span style="color: #c00; font-weight: bold;" title="Required">*</span>' : '';
+      let typeStr = prop.type || 'unknown';
+      if (prop.type === 'array' && prop.items) {
+        typeStr = `array[${prop.items.type || 'any'}]`;
+      }
+      return `<span class="type-value">${escapeHtml(typeStr)}</span>${reqBadge}`;
     };
 
+    // Show last part of path but with visual indentation
+    const displayName = path.split('.').pop().replace('[]', '');
+
     html += `<tr class="${rowClass}">
-      <td class="column-name"><code>${escapeHtml(key)}</code></td>
-      <td>${formatType(current, wasRequired)}</td>
-      <td>${formatType(proposed, isRequired)}</td>
+      <td class="column-name">${indent}<code>${escapeHtml(displayName)}</code>${depth > 0 ? `<small style="color: var(--gray); margin-left: 0.5rem;">${escapeHtml(path)}</small>` : ''}</td>
+      <td>${formatType(current)}</td>
+      <td>${formatType(proposed)}</td>
       <td>${changeLabel}</td>
     </tr>`;
   }
@@ -355,42 +399,83 @@ async function loadProposalDetail() {
       </div>
     ` : '';
 
+    // Build impacted parties summary
+    const consumerCount = status?.consumers?.total || 0;
+    const affectedAssets = proposal.affected_assets || [];
+    const downstreamCount = affectedAssets.length;
+    const impactedParties = [];
+    if (consumerCount > 0) impactedParties.push(`${consumerCount} registered consumer${consumerCount !== 1 ? 's' : ''}`);
+    if (downstreamCount > 0) impactedParties.push(`${downstreamCount} downstream asset${downstreamCount !== 1 ? 's' : ''}`);
+
     document.getElementById('proposal-detail').innerHTML = `
       ${warningBanner}
       <div style="display: flex; justify-content: space-between; align-items: flex-start;">
         <div>
           <h2 style="margin-bottom: 0.5rem;">Breaking Change Proposal</h2>
-          <p style="color: var(--gray); margin-top: 0;">
-            Proposed by <a href="/teams/${status?.proposed_by?.team_id}">${escapeHtml(status?.proposed_by?.team_name || 'Unknown')}</a>
-            ${status?.proposed_by?.user_name
-              ? ` (<a href="/users/${status.proposed_by.user_id}">${escapeHtml(status.proposed_by.user_name)}</a>)`
-              : ''
-            }
-          </p>
         </div>
         <span class="status status-${proposal.status}" style="font-size: 1rem; padding: 0.5rem 1rem;">${proposal.status.toUpperCase()}</span>
       </div>
 
-      <div class="card">
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
-          <div>
-            <strong>Asset</strong><br>
-            <a href="/assets/${proposal.asset_id}">${escapeHtml(status?.asset_fqn || proposal.asset_id)}</a>
+      <div class="card" style="background: linear-gradient(135deg, #f8f9ff 0%, #fff 100%); border-left: 4px solid #5555ff; margin-bottom: 1.5rem;">
+        <div style="display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;">
+          <div style="flex: 1; min-width: 250px;">
+            <div style="font-size: 0.85rem; color: var(--gray); text-transform: uppercase; letter-spacing: 0.05em;">Producer</div>
+            <div style="font-size: 1.1rem; font-weight: 600;">
+              <a href="/teams/${status?.proposed_by?.team_id}">${escapeHtml(status?.proposed_by?.team_name || 'Unknown Team')}</a>
+              ${status?.proposed_by?.user_name ? `<span style="color: var(--gray); font-weight: normal;"> via ${escapeHtml(status.proposed_by.user_name)}</span>` : ''}
+            </div>
           </div>
+
+          <div style="font-size: 2rem; color: var(--gray);">→</div>
+
+          <div style="flex: 1; min-width: 250px;">
+            <div style="font-size: 0.85rem; color: var(--gray); text-transform: uppercase; letter-spacing: 0.05em;">Proposes changes to</div>
+            <div style="font-size: 1.1rem; font-weight: 600;">
+              <a href="/assets/${proposal.asset_id}"><code>${escapeHtml(status?.asset_fqn || proposal.asset_id)}</code></a>
+            </div>
+          </div>
+
+          <div style="font-size: 2rem; color: var(--gray);">→</div>
+
+          <div style="flex: 1; min-width: 250px;">
+            <div style="font-size: 0.85rem; color: var(--gray); text-transform: uppercase; letter-spacing: 0.05em;">Impacting</div>
+            <div style="font-size: 1.1rem; font-weight: 600;">
+              ${impactedParties.length > 0 ? impactedParties.join(' + ') : '<span style="color: #080;">No downstream impact</span>'}
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border);">
+          <strong style="color: #c00;">What's changing:</strong>
+          ${breakingChanges.length > 0
+            ? breakingChanges.slice(0, 3).map(bc => `<span class="change-badge change-breaking" style="margin-left: 0.5rem;">${escapeHtml(bc.message || bc.path || bc.type || 'schema change')}</span>`).join('')
+              + (breakingChanges.length > 3 ? `<span style="color: var(--gray); margin-left: 0.5rem;">+${breakingChanges.length - 3} more</span>` : '')
+            : '<span style="color: var(--gray); margin-left: 0.5rem;">Schema modification (see details below)</span>'
+          }
+        </div>
+      </div>
+
+      <div class="card" style="background: var(--bg-secondary);">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem;">
           <div>
             <strong>Change Type</strong><br>
-            <span class="status status-${proposal.change_type === 'major' ? 'deprecated' : 'active'}">${proposal.change_type || 'Unknown'}</span>
+            <span class="status status-${proposal.change_type === 'major' ? 'deprecated' : 'active'}">${proposal.change_type?.toUpperCase() || 'Unknown'}</span>
           </div>
           <div>
             <strong>Created</strong><br>
             ${formatDate(proposal.proposed_at)}
           </div>
+          ${proposal.resolved_at ? `
           <div>
-            <strong>Impacted Teams</strong><br>
-            ${status?.consumers?.total || 0} consumer${status?.consumers?.total !== 1 ? 's' : ''}
+            <strong>Resolved</strong><br>
+            ${formatDate(proposal.resolved_at)}
+          </div>
+          ` : ''}
+          <div>
+            <strong>Proposal ID</strong><br>
+            <code style="font-size: 0.8rem;">${proposal.id.substring(0, 8)}...</code>
           </div>
         </div>
-        ${proposal.resolved_at ? `<p style="margin-top: 1rem;"><strong>Resolved:</strong> ${formatDate(proposal.resolved_at)}</p>` : ''}
       </div>
 
       <div style="margin-top: 1.5rem; display: flex; gap: 0.5rem; flex-wrap: wrap;">
@@ -528,7 +613,7 @@ async function loadProposalDetail() {
     // Affected Parties (lineage-discovered teams)
     const affectedContainer = document.getElementById('affected-parties');
     const affectedTeams = proposal.affected_teams || [];
-    const affectedAssets = proposal.affected_assets || [];
+    // affectedAssets already defined above
 
     if (affectedTeams.length > 0 || affectedAssets.length > 0) {
       affectedContainer.innerHTML = `

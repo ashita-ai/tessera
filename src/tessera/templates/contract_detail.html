@@ -28,6 +28,103 @@
 <script>
 const contractId = '{{ contract_id }}';
 
+// Recursively collect all properties from a schema, including nested objects
+function collectSchemaFields(schema, prefix = '') {
+  const results = [];
+  const props = schema?.properties || {};
+  const required = new Set(schema?.required || []);
+
+  for (const [key, prop] of Object.entries(props)) {
+    const fullPath = prefix ? `${prefix}.${key}` : key;
+    const isRequired = required.has(key);
+
+    results.push({
+      path: fullPath,
+      key: key,
+      depth: prefix.split('.').filter(Boolean).length,
+      prop: prop,
+      required: isRequired
+    });
+
+    // Recurse into nested objects
+    if (prop.type === 'object' && prop.properties) {
+      results.push(...collectSchemaFields(prop, fullPath));
+    }
+
+    // Handle items in arrays
+    if (prop.type === 'array' && prop.items && prop.items.type === 'object' && prop.items.properties) {
+      results.push(...collectSchemaFields(prop.items, `${fullPath}[]`));
+    }
+  }
+
+  return results;
+}
+
+function renderSchemaTable(schema) {
+  const fields = collectSchemaFields(schema);
+
+  if (fields.length === 0) {
+    return `<div class="card" style="background: var(--white);"><pre class="json-highlighted">${highlightJson(schema)}</pre></div>`;
+  }
+
+  let html = `
+    <table>
+      <thead>
+        <tr>
+          <th>Field</th>
+          <th>Type</th>
+          <th>Required</th>
+          <th>Details</th>
+        </tr>
+      </thead>
+      <tbody>
+  `;
+
+  for (const field of fields) {
+    const depth = (field.path.match(/\./g) || []).length;
+    const indent = '&nbsp;&nbsp;'.repeat(depth);
+    const displayName = field.path.split('.').pop().replace('[]', '');
+
+    let typeStr = field.prop.type || 'unknown';
+    if (field.prop.type === 'array' && field.prop.items) {
+      typeStr = `array[${field.prop.items.type || 'any'}]`;
+    }
+
+    const details = [];
+    if (field.prop.description) details.push(field.prop.description);
+    if (field.prop.format) details.push(`format: ${field.prop.format}`);
+    if (field.prop.enum) details.push(`enum: [${field.prop.enum.join(', ')}]`);
+    if (field.prop.minimum !== undefined) details.push(`min: ${field.prop.minimum}`);
+    if (field.prop.maximum !== undefined) details.push(`max: ${field.prop.maximum}`);
+    if (field.prop.minLength !== undefined) details.push(`minLength: ${field.prop.minLength}`);
+    if (field.prop.maxLength !== undefined) details.push(`maxLength: ${field.prop.maxLength}`);
+    if (field.prop.pattern) details.push(`pattern: ${field.prop.pattern}`);
+
+    html += `
+      <tr${depth > 0 ? ' style="background: #fafafa;"' : ''}>
+        <td>${indent}<code>${escapeHtml(displayName)}</code>${depth > 0 ? `<small style="color: var(--gray); margin-left: 0.5rem;">${escapeHtml(field.path)}</small>` : ''}</td>
+        <td><span class="type-value">${escapeHtml(typeStr)}</span></td>
+        <td>${field.required ? '<span style="color: #c00; font-weight: bold;">Yes</span>' : '<span style="color: var(--gray);">No</span>'}</td>
+        <td>${details.length > 0 ? `<small>${escapeHtml(details.join(' | '))}</small>` : '<em style="color: var(--gray);">-</em>'}</td>
+      </tr>
+    `;
+  }
+
+  html += '</tbody></table>';
+
+  // Also show raw JSON in collapsible
+  html += `
+    <details style="margin-top: 1rem;">
+      <summary style="cursor: pointer; color: var(--gray);">View raw JSON Schema</summary>
+      <div class="card" style="background: var(--white); margin-top: 0.5rem;">
+        <pre class="json-highlighted">${highlightJson(schema)}</pre>
+      </div>
+    </details>
+  `;
+
+  return html;
+}
+
 async function loadContractDetail() {
   try {
     const contract = await api.getContract(contractId);
@@ -52,11 +149,7 @@ async function loadContractDetail() {
     const schemaContainer = document.getElementById('contract-schema');
     const schema = contract.schema_def || contract.schema;
     if (schema) {
-      schemaContainer.innerHTML = `
-        <div class="card" style="background: var(--white);">
-          <pre class="json-highlighted">${highlightJson(schema)}</pre>
-        </div>
-      `;
+      schemaContainer.innerHTML = renderSchemaTable(schema);
     } else {
       schemaContainer.innerHTML = '<div class="empty">No schema defined.</div>';
     }
@@ -64,11 +157,63 @@ async function loadContractDetail() {
     // Guarantees
     const guaranteesContainer = document.getElementById('contract-guarantees');
     if (contract.guarantees && Object.keys(contract.guarantees).length > 0) {
-      guaranteesContainer.innerHTML = `
-        <div class="card" style="background: var(--white);">
-          <pre class="json-highlighted">${highlightJson(contract.guarantees)}</pre>
+      // Parse and render guarantees more clearly
+      const g = contract.guarantees;
+      let guaranteesHtml = '<div class="card">';
+
+      if (g.freshness_sla) {
+        guaranteesHtml += `
+          <div style="margin-bottom: 1rem;">
+            <strong>Freshness SLA:</strong>
+            <span style="font-size: 1.2rem; color: #080;">${escapeHtml(g.freshness_sla)}</span>
+            <p style="color: var(--gray); margin: 0.25rem 0 0 0; font-size: 0.9rem;">
+              Data should be updated within this time window. Violations are logged for monitoring.
+            </p>
+          </div>
+        `;
+      }
+
+      if (g.completeness_sla !== undefined) {
+        guaranteesHtml += `
+          <div style="margin-bottom: 1rem;">
+            <strong>Completeness SLA:</strong>
+            <span style="font-size: 1.2rem; color: #080;">${g.completeness_sla}%</span>
+            <p style="color: var(--gray); margin: 0.25rem 0 0 0; font-size: 0.9rem;">
+              Minimum percentage of non-null values expected. Violations are logged for monitoring.
+            </p>
+          </div>
+        `;
+      }
+
+      if (g.update_frequency) {
+        guaranteesHtml += `
+          <div style="margin-bottom: 1rem;">
+            <strong>Update Frequency:</strong>
+            <span style="font-size: 1.2rem; color: #080;">${escapeHtml(g.update_frequency)}</span>
+          </div>
+        `;
+      }
+
+      // Show any other guarantees
+      const knownKeys = ['freshness_sla', 'completeness_sla', 'update_frequency'];
+      const otherKeys = Object.keys(g).filter(k => !knownKeys.includes(k));
+      if (otherKeys.length > 0) {
+        guaranteesHtml += '<div style="margin-top: 1rem;"><strong>Other Guarantees:</strong>';
+        guaranteesHtml += `<pre class="json-highlighted">${highlightJson(Object.fromEntries(otherKeys.map(k => [k, g[k]])))}</pre></div>`;
+      }
+
+      guaranteesHtml += `
+        <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border);">
+          <small style="color: var(--gray);">
+            <strong>Note:</strong> SLA violations are passively recorded in the audit log.
+            Tessera does not actively alert or block on violations; use external monitoring tools
+            to track audit events and set up alerts based on your requirements.
+          </small>
         </div>
       `;
+
+      guaranteesHtml += '</div>';
+      guaranteesContainer.innerHTML = guaranteesHtml;
     } else {
       guaranteesContainer.innerHTML = '<div class="empty">No guarantees defined.</div>';
     }

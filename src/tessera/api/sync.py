@@ -6,13 +6,14 @@ Endpoints for synchronizing schemas from external sources:
 - GraphQL introspection for GraphQL schema contracts
 """
 
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.api.auth import Auth, RequireAdmin
@@ -331,6 +332,10 @@ class DbtManifestUploadRequest(BaseModel):
     auto_publish_contracts: bool = Field(
         default=False,
         description="Automatically publish initial contracts for new assets with column schemas",
+    )
+    auto_delete: bool = Field(
+        default=False,
+        description="Soft-delete dbt-managed assets missing from manifest (i.e. removed models)",
     )
     auto_create_proposals: bool = Field(
         default=False,
@@ -1413,6 +1418,47 @@ async def upload_dbt_manifest(
     # Flush to ensure all asset IDs are available for per-asset audit logging
     await session.flush()
 
+    # Handle auto_delete: soft-delete dbt-managed assets not in manifest
+    assets_deleted = 0
+    deleted_assets_info: list[str] = []
+    if upload_req.auto_delete:
+        # Build set of FQNs from manifest
+        manifest_fqns: set[str] = set()
+        for node_id, node in nodes.items():
+            resource_type = node.get("resource_type")
+            if resource_type not in ("model", "seed", "snapshot"):
+                continue
+            database = node.get("database", "")
+            schema = node.get("schema", "")
+            name = node.get("name", "")
+            manifest_fqns.add(f"{database}.{schema}.{name}".lower())
+        for source_id, source in sources.items():
+            database = source.get("database", "")
+            schema = source.get("schema", "")
+            name = source.get("name", "")
+            manifest_fqns.add(f"{database}.{schema}.{name}".lower())
+
+        # Find dbt-managed assets not in manifest
+        existing_result = await session.execute(select(AssetDB).where(AssetDB.deleted_at.is_(None)))
+        for asset in existing_result.scalars().all():
+            if asset.fqn in manifest_fqns:
+                continue
+            metadata = asset.metadata_ or {}
+            if not (metadata.get("dbt_node_id") or metadata.get("dbt_source_id")):
+                continue
+            # Soft delete the asset
+            asset.deleted_at = datetime.now(UTC)
+            assets_deleted += 1
+            deleted_assets_info.append(asset.fqn)
+            await audit.log_event(
+                session=session,
+                entity_type="asset",
+                entity_id=asset.id,
+                action=AuditAction.ASSET_DELETED,
+                actor_id=auth.team_id,
+                payload={"fqn": asset.fqn, "triggered_by": "dbt_sync_upload_auto_delete"},
+            )
+
     # Log per-asset audit events
     for asset, team_id in created_assets_audit:
         await audit.log_event(
@@ -1458,6 +1504,8 @@ async def upload_dbt_manifest(
             "created": assets_created,
             "updated": assets_updated,
             "skipped": assets_skipped,
+            "deleted": assets_deleted,
+            "deleted_fqns": deleted_assets_info[:20] if deleted_assets_info else [],
         },
         "contracts": {
             "published": contracts_published,
@@ -1700,13 +1748,41 @@ async def diff_dbt_manifest(
         if fqn not in manifest_fqns:
             # Check if it's a dbt-managed asset
             metadata = asset.metadata_ or {}
-            if metadata.get("dbt_node_id") or metadata.get("dbt_source_id"):
-                warnings.append(f"{fqn}: Asset in Tessera but missing from manifest (deleted?)")
+            node_id = metadata.get("dbt_node_id") or metadata.get("dbt_source_id")
+            if node_id:
+                # Count registrations (consumers) for this asset via its contracts
+                reg_result = await session.execute(
+                    select(func.count())
+                    .select_from(RegistrationDB)
+                    .join(ContractDB, RegistrationDB.contract_id == ContractDB.id)
+                    .where(ContractDB.asset_id == asset.id)
+                    .where(RegistrationDB.status == RegistrationStatus.ACTIVE)
+                )
+                consumers_count = reg_result.scalar() or 0
+
+                models.append(
+                    DbtDiffItem(
+                        fqn=fqn,
+                        node_id=node_id,
+                        change_type="deleted",
+                        owner_team=None,
+                        consumers_declared=consumers_count,
+                        consumers_from_refs=0,
+                        has_schema=False,
+                        schema_change_type=None,
+                        breaking_changes=[],
+                    )
+                )
+                if consumers_count > 0:
+                    warnings.append(
+                        f"{fqn}: Model removed but has {consumers_count} registered consumer(s)"
+                    )
 
     # Calculate summary
     summary = {
         "new": sum(1 for m in models if m.change_type == "new"),
         "modified": sum(1 for m in models if m.change_type == "modified"),
+        "deleted": sum(1 for m in models if m.change_type == "deleted"),
         "unchanged": sum(1 for m in models if m.change_type == "unchanged"),
         "breaking": sum(1 for m in models if m.schema_change_type == "breaking"),
     }

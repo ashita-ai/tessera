@@ -46,6 +46,7 @@ from tessera.models.enums import (
     AuditRunStatus,
     ChangeType,
     ContractStatus,
+    ProposalStatus,
     RegistrationStatus,
     ResourceType,
     SchemaFormat,
@@ -1115,6 +1116,20 @@ async def create_contract(
         return response
 
     # Breaking change without force = create proposal
+    # First check if there's already a pending proposal for this asset
+    existing_proposal_result = await session.execute(
+        select(ProposalDB)
+        .where(ProposalDB.asset_id == asset_id)
+        .where(ProposalDB.status == ProposalStatus.PENDING)
+    )
+    existing_proposal = existing_proposal_result.scalar_one_or_none()
+    if existing_proposal:
+        raise DuplicateError(
+            ErrorCode.DUPLICATE_PROPOSAL,
+            f"Asset already has a pending proposal (ID: {existing_proposal.id}). "
+            "Resolve the existing proposal before creating a new one.",
+        )
+
     # Compute affected parties from lineage (exclude the owner team)
     affected_teams, affected_assets = await get_affected_parties(
         session, asset_id, exclude_team_id=asset.owner_team_id

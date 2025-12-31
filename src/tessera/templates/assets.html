@@ -9,27 +9,27 @@
   <div id="owner-filter-banner" style="display: none; margin-bottom: 1rem; padding: 0.75rem; background: var(--light-gray); border-radius: 4px;"></div>
 
   <!-- Filters -->
-  <div class="filters" style="margin-bottom: 1rem; display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; padding: 0.75rem 1rem; background: var(--light-gray); border: 1px solid #ddd;">
-    <div style="display: flex; align-items: center; gap: 0.5rem;">
-      <label for="search-fqn" style="margin: 0; font-size: 0.875rem; white-space: nowrap;">FQN:</label>
-      <input type="text" id="search-fqn" placeholder="Search..." style="width: 200px; padding: 0.4rem 0.5rem; margin: 0;">
+  <div class="filters" style="margin-bottom: 1rem; display: grid; grid-template-columns: 1fr 1fr 1fr 1fr auto; gap: 0.75rem; align-items: end; padding: 0.75rem 1rem; background: var(--light-gray); border: 1px solid #ddd;">
+    <div style="display: flex; flex-direction: column; gap: 0.25rem;">
+      <label for="search-fqn" style="margin: 0; font-size: 0.875rem;">FQN</label>
+      <input type="text" id="search-fqn" placeholder="Search..." style="width: 100%; padding: 0.4rem 0.5rem; margin: 0; box-sizing: border-box;">
     </div>
-    <div style="display: flex; align-items: center; gap: 0.5rem;">
-      <label for="filter-team" style="margin: 0; font-size: 0.875rem; white-space: nowrap;">Team:</label>
-      <select id="filter-team" style="width: 150px; padding: 0.4rem; margin: 0;" onchange="onTeamFilterChange()">
+    <div style="display: flex; flex-direction: column; gap: 0.25rem;">
+      <label for="filter-team" style="margin: 0; font-size: 0.875rem;">Team</label>
+      <select id="filter-team" style="width: 100%; padding: 0.4rem; margin: 0; box-sizing: border-box;" onchange="onTeamFilterChange()">
         <option value="">All teams</option>
       </select>
     </div>
-    <div style="display: flex; align-items: center; gap: 0.5rem;">
-      <label for="filter-owner" style="margin: 0; font-size: 0.875rem; white-space: nowrap;">Owner:</label>
-      <select id="filter-owner" style="width: 150px; padding: 0.4rem; margin: 0;">
+    <div style="display: flex; flex-direction: column; gap: 0.25rem;">
+      <label for="filter-owner" style="margin: 0; font-size: 0.875rem;">Owner</label>
+      <select id="filter-owner" style="width: 100%; padding: 0.4rem; margin: 0; box-sizing: border-box;">
         <option value="">All owners</option>
         <option value="unassigned">Unassigned</option>
       </select>
     </div>
-    <div style="display: flex; align-items: center; gap: 0.5rem;">
-      <label for="filter-type" style="margin: 0; font-size: 0.875rem; white-space: nowrap;">Type:</label>
-      <select id="filter-type" style="width: 130px; padding: 0.4rem; margin: 0;">
+    <div style="display: flex; flex-direction: column; gap: 0.25rem;">
+      <label for="filter-type" style="margin: 0; font-size: 0.875rem;">Type</label>
+      <select id="filter-type" style="width: 100%; padding: 0.4rem; margin: 0; box-sizing: border-box;">
         <option value="">All types</option>
         <option value="model">Model</option>
         <option value="source">Source</option>
@@ -42,7 +42,7 @@
         <option value="other">Other</option>
       </select>
     </div>
-    <div style="display: flex; gap: 0.5rem; margin-left: auto;">
+    <div style="display: flex; gap: 0.5rem; padding-bottom: 0.1rem;">
       <button onclick="loadAssets()" style="padding: 0.4rem 1rem;">Filter</button>
       <button class="secondary" onclick="clearFilters()" style="padding: 0.4rem 1rem;">Clear</button>
     </div>

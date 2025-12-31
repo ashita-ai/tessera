@@ -1234,6 +1234,30 @@ def create_proposals(team_ids: dict[str, str]) -> int:
 
         print(f"  Found {len(target_items)} assets suitable for proposals")
 
+        # Step 0: Check for existing pending proposals and skip those assets
+        pending_resp = httpx.get(
+            f"{API_URL}/api/v1/proposals?status=pending&limit=100",
+            headers=get_headers(),
+            timeout=10,
+        )
+        assets_with_pending_proposals: set[str] = set()
+        if pending_resp.status_code == 200:
+            for p in pending_resp.json().get("results", []):
+                assets_with_pending_proposals.add(p.get("asset_id", ""))
+
+        # Filter out assets that already have pending proposals
+        target_items = [
+            item
+            for item in target_items
+            if item["asset"]["id"] not in assets_with_pending_proposals
+        ]
+
+        if not target_items:
+            print("  All candidate assets already have pending proposals")
+            return 0
+
+        print(f"  {len(target_items)} assets without existing proposals")
+
         # Step 1: Register demo teams as consumers
         print("  Registering demo teams as consumers...")
         demo_team_list = list(demo_consumer_teams.items())

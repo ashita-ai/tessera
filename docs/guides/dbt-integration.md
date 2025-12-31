@@ -59,6 +59,7 @@ The primary integration endpoint. Syncs assets from a dbt manifest with full aut
 | `auto_create_proposals` | boolean | `false` | Create proposals for breaking changes instead of failing |
 | `auto_register_consumers` | boolean | `false` | Register consumers from `meta.tessera.consumers` |
 | `infer_consumers_from_refs` | boolean | `false` | Infer consumer relationships from dbt `ref()` calls |
+| `auto_delete` | boolean | `false` | Soft-delete dbt-managed assets missing from manifest (removed models) |
 
 **Response:**
 
@@ -68,7 +69,9 @@ The primary integration endpoint. Syncs assets from a dbt manifest with full aut
   "assets": {
     "created": 10,
     "updated": 5,
-    "skipped": 2
+    "skipped": 2,
+    "deleted": 1,
+    "deleted_fqns": ["warehouse.staging.stg_legacy"]
   },
   "contracts": {
     "published": 8
@@ -152,6 +155,7 @@ Dry-run preview for CI/CD pipelines. Shows what would change without applying.
   "summary": {
     "new": 3,
     "modified": 5,
+    "deleted": 1,
     "unchanged": 7,
     "breaking": 1
   },
@@ -162,12 +166,24 @@ Dry-run preview for CI/CD pipelines. Shows what would change without applying.
       "change_type": "modified",
       "schema_change_type": "breaking",
       "breaking_changes": ["Removed required field 'email'"]
+    },
+    {
+      "fqn": "warehouse.staging.stg_legacy",
+      "node_id": "model.project.stg_legacy",
+      "change_type": "deleted",
+      "consumers_declared": 2,
+      "has_schema": false
     }
+  ],
+  "warnings": [
+    "warehouse.staging.stg_legacy: Model removed but has 2 registered consumer(s)"
   ]
 }
 ```
 
 Use `blocking: true` in CI to fail the build on breaking changes.
+
+**Deleted Model Detection**: The diff endpoint detects models that exist in Tessera but are missing from the manifest. These appear with `change_type: "deleted"` and include a count of registered consumers. Use this to identify models that may have downstream dependencies before removing them.
 
 ---
 
@@ -525,6 +541,55 @@ The `conflict_mode` parameter controls how existing assets are handled:
 | `ignore` | Skip assets that already exist (default, safe) |
 | `overwrite` | Update existing assets with new metadata |
 | `fail` | Return error if any asset already exists |
+
+---
+
+## Model Deletion Lifecycle
+
+Tessera uses soft deletes for assets. When a dbt model is removed, the asset is marked with a `deleted_at` timestamp rather than being physically deleted. This preserves audit history and allows recovery.
+
+### Detecting Deleted Models
+
+Use the `/dbt/diff` endpoint to preview which models would be deleted:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/sync/dbt/diff \
+  -H "Content-Type: application/json" \
+  -d "{\"manifest\": $(cat target/manifest.json)}"
+```
+
+Models in Tessera but missing from the manifest appear with `change_type: "deleted"` along with their consumer count.
+
+### Enabling Auto-Delete
+
+By default, `/dbt/upload` does not delete assets. Enable with `auto_delete: true`:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/sync/dbt/upload \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"manifest\": $(cat target/manifest.json),
+    \"owner_team_id\": \"your-team-uuid\",
+    \"auto_delete\": true
+  }"
+```
+
+Only dbt-managed assets (those with `dbt_node_id` or `dbt_source_id` in metadata) are deleted. Manually-created assets are never affected.
+
+### What Gets Deleted
+
+| Asset Type | Deleted by auto_delete |
+|------------|------------------------|
+| Models synced from dbt | Yes |
+| Sources synced from dbt | Yes |
+| Seeds synced from dbt | Yes |
+| Snapshots synced from dbt | Yes |
+| Manually-created assets | No |
+| Assets from other sync sources | No |
+
+### Recovery
+
+Soft-deleted assets can be restored by re-syncing a manifest that includes the model. The asset's `deleted_at` will be cleared.
 
 ---
 

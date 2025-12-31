@@ -6,10 +6,10 @@
 <section>
   <h2>Audit Log</h2>
 
-  <div class="filters" style="margin-bottom: 1rem; display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; padding: 0.75rem 1rem; background: var(--light-gray); border: 1px solid #ddd;">
-    <div style="display: flex; align-items: center; gap: 0.5rem;">
-      <label for="filter-entity-type" style="margin: 0; font-size: 0.875rem; white-space: nowrap;">Entity Type:</label>
-      <select id="filter-entity-type" style="width: 120px; padding: 0.4rem; margin: 0;" onchange="onEntityTypeChange()">
+  <div class="filters" style="margin-bottom: 1rem; display: grid; grid-template-columns: 1fr 1fr auto; gap: 0.75rem; align-items: end; padding: 0.75rem 1rem; background: var(--light-gray); border: 1px solid #ddd;">
+    <div style="display: flex; flex-direction: column; gap: 0.25rem;">
+      <label for="filter-entity-type" style="margin: 0; font-size: 0.875rem;">Entity Type</label>
+      <select id="filter-entity-type" style="width: 100%; padding: 0.4rem; margin: 0; box-sizing: border-box;" onchange="onEntityTypeChange()">
         <option value="">All</option>
         <option value="team">Teams</option>
         <option value="asset">Assets</option>
@@ -20,13 +20,13 @@
         <option value="sync">Sync</option>
       </select>
     </div>
-    <div style="display: flex; align-items: center; gap: 0.5rem;">
-      <label for="filter-action" style="margin: 0; font-size: 0.875rem; white-space: nowrap;">Action:</label>
-      <select id="filter-action" style="width: 180px; padding: 0.4rem; margin: 0;">
+    <div style="display: flex; flex-direction: column; gap: 0.25rem;">
+      <label for="filter-action" style="margin: 0; font-size: 0.875rem;">Action</label>
+      <select id="filter-action" style="width: 100%; padding: 0.4rem; margin: 0; box-sizing: border-box;">
         <option value="">All actions</option>
       </select>
     </div>
-    <div style="display: flex; gap: 0.5rem; margin-left: auto;">
+    <div style="display: flex; gap: 0.5rem; padding-bottom: 0.1rem;">
       <button onclick="loadAuditEvents()" style="padding: 0.4rem 1rem;">Filter</button>
       <button class="secondary" onclick="clearFilters()" style="padding: 0.4rem 1rem;">Clear</button>
     </div>
@@ -133,53 +133,166 @@ function formatPayload(payload) {
   return items || '-';
 }
 
+// Cache for resolved names to avoid redundant lookups
+const nameCache = {
+  users: {},
+  teams: {},
+  assets: {},
+  proposals: {},
+  contracts: {}
+};
+
+// Resolve user name from ID
+async function resolveUserName(userId) {
+  if (!userId) return null;
+  if (nameCache.users[userId]) return nameCache.users[userId];
+  try {
+    const user = await api.getUser(userId);
+    nameCache.users[userId] = user.name;
+    return user.name;
+  } catch (e) {
+    return null;
+  }
+}
+
+// Resolve team name from ID
+async function resolveTeamName(teamId) {
+  if (!teamId) return null;
+  if (nameCache.teams[teamId]) return nameCache.teams[teamId];
+  try {
+    const team = await api.getTeam(teamId);
+    nameCache.teams[teamId] = team.name;
+    return team.name;
+  } catch (e) {
+    return null;
+  }
+}
+
+// Resolve asset FQN from ID
+async function resolveAssetFqn(assetId) {
+  if (!assetId) return null;
+  if (nameCache.assets[assetId]) return nameCache.assets[assetId];
+  try {
+    const asset = await api.getAsset(assetId);
+    nameCache.assets[assetId] = asset.fqn;
+    return asset.fqn;
+  } catch (e) {
+    return null;
+  }
+}
+
+// Get link for entity based on type
+function getEntityLink(entityType, entityId, name) {
+  const displayName = name ? escapeHtml(name) : entityId;
+  switch (entityType) {
+    case 'asset':
+      return `<a href="/assets/${entityId}">${displayName}</a>`;
+    case 'team':
+      return `<a href="/teams/${entityId}">${displayName}</a>`;
+    case 'contract':
+      return `<a href="/contracts/${entityId}">${displayName}</a>`;
+    case 'proposal':
+      return `<a href="/proposals/${entityId}">${displayName}</a>`;
+    case 'registration':
+      return `<a href="/registrations">${displayName}</a>`;
+    default:
+      return displayName;
+  }
+}
+
 function formatAuditDetails(event) {
   const parts = [];
+  const payload = event.payload || {};
 
-  // Add entity ID with copy button
-  parts.push(`<div class="audit-detail-row"><span class="audit-label">ID:</span> <code class="copyable" onclick="copyToClipboard('${event.entity_id}')" title="Click to copy">${event.entity_id.substring(0, 8)}...</code></div>`);
-
-  // Add actor info if present
-  if (event.actor_id) {
-    parts.push(`<div class="audit-detail-row"><span class="audit-label">Actor:</span> <code class="copyable" onclick="copyToClipboard('${event.actor_id}')" title="Click to copy">${event.actor_id.substring(0, 8)}...</code></div>`);
+  // For assets and contracts, show FQN prominently (from payload or we'll resolve it)
+  if (payload.fqn) {
+    const link = event.entity_type === 'asset'
+      ? `<a href="/assets/${event.entity_id}">${escapeHtml(payload.fqn)}</a>`
+      : (event.entity_type === 'contract'
+        ? `<a href="/contracts/${event.entity_id}">${escapeHtml(payload.fqn)}</a>`
+        : `<span class="audit-fqn">${escapeHtml(payload.fqn)}</span>`);
+    parts.push(`<div class="audit-detail-row"><span class="audit-label">Asset:</span> ${link}</div>`);
+  } else if (event.entity_type === 'asset') {
+    // We'll show the ID with a placeholder that gets resolved
+    parts.push(`<div class="audit-detail-row"><span class="audit-label">Asset:</span> <a href="/assets/${event.entity_id}" data-resolve-asset="${event.entity_id}">${event.entity_id}</a></div>`);
   }
 
-  // Format payload based on entity type
-  if (event.payload && Object.keys(event.payload).length > 0) {
-    const payload = event.payload;
+  // For proposals, show proposal link
+  if (event.entity_type === 'proposal') {
+    parts.push(`<div class="audit-detail-row"><span class="audit-label">Proposal:</span> <a href="/proposals/${event.entity_id}">${event.entity_id}</a></div>`);
+  }
 
-    // FQN is the most important - show prominently
-    if (payload.fqn) {
-      parts.push(`<div class="audit-detail-row"><span class="audit-label">FQN:</span> <span class="audit-fqn">${escapeHtml(payload.fqn)}</span></div>`);
+  // For contracts, show version and contract link
+  if (event.entity_type === 'contract') {
+    if (!payload.fqn) {
+      parts.push(`<div class="audit-detail-row"><span class="audit-label">Contract:</span> <a href="/contracts/${event.entity_id}">${event.entity_id}</a></div>`);
     }
-
-    // Version info
     if (payload.version) {
-      parts.push(`<div class="audit-detail-row"><span class="audit-label">Version:</span> ${escapeHtml(payload.version)}</div>`);
+      parts.push(`<div class="audit-detail-row"><span class="audit-label">Version:</span> v${escapeHtml(payload.version)}</div>`);
     }
+  }
 
-    // Force flag
-    if (payload.force !== undefined) {
-      parts.push(`<div class="audit-detail-row"><span class="audit-label">Force:</span> ${payload.force ? 'yes' : 'no'}</div>`);
-    }
+  // For teams, show team name/link
+  if (event.entity_type === 'team') {
+    const teamName = payload.name ? escapeHtml(payload.name) : event.entity_id;
+    parts.push(`<div class="audit-detail-row"><span class="audit-label">Team:</span> <a href="/teams/${event.entity_id}">${teamName}</a></div>`);
+  }
 
-    // Triggered by
-    if (payload.triggered_by) {
-      parts.push(`<div class="audit-detail-row"><span class="audit-label">Source:</span> ${escapeHtml(payload.triggered_by)}</div>`);
-    }
+  // Actor - show with placeholder for name resolution
+  if (event.actor_id) {
+    parts.push(`<div class="audit-detail-row"><span class="audit-label">Actor:</span> <span data-resolve-actor="${event.actor_id}">${event.actor_id}</span></div>`);
+  }
 
-    // Other payload items (exclude ones we already showed)
-    const shown = ['fqn', 'version', 'force', 'triggered_by'];
-    const other = Object.entries(payload)
-      .filter(([k, v]) => !shown.includes(k) && v !== null && v !== undefined)
-      .map(([k, v]) => `${escapeHtml(k)}: ${escapeHtml(String(v).substring(0, 50))}${String(v).length > 50 ? '...' : ''}`)
-      .join(', ');
-    if (other) {
-      parts.push(`<div class="audit-detail-row audit-detail-other">${other}</div>`);
-    }
+  // Force flag
+  if (payload.force !== undefined && payload.force === true) {
+    parts.push(`<div class="audit-detail-row"><span class="audit-label" style="color: #c00;">Force:</span> <strong style="color: #c00;">yes</strong></div>`);
+  }
+
+  // Triggered by
+  if (payload.triggered_by) {
+    parts.push(`<div class="audit-detail-row"><span class="audit-label">Source:</span> ${escapeHtml(payload.triggered_by)}</div>`);
+  }
+
+  // Other payload items (exclude ones we already showed)
+  const shown = ['fqn', 'version', 'force', 'triggered_by', 'name'];
+  const other = Object.entries(payload)
+    .filter(([k, v]) => !shown.includes(k) && v !== null && v !== undefined)
+    .map(([k, v]) => `<strong>${escapeHtml(k)}:</strong> ${escapeHtml(String(v))}`)
+    .join(' &nbsp;|&nbsp; ');
+  if (other) {
+    parts.push(`<div class="audit-detail-row audit-detail-other" style="margin-top: 0.25rem; color: var(--gray); font-size: 0.75rem;">${other}</div>`);
   }
 
   return parts.join('');
+}
+
+// Resolve all placeholders in the table after loading
+async function resolveAuditNames() {
+  // Resolve actors (could be users or teams)
+  const actorElements = document.querySelectorAll('[data-resolve-actor]');
+  for (const el of actorElements) {
+    const actorId = el.dataset.resolveActor;
+    // Try user first, then team
+    let name = await resolveUserName(actorId);
+    if (name) {
+      el.innerHTML = `<a href="/users/${actorId}">${escapeHtml(name)}</a>`;
+    } else {
+      name = await resolveTeamName(actorId);
+      if (name) {
+        el.innerHTML = `<a href="/teams/${actorId}">${escapeHtml(name)}</a>`;
+      }
+    }
+  }
+
+  // Resolve asset FQNs
+  const assetElements = document.querySelectorAll('[data-resolve-asset]');
+  for (const el of assetElements) {
+    const assetId = el.dataset.resolveAsset;
+    const fqn = await resolveAssetFqn(assetId);
+    if (fqn) {
+      el.textContent = fqn;
+    }
+  }
 }
 
 function copyToClipboard(text) {
@@ -261,6 +374,9 @@ async function loadAuditEvents() {
     } else {
       paginationContainer.innerHTML = `<span style="color: var(--gray);">Showing ${data.results.length} of ${data.total} results</span>`;
     }
+
+    // Resolve names asynchronously after table is rendered
+    resolveAuditNames();
   } catch (error) {
     showError(error.message);
     container.innerHTML = '<div class="error">Failed to load audit events. Admin access required.</div>';

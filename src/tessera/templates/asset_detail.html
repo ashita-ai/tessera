@@ -38,6 +38,13 @@
 </section>
 
 <section>
+  <h2>Proposal History</h2>
+  <div id="proposal-history">
+    <div class="loading">Loading...</div>
+  </div>
+</section>
+
+<section>
   <h2>Consumers</h2>
   <div id="consumers">
     <div class="loading">Loading...</div>
@@ -219,6 +226,38 @@ const assetId = '{{ asset_id }}';
 let teamsCache = [];
 let activeContractCache = null;
 let assetCache = null;
+
+// Recursively collect all properties from a schema, including nested objects
+function collectSchemaFields(schema, prefix = '') {
+  const results = [];
+  const props = schema?.properties || {};
+  const required = new Set(schema?.required || []);
+
+  for (const [key, prop] of Object.entries(props)) {
+    const fullPath = prefix ? `${prefix}.${key}` : key;
+    const isRequired = required.has(key);
+
+    results.push({
+      path: fullPath,
+      key: key,
+      depth: prefix.split('.').filter(Boolean).length,
+      prop: prop,
+      required: isRequired
+    });
+
+    // Recurse into nested objects
+    if (prop.type === 'object' && prop.properties) {
+      results.push(...collectSchemaFields(prop, fullPath));
+    }
+
+    // Handle items in arrays
+    if (prop.type === 'array' && prop.items && prop.items.type === 'object' && prop.items.properties) {
+      results.push(...collectSchemaFields(prop.items, `${fullPath}[]`));
+    }
+  }
+
+  return results;
+}
 
 function closeModal() {
   document.getElementById('modal-overlay').style.display = 'none';
@@ -638,30 +677,49 @@ async function loadAssetDetail() {
     // Current schema
     const schemaContainer = document.getElementById('current-schema');
     if (activeContract && activeContract.schema_def) {
-      const props = activeContract.schema_def.properties || {};
-      const required = new Set(activeContract.schema_def.required || []);
-      const columns = Object.entries(props);
+      const fields = collectSchemaFields(activeContract.schema_def);
 
-      if (columns.length > 0) {
+      if (fields.length > 0) {
         schemaContainer.innerHTML = `
           <table>
             <thead>
               <tr>
-                <th>Column</th>
+                <th>Field</th>
                 <th>Type</th>
                 <th>Required</th>
-                <th>Description</th>
+                <th>Details</th>
               </tr>
             </thead>
             <tbody>
-              ${columns.map(([name, def]) => `
-                <tr>
-                  <td><code>${escapeHtml(name)}</code></td>
-                  <td><code>${escapeHtml(def.type || 'unknown')}</code></td>
-                  <td>${required.has(name) ? '<span style="color: red;">Yes</span>' : 'No'}</td>
-                  <td>${def.description ? escapeHtml(def.description) : '<em>-</em>'}</td>
-                </tr>
-              `).join('')}
+              ${fields.map(field => {
+                const depth = (field.path.match(/\./g) || []).length;
+                const indent = '&nbsp;&nbsp;'.repeat(depth);
+                const displayName = field.path.split('.').pop().replace('[]', '');
+
+                let typeStr = field.prop.type || 'unknown';
+                if (field.prop.type === 'array' && field.prop.items) {
+                  typeStr = 'array[' + (field.prop.items.type || 'any') + ']';
+                }
+
+                const details = [];
+                if (field.prop.description) details.push(field.prop.description);
+                if (field.prop.format) details.push('format: ' + field.prop.format);
+                if (field.prop.enum) details.push('enum: [' + field.prop.enum.join(', ') + ']');
+                if (field.prop.minimum !== undefined) details.push('min: ' + field.prop.minimum);
+                if (field.prop.maximum !== undefined) details.push('max: ' + field.prop.maximum);
+
+                const bgStyle = depth > 0 ? ' style="background: #fafafa;"' : '';
+                const pathLabel = depth > 0 ? '<small style="color: var(--gray); margin-left: 0.5rem;">' + escapeHtml(field.path) + '</small>' : '';
+                const reqHtml = field.required ? '<span style="color: red;">Yes</span>' : 'No';
+                const detailsHtml = details.length > 0 ? '<small>' + escapeHtml(details.join(' | ')) + '</small>' : '<em>-</em>';
+
+                return '<tr' + bgStyle + '>' +
+                  '<td>' + indent + '<code>' + escapeHtml(displayName) + '</code>' + pathLabel + '</td>' +
+                  '<td><code>' + escapeHtml(typeStr) + '</code></td>' +
+                  '<td>' + reqHtml + '</td>' +
+                  '<td>' + detailsHtml + '</td>' +
+                  '</tr>';
+              }).join('')}
             </tbody>
           </table>
         `;
@@ -841,6 +899,58 @@ async function loadAssetDetail() {
       }
     } catch (e) {
       proposalsContainer.innerHTML = '<div class="empty">No proposals.</div>';
+    }
+
+    // Proposal History (approved/rejected)
+    const proposalHistoryContainer = document.getElementById('proposal-history');
+    try {
+      // Fetch all proposals for this asset (no status filter)
+      const allProposalsData = await api.listProposals({ asset_id: assetId });
+      const allProposals = allProposalsData.results || [];
+
+      // Filter to only show resolved proposals (approved/rejected)
+      const resolvedProposals = allProposals.filter(p => p.status === 'approved' || p.status === 'rejected');
+
+      if (resolvedProposals.length > 0) {
+        proposalHistoryContainer.innerHTML = `
+          <table>
+            <thead>
+              <tr>
+                <th>Status</th>
+                <th>Change Type</th>
+                <th>Breaking Changes</th>
+                <th>Proposed</th>
+                <th>Resolved</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${resolvedProposals.map(p => {
+                const statusColor = p.status === 'approved' ? 'var(--success)' : 'var(--error)';
+                const statusIcon = p.status === 'approved' ? '✓' : '✗';
+                const changeCount = p.breaking_changes_count || (p.breaking_changes || []).length || 0;
+                return `
+                <tr>
+                  <td>
+                    <span style="color: ${statusColor}; font-weight: bold;">
+                      ${statusIcon} ${p.status}
+                    </span>
+                  </td>
+                  <td><span class="status status-deprecated">${escapeHtml(p.change_type || 'major')}</span></td>
+                  <td><strong>${changeCount}</strong></td>
+                  <td>${formatDate(p.proposed_at)}</td>
+                  <td>${p.resolved_at ? formatDate(p.resolved_at) : '-'}</td>
+                  <td><a href="/proposals/${p.id}">View</a></td>
+                </tr>
+              `}).join('')}
+            </tbody>
+          </table>
+        `;
+      } else {
+        proposalHistoryContainer.innerHTML = '<div class="empty">No resolved proposals.</div>';
+      }
+    } catch (e) {
+      proposalHistoryContainer.innerHTML = '<div class="empty">No proposal history.</div>';
     }
 
     // Consumers (registrations)
