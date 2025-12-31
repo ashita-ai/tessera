@@ -63,24 +63,57 @@ async def close_redis() -> None:
 
 
 def _make_key(prefix: str, *parts: str) -> str:
-    """Create a cache key from prefix and parts."""
+    """Creates a namespaced cache key from a prefix and variable parts.
+
+    This function standardizes key generation across the application by
+    prepending the application namespace ('tessera') and joining components
+    with a consistent separator.
+
+    Args:
+        prefix (str): The category or section for the key.
+        *parts (str): Variable number of string arguments to form the unique
+            identifier.
+
+    Returns:
+        str: The fully formatted cache key (e.g., "tessera:user:12345").
+    """
     key_data = ":".join(str(p) for p in parts)
     return f"tessera:{prefix}:{key_data}"
 
 
 def _type_aware_serializer(obj: Any) -> str:
-    """Serialize objects with type information to prevent collisions.
+    """Serializes objects with explicit type information to prevent hash collisions.
 
-    This ensures that {"id": 123} and {"id": "123"} produce different hashes.
+    This helper is used as the `default` argument for JSON serialization. It
+    ensures that values which might look identical in standard JSON (e.g., the
+    integer 123 vs the string "123") result in different serialized strings.
+
+    Args:
+        obj (Any): The object to be serialized.
+
+    Returns:
+        str: A string representation combining the type name and the object's
+            representation (e.g., "int:123" or "str:'123'").
     """
     return f"{type(obj).__name__}:{obj!r}"
 
 
 def _hash_dict(data: dict[str, Any]) -> str:
-    """Create a hash of a dictionary for cache key generation.
+    """Generates a deterministic hash of a dictionary for use in cache keys.
 
-    Uses type-aware serialization to prevent collisions between values that
-    stringify similarly (e.g., int 123 vs string "123").
+    This function is essential for creating cache keys based on complex input
+    parameters (like query filters or configuration objects). It sorts keys
+    and uses type-aware serialization to ensure that functionally identical
+    dictionaries produce the same hash, while avoiding collisions between
+    different types (e.g., int 123 vs string "123").
+
+    Args:
+        data (dict[str, Any]): The dictionary to hash. Keys are sorted before
+            hashing to ensure determinism.
+
+    Returns:
+        str: The first 16 characters of the SHA256 hex digest of the
+            serialized dictionary.
     """
     serialized = json.dumps(data, sort_keys=True, default=_type_aware_serializer)
     return hashlib.sha256(serialized.encode()).hexdigest()[:16]
