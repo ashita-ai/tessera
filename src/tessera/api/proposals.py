@@ -29,7 +29,7 @@ from tessera.db import (
     UserDB,
     get_session,
 )
-from tessera.models import Acknowledgment, AcknowledgmentCreate, Contract, Proposal
+from tessera.models import Acknowledgment, AcknowledgmentCreate, Contract, ObjectionCreate, Proposal
 from tessera.models.enums import (
     AcknowledgmentResponseType,
     APIKeyScope,
@@ -715,6 +715,111 @@ async def withdraw_proposal(
     )
 
     return proposal
+
+
+@router.post("/{proposal_id}/object", status_code=201)
+@limit_write
+async def file_objection(
+    request: Request,
+    auth: Auth,
+    proposal_id: UUID,
+    objection: ObjectionCreate,
+    objector_team_id: UUID = Query(..., description="Team ID filing the objection"),
+    objector_user_id: UUID | None = Query(None, description="User ID filing the objection"),
+    _: None = RequireWrite,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """File an objection to a proposal as an affected team.
+
+    Objections are non-blocking - they don't prevent the proposal from being approved,
+    but they are prominently visible to help coordinate discussions between teams.
+    Only teams listed as affected_teams can file objections.
+
+    Requires write scope.
+    """
+    # Resource-level auth: must own the objector team or be admin
+    if objector_team_id != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):
+        raise ForbiddenError(
+            "You can only file objections on behalf of your own team",
+            code=ErrorCode.FORBIDDEN,
+            extra={"code": "INSUFFICIENT_PERMISSIONS"},
+        )
+
+    # Get proposal with asset in single query
+    result = await session.execute(
+        select(ProposalDB, AssetDB)
+        .join(AssetDB, ProposalDB.asset_id == AssetDB.id)
+        .where(ProposalDB.id == proposal_id)
+    )
+    row = result.one_or_none()
+    if not row:
+        raise NotFoundError(ErrorCode.PROPOSAL_NOT_FOUND, "Proposal not found")
+    proposal: ProposalDB = row[0]
+    asset: AssetDB = row[1]
+
+    if proposal.status != ProposalStatus.PENDING:
+        raise BadRequestError("Proposal is not pending", code=ErrorCode.PROPOSAL_NOT_PENDING)
+
+    # Get team info
+    team_result = await session.execute(select(TeamDB).where(TeamDB.id == objector_team_id))
+    objector_team = team_result.scalar_one_or_none()
+    if not objector_team:
+        raise NotFoundError(ErrorCode.TEAM_NOT_FOUND, "Team not found")
+
+    # Verify the team is in affected_teams
+    affected_team_ids = {t.get("team_id") for t in proposal.affected_teams}
+    if str(objector_team_id) not in affected_team_ids:
+        raise ForbiddenError(
+            "Only affected teams can file objections. "
+            "Your team is not downstream of this asset.",
+            code=ErrorCode.FORBIDDEN,
+            extra={"code": "NOT_AFFECTED_TEAM"},
+        )
+
+    # Check for duplicate objection from same team
+    existing_objections = proposal.objections or []
+    for obj in existing_objections:
+        if obj.get("team_id") == str(objector_team_id):
+            raise DuplicateError(
+                ErrorCode.DUPLICATE_ACKNOWLEDGMENT,  # Reuse error code
+                "Already objected by this team",
+            )
+
+    # Get objector user name if provided
+    objector_user_name = None
+    if objector_user_id:
+        user_result = await session.execute(select(UserDB).where(UserDB.id == objector_user_id))
+        objector_user = user_result.scalar_one_or_none()
+        if objector_user:
+            objector_user_name = objector_user.name
+
+    # Build the objection record
+    objection_record = {
+        "team_id": str(objector_team_id),
+        "team_name": objector_team.name,
+        "reason": objection.reason,
+        "objected_at": datetime.now(UTC).isoformat(),
+        "objected_by_user_id": str(objector_user_id) if objector_user_id else None,
+        "objected_by_user_name": objector_user_name,
+    }
+
+    # Append to objections list
+    updated_objections = list(existing_objections)
+    updated_objections.append(objection_record)
+    proposal.objections = updated_objections
+
+    await session.flush()
+    await session.refresh(proposal)
+
+    return {
+        "action": "objection_filed",
+        "proposal_id": str(proposal_id),
+        "asset_fqn": asset.fqn,
+        "objection": objection_record,
+        "total_objections": len(updated_objections),
+        "note": "Objections are non-blocking. The proposal can still be approved, "
+        "but objections are visible to all parties to facilitate coordination.",
+    }
 
 
 @router.post("/{proposal_id}/force", response_model=Proposal)

@@ -8,7 +8,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from tessera.config import settings
-from tessera.models.enums import GuaranteeMode, ResourceType
+from tessera.models.enums import GuaranteeMode, ResourceType, SemverMode
 
 # FQN pattern: alphanumeric/underscores separated by dots, at least 2 segments
 # Examples: db.schema.table, schema.table, my_db.my_schema.my_table
@@ -52,6 +52,7 @@ class AssetCreate(AssetBase):
     owner_user_id: UUID | None = None
     resource_type: ResourceType = ResourceType.OTHER
     guarantee_mode: GuaranteeMode = GuaranteeMode.NOTIFY
+    semver_mode: SemverMode = SemverMode.AUTO
 
 
 class AssetUpdate(BaseModel):
@@ -63,6 +64,7 @@ class AssetUpdate(BaseModel):
     environment: str | None = Field(None, min_length=1, max_length=50)
     resource_type: ResourceType | None = None
     guarantee_mode: GuaranteeMode | None = None
+    semver_mode: SemverMode | None = None
     metadata: dict[str, Any] | None = None
 
 
@@ -78,6 +80,7 @@ class Asset(BaseModel):
     environment: str
     resource_type: ResourceType = ResourceType.OTHER
     guarantee_mode: GuaranteeMode = GuaranteeMode.NOTIFY
+    semver_mode: SemverMode = SemverMode.AUTO
     metadata: dict[str, Any] = Field(default_factory=dict, validation_alias="metadata_")
     created_at: datetime
 

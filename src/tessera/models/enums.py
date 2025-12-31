@@ -86,6 +86,17 @@ class GuaranteeMode(StrEnum):
     IGNORE = "ignore"  # Don't track guarantee changes
 
 
+class SemverMode(StrEnum):
+    """Semantic versioning enforcement mode for assets.
+
+    Controls how version numbers are handled when publishing contracts.
+    """
+
+    AUTO = "auto"  # Automatically assign version based on change type (default)
+    SUGGEST = "suggest"  # Return suggested version; user can override
+    ENFORCE = "enforce"  # Reject if user-provided version doesn't match change type
+
+
 class GuaranteeChangeSeverity(StrEnum):
     """Severity of a guarantee change."""
 

@@ -39,18 +39,22 @@ from tessera.models import (
     ContractCreate,
     Proposal,
 )
+from tessera.models.contract import VersionSuggestion
 from tessera.models.enums import (
     APIKeyScope,
     AuditRunStatus,
+    ChangeType,
     ContractStatus,
     RegistrationStatus,
     ResourceType,
     SchemaFormat,
+    SemverMode,
 )
 from tessera.services import (
     audit,
     check_compatibility,
     diff_schemas,
+    get_affected_parties,
     log_contract_published,
     log_proposal_created,
     validate_json_schema,
@@ -126,6 +130,111 @@ def bump_version(current: str, bump_type: str) -> str:
         return f"{major}.{minor + 1}.0"
 
 
+def compute_version_suggestion(
+    current_version: str | None,
+    change_type: ChangeType,
+    is_compatible: bool,
+) -> VersionSuggestion:
+    """Compute the suggested version based on schema diff analysis.
+
+    Args:
+        current_version: The current contract version (None if first contract)
+        change_type: The detected change type from schema diff
+        is_compatible: Whether the change is backward compatible
+
+    Returns:
+        A VersionSuggestion with the suggested version and explanation
+    """
+    if current_version is None:
+        return VersionSuggestion(
+            suggested_version="1.0.0",
+            current_version=None,
+            change_type=ChangeType.PATCH,
+            reason="First contract for this asset",
+            is_first_contract=True,
+        )
+
+    major, minor, patch = parse_semver(current_version)
+
+    if not is_compatible:
+        # Breaking change = major bump
+        suggested = f"{major + 1}.0.0"
+        reason = "Breaking change detected - major version bump required"
+        actual_change_type = ChangeType.MAJOR
+    elif change_type == ChangeType.MAJOR:
+        # Schema diff says major, but compatibility check says OK - treat as minor
+        suggested = f"{major}.{minor + 1}.0"
+        reason = "Backward-compatible schema additions - minor version bump"
+        actual_change_type = ChangeType.MINOR
+    elif change_type == ChangeType.MINOR:
+        suggested = f"{major}.{minor + 1}.0"
+        reason = "Backward-compatible schema additions - minor version bump"
+        actual_change_type = ChangeType.MINOR
+    else:
+        # PATCH - no schema changes or only compatible refinements
+        suggested = f"{major}.{minor}.{patch + 1}"
+        reason = "No breaking schema changes - patch version bump"
+        actual_change_type = ChangeType.PATCH
+
+    return VersionSuggestion(
+        suggested_version=suggested,
+        current_version=current_version,
+        change_type=actual_change_type,
+        reason=reason,
+        is_first_contract=False,
+    )
+
+
+def validate_version_for_change_type(
+    user_version: str,
+    current_version: str,
+    suggested_change_type: ChangeType,
+) -> tuple[bool, str | None]:
+    """Validate that user-provided version matches the detected change type.
+
+    Args:
+        user_version: The version provided by the user
+        current_version: The current contract version
+        suggested_change_type: The change type detected from schema diff
+
+    Returns:
+        Tuple of (is_valid, error_message). If valid, error_message is None.
+    """
+    try:
+        user_major, user_minor, user_patch = parse_semver(user_version)
+        curr_major, curr_minor, curr_patch = parse_semver(current_version)
+    except ValueError as e:
+        return False, str(e)
+
+    # Version must be greater than current
+    user_tuple = (user_major, user_minor, user_patch)
+    curr_tuple = (curr_major, curr_minor, curr_patch)
+    if user_tuple <= curr_tuple:
+        return (
+            False,
+            f"Version {user_version} must be greater than current version {current_version}",
+        )
+
+    # For major changes, major version must increase
+    if suggested_change_type == ChangeType.MAJOR:
+        if user_major <= curr_major:
+            return False, (
+                f"Breaking change requires major version bump. "
+                f"Expected {curr_major + 1}.0.0 or higher, got {user_version}"
+            )
+
+    # For minor changes, version must increase appropriately
+    # (major bump is also acceptable for minor changes)
+    if suggested_change_type == ChangeType.MINOR:
+        if user_major == curr_major and user_minor <= curr_minor:
+            return False, (
+                f"Backward-compatible additions require at least a minor version bump. "
+                f"Expected {curr_major}.{curr_minor + 1}.0 or higher, got {user_version}"
+            )
+
+    return True, None
+
+
 async def _get_team_name(session: AsyncSession, team_id: UUID) -> str:
     """Get team name by ID, returns 'unknown' if not found."""
     result = await session.execute(select(TeamDB.name).where(TeamDB.id == team_id))
@@ -197,6 +306,8 @@ async def create_asset(
         owner_user_id=asset.owner_user_id,
         environment=asset.environment,
         resource_type=asset.resource_type,
+        guarantee_mode=asset.guarantee_mode,
+        semver_mode=asset.semver_mode,
         metadata_=asset.metadata,
     )
     session.add(db_asset)
@@ -508,6 +619,10 @@ async def update_asset(
         asset.environment = update.environment
     if update.resource_type is not None:
         asset.resource_type = update.resource_type
+    if update.guarantee_mode is not None:
+        asset.guarantee_mode = update.guarantee_mode
+    if update.semver_mode is not None:
+        asset.semver_mode = update.semver_mode
     if update.metadata is not None:
         asset.metadata_ = update.metadata
 
@@ -804,24 +919,65 @@ async def create_contract(
     )
     current_contract = contract_result.scalar_one_or_none()
 
-    # Auto-generate version if not provided
+    # Pre-compute schema diff for version suggestion (if there's a current contract)
+    version_suggestion: VersionSuggestion | None = None
+    if current_contract:
+        pre_diff = diff_schemas(current_contract.schema_def, schema_to_store)
+        pre_is_compatible, _pre_breaks = check_compatibility(
+            current_contract.schema_def,
+            schema_to_store,
+            current_contract.compatibility_mode,
+        )
+        version_suggestion = compute_version_suggestion(
+            current_contract.version,
+            pre_diff.change_type,
+            pre_is_compatible,
+        )
+    else:
+        version_suggestion = compute_version_suggestion(None, ChangeType.PATCH, True)
+
+    # Get asset's semver mode
+    semver_mode = asset.semver_mode
+
+    # Handle version based on semver_mode
     version_auto_generated = False
     if contract.version is None:
-        version_auto_generated = True
-        if not current_contract:
-            # First contract for this asset
-            version = "1.0.0"
-        else:
-            # Determine bump type based on compatibility
-            is_compatible, _unused = check_compatibility(
-                current_contract.schema_def,
-                schema_to_store,
-                current_contract.compatibility_mode,
+        # No version provided by user
+        if semver_mode == SemverMode.SUGGEST:
+            # Return suggestion instead of auto-generating
+            msg = (
+                "Version not provided. Please review the suggested version "
+                "and re-submit with an explicit version."
             )
-            bump_type = "minor" if is_compatible else "major"
-            version = bump_version(current_contract.version, bump_type)
+            return {
+                "action": "version_required",
+                "message": msg,
+                "version_suggestion": version_suggestion.model_dump(),
+            }
+        else:
+            # AUTO mode: auto-generate version
+            version_auto_generated = True
+            version = version_suggestion.suggested_version
     else:
+        # User provided a version
         version = contract.version
+
+        # In ENFORCE mode, validate the user's version matches the change type
+        if semver_mode == SemverMode.ENFORCE and current_contract:
+            is_valid, error_msg = validate_version_for_change_type(
+                version,
+                current_contract.version,
+                version_suggestion.change_type,
+            )
+            if not is_valid:
+                raise BadRequestError(
+                    error_msg or "Invalid version for change type",
+                    code=ErrorCode.INVALID_VERSION,
+                    details={
+                        "provided_version": version,
+                        "version_suggestion": version_suggestion.model_dump(),
+                    },
+                )
 
     # Check if version already exists for this asset
     existing_version_result = await session.execute(
@@ -955,6 +1111,11 @@ async def create_contract(
         return response
 
     # Breaking change without force = create proposal
+    # Compute affected parties from lineage (exclude the owner team)
+    affected_teams, affected_assets = await get_affected_parties(
+        session, asset_id, exclude_team_id=asset.owner_team_id
+    )
+
     db_proposal = ProposalDB(
         asset_id=asset_id,
         proposed_schema=schema_to_store,
@@ -962,6 +1123,9 @@ async def create_contract(
         breaking_changes=[bc.to_dict() for bc in breaking_changes],
         proposed_by=published_by,
         proposed_by_user_id=published_by_user_id,
+        affected_teams=affected_teams,
+        affected_assets=affected_assets,
+        objections=[],  # Initially empty
     )
     session.add(db_proposal)
     await session.flush()

@@ -1,5 +1,6 @@
 """Business logic services."""
 
+from tessera.services.affected_parties import get_affected_parties
 from tessera.services.audit import (
     AuditAction,
     log_contract_published,
@@ -44,6 +45,8 @@ from tessera.services.schema_validator import (
 )
 
 __all__ = [
+    # Affected parties
+    "get_affected_parties",
     # Schema diffing
     "BreakingChange",
     "SchemaDiff",

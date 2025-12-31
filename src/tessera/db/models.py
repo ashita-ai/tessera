@@ -29,6 +29,7 @@ from tessera.models.enums import (
     RegistrationStatus,
     ResourceType,
     SchemaFormat,
+    SemverMode,
     UserRole,
     WebhookDeliveryStatus,
 )
@@ -110,6 +111,7 @@ class AssetDB(Base):
     guarantee_mode: Mapped[GuaranteeMode] = mapped_column(
         Enum(GuaranteeMode), default=GuaranteeMode.NOTIFY
     )
+    semver_mode: Mapped[SemverMode] = mapped_column(Enum(SemverMode), default=SemverMode.AUTO)
     metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     deleted_at: Mapped[datetime | None] = mapped_column(
@@ -216,6 +218,14 @@ class ProposalDB(Base):
         DateTime(timezone=True), nullable=True, index=True
     )
     auto_expire: Mapped[bool] = mapped_column(default=False)
+
+    # Affected parties discovered via lineage (not registered consumers)
+    # Teams owning downstream assets that will be affected by this change
+    affected_teams: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    # Downstream assets that depend on this asset and will be affected
+    affected_assets: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    # Objections filed by affected teams (non-blocking but visible)
+    objections: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
 
     # Relationships
     asset: Mapped["AssetDB"] = relationship(back_populates="proposals")

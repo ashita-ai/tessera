@@ -31,6 +31,20 @@
 </section>
 
 <section>
+  <h2>Affected Downstream Teams (via Lineage)</h2>
+  <div id="affected-parties">
+    <div class="loading">Loading...</div>
+  </div>
+</section>
+
+<section>
+  <h2>Objections</h2>
+  <div id="objections">
+    <div class="loading">Loading...</div>
+  </div>
+</section>
+
+<section>
   <h2>Acknowledgments</h2>
   <div id="acknowledgments">
     <div class="loading">Loading...</div>
@@ -509,6 +523,97 @@ async function loadProposalDetail() {
           ` : ''}
         </div>
       `;
+    }
+
+    // Affected Parties (lineage-discovered teams)
+    const affectedContainer = document.getElementById('affected-parties');
+    const affectedTeams = proposal.affected_teams || [];
+    const affectedAssets = proposal.affected_assets || [];
+
+    if (affectedTeams.length > 0 || affectedAssets.length > 0) {
+      affectedContainer.innerHTML = `
+        <div class="card" style="border-left: 6px solid #5555ff; background: #f5f5ff;">
+          <p style="margin-top: 0;">
+            <strong>${affectedTeams.length}</strong> team${affectedTeams.length !== 1 ? 's' : ''} own
+            <strong>${affectedAssets.length}</strong> downstream asset${affectedAssets.length !== 1 ? 's' : ''}
+            that depend on this asset and may be affected by this change.
+          </p>
+          <p style="color: var(--gray); font-size: 0.9rem;">
+            These teams will be notified and can file objections, but their approval is not required.
+          </p>
+
+          ${affectedAssets.length > 0 ? `
+            <h4 style="margin: 1rem 0 0.5rem 0;">Affected Downstream Assets</h4>
+            <table>
+              <thead>
+                <tr>
+                  <th>Asset</th>
+                  <th>Owner Team</th>
+                  <th>Owner User</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${affectedAssets.map(a => `
+                  <tr>
+                    <td><a href="/assets/${a.asset_id}"><code>${escapeHtml(a.asset_fqn)}</code></a></td>
+                    <td><a href="/teams/${a.owner_team_id}">${escapeHtml(a.owner_team_name || 'Unknown')}</a></td>
+                    <td>${a.owner_user_name
+                      ? `<a href="/users/${a.owner_user_id}">${escapeHtml(a.owner_user_name)}</a>`
+                      : '<em style="color: var(--gray);">-</em>'
+                    }</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          ` : ''}
+        </div>
+      `;
+    } else {
+      affectedContainer.innerHTML = '<div class="empty">No downstream assets depend on this asset via lineage.</div>';
+    }
+
+    // Objections (non-blocking but prominently displayed)
+    const objectionsContainer = document.getElementById('objections');
+    const objections = proposal.objections || [];
+
+    if (objections.length > 0) {
+      objectionsContainer.innerHTML = `
+        <div class="card" style="border-left: 6px solid #ff8c00; background: #fff8f0;">
+          <div style="margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+            <span style="font-size: 1.25rem; color: #ff8c00;">!</span>
+            <strong style="color: #ff8c00;">${objections.length} Objection${objections.length !== 1 ? 's' : ''} Filed</strong>
+          </div>
+          <p style="color: var(--gray); font-size: 0.9rem; margin-top: 0;">
+            Objections are non-blocking. The proposal can still be approved, but these concerns
+            should be addressed through team coordination.
+          </p>
+          <table>
+            <thead>
+              <tr>
+                <th>Team</th>
+                <th>Filed By</th>
+                <th>Reason</th>
+                <th>Filed At</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${objections.map(o => `
+                <tr>
+                  <td><a href="/teams/${o.team_id}">${escapeHtml(o.team_name)}</a></td>
+                  <td>${o.objected_by_user_name
+                    ? `<a href="/users/${o.objected_by_user_id}">${escapeHtml(o.objected_by_user_name)}</a>`
+                    : '<em style="color: var(--gray);">-</em>'
+                  }</td>
+                  <td>${escapeHtml(o.reason)}</td>
+                  <td>${formatDate(o.objected_at)}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    } else {
+      objectionsContainer.innerHTML = '<div class="empty">No objections have been filed.</div>';
     }
 
     // Acknowledgments

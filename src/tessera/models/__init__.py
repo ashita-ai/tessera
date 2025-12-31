@@ -37,7 +37,14 @@ from tessera.models.enums import (
     ProposalStatus,
     RegistrationStatus,
 )
-from tessera.models.proposal import Proposal, ProposalCreate
+from tessera.models.proposal import (
+    AffectedAsset,
+    AffectedTeam,
+    Objection,
+    ObjectionCreate,
+    Proposal,
+    ProposalCreate,
+)
 from tessera.models.registration import Registration, RegistrationCreate, RegistrationUpdate
 from tessera.models.team import Team, TeamCreate, TeamUpdate
 from tessera.models.user import User, UserCreate, UserUpdate, UserWithTeam
@@ -79,6 +86,10 @@ __all__ = [
     "RegistrationCreate",
     "RegistrationUpdate",
     # Proposal
+    "AffectedAsset",
+    "AffectedTeam",
+    "Objection",
+    "ObjectionCreate",
     "Proposal",
     "ProposalCreate",
     # Acknowledgment

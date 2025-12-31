@@ -193,6 +193,27 @@ async def get_lineage(
         for dep_asset_id, dep_type, fqn, team_name in upstream_result.all()
     ]
 
+    # If no upstream from dependencies table, fall back to metadata.depends_on
+    if not upstream:
+        depends_on_fqns = asset.metadata_.get("depends_on", [])
+        if depends_on_fqns:
+            # Look up assets by FQN to get their IDs and owner teams
+            upstream_assets_result = await session.execute(
+                select(AssetDB, TeamDB)
+                .join(TeamDB, AssetDB.owner_team_id == TeamDB.id)
+                .where(AssetDB.fqn.in_(depends_on_fqns))
+                .where(AssetDB.deleted_at.is_(None))
+            )
+            for upstream_asset, upstream_team in upstream_assets_result.all():
+                upstream.append(
+                    {
+                        "asset_id": str(upstream_asset.id),
+                        "asset_fqn": upstream_asset.fqn,
+                        "dependency_type": "consumes",
+                        "owner_team": upstream_team.name,
+                    }
+                )
+
     contracts_result = await session.execute(
         select(ContractDB.id).where(ContractDB.asset_id == asset_id)
     )
@@ -248,6 +269,27 @@ async def get_lineage(
         }
         for dep_asset_id, dep_type, fqn, team_name in downstream_assets_result.all()
     ]
+
+    # If no downstream_assets from dependencies table, find assets that depend on us via metadata
+    if not downstream_assets:
+        # Find all assets whose metadata.depends_on contains this asset's FQN
+        all_assets_result = await session.execute(
+            select(AssetDB, TeamDB)
+            .join(TeamDB, AssetDB.owner_team_id == TeamDB.id)
+            .where(AssetDB.deleted_at.is_(None))
+            .where(AssetDB.id != asset_id)  # Exclude self
+        )
+        for downstream_asset, downstream_team in all_assets_result.all():
+            depends_on = downstream_asset.metadata_.get("depends_on", [])
+            if asset.fqn in depends_on:
+                downstream_assets.append(
+                    {
+                        "asset_id": str(downstream_asset.id),
+                        "asset_fqn": downstream_asset.fqn,
+                        "dependency_type": "consumes",
+                        "owner_team": downstream_team.name,
+                    }
+                )
 
     res = {
         "asset_id": str(asset_id),

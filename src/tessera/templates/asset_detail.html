@@ -992,9 +992,9 @@ async function loadAssetDetail() {
             <tbody>
               ${downstreamAssets.map(d => `
                 <tr>
-                  <td><a href="/assets/${d.id}">${escapeHtml(d.fqn || d.id)}</a></td>
-                  <td>${escapeHtml(d.dependency_type || 'ref')}</td>
-                  <td><a href="/teams/${d.owner_team_id}">${escapeHtml(d.owner_team_name || d.owner_team_id)}</a></td>
+                  <td><a href="/assets/${d.asset_id}">${escapeHtml(d.asset_fqn || d.asset_id)}</a></td>
+                  <td>${escapeHtml(d.dependency_type || 'consumes')}</td>
+                  <td>${escapeHtml(d.owner_team || 'Unknown')}</td>
                 </tr>
               `).join('')}
             </tbody>

@@ -8,7 +8,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from tessera.config import settings
-from tessera.models.enums import CompatibilityMode, ContractStatus, SchemaFormat
+from tessera.models.enums import ChangeType, CompatibilityMode, ContractStatus, SchemaFormat
 
 
 class Guarantees(BaseModel):
@@ -97,3 +97,27 @@ class Contract(ContractBase):
     published_at: datetime
     published_by: UUID
     published_by_user_id: UUID | None = None
+
+
+class VersionSuggestion(BaseModel):
+    """Suggested version based on schema diff analysis.
+
+    Returned when asset.semver_mode is 'suggest' and no version is provided,
+    or included in validation errors when semver_mode is 'enforce'.
+    """
+
+    suggested_version: str = Field(
+        ..., description="The suggested semantic version based on schema changes"
+    )
+    current_version: str | None = Field(
+        None, description="The current contract version (None for first contract)"
+    )
+    change_type: ChangeType = Field(
+        ..., description="The detected change type (major, minor, patch)"
+    )
+    reason: str = Field(
+        ..., description="Human-readable explanation of why this version was suggested"
+    )
+    is_first_contract: bool = Field(
+        False, description="True if this is the first contract for the asset"
+    )

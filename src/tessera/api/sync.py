@@ -20,7 +20,7 @@ from tessera.api.errors import BadRequestError, ErrorCode, NotFoundError
 from tessera.api.rate_limit import limit_admin
 from tessera.db import AssetDB, ContractDB, ProposalDB, RegistrationDB, TeamDB, UserDB, get_session
 from tessera.models.enums import CompatibilityMode, ContractStatus, RegistrationStatus, ResourceType
-from tessera.services import audit, validate_json_schema
+from tessera.services import audit, get_affected_parties, validate_json_schema
 from tessera.services.audit import AuditAction, log_contract_published, log_proposal_created
 from tessera.services.graphql import GraphQLOperation, parse_graphql_introspection
 from tessera.services.graphql import operations_to_assets as graphql_operations_to_assets
@@ -1369,6 +1369,11 @@ async def upload_dbt_manifest(
 
             # Only create proposal if there are breaking changes
             if not is_compatible and breaking_changes_list:
+                # Compute affected parties from lineage (exclude the owner team)
+                affected_teams, affected_assets = await get_affected_parties(
+                    session, asset.id, exclude_team_id=asset.owner_team_id
+                )
+
                 db_proposal = ProposalDB(
                     asset_id=asset.id,
                     proposed_schema=proposed_schema,
@@ -1377,6 +1382,9 @@ async def upload_dbt_manifest(
                     breaking_changes=[bc.to_dict() for bc in breaking_changes_list],
                     proposed_by=team_id,
                     proposed_by_user_id=user_id,
+                    affected_teams=affected_teams,
+                    affected_assets=affected_assets,
+                    objections=[],  # Initially empty
                 )
                 session.add(db_proposal)
                 await session.flush()  # Get proposal ID
