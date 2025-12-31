@@ -772,7 +772,7 @@ async def _get_last_audit_status(
     return audit_run.status, audit_run.guarantees_failed, audit_run.run_at
 
 
-@router.post("/{asset_id}/contracts", status_code=201)
+@router.post("/{asset_id}/contracts", status_code=201, response_model=None)
 @limit_write
 async def create_contract(
     request: Request,
