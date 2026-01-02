@@ -49,8 +49,9 @@ async def create_user(
     if user.password:
         password_hash = _hasher.hash(user.password)
 
+    normalized_email = user.email.lower().strip()
     db_user = UserDB(
-        email=user.email,
+        email=normalized_email,
         name=user.name,
         team_id=user.team_id,
         password_hash=password_hash,
@@ -63,7 +64,7 @@ async def create_user(
     except IntegrityError:
         await session.rollback()
         raise HTTPException(
-            status_code=409, detail=f"User with email '{user.email}' already exists"
+            status_code=409, detail=f"User with email '{normalized_email}' already exists"
         )
     await session.refresh(db_user)
 
@@ -107,7 +108,8 @@ async def list_users(
     if team_id:
         base_query = base_query.where(UserDB.team_id == team_id)
     if email:
-        base_query = base_query.where(UserDB.email.ilike(f"%{email}%"))
+        normalized_query_email = email.lower().strip()
+        base_query = base_query.where(UserDB.email.ilike(f"%{normalized_query_email}%"))
     if name:
         base_query = base_query.where(UserDB.name.ilike(f"%{name}%"))
 
@@ -219,7 +221,8 @@ async def update_user(
             raise HTTPException(status_code=404, detail="Team not found")
 
     if update.email is not None:
-        user.email = update.email
+        normalized_update_email = update.email.lower().strip()
+        user.email = normalized_update_email
     if update.name is not None:
         user.name = update.name
     if update.team_id is not None:
@@ -238,7 +241,7 @@ async def update_user(
     except IntegrityError:
         await session.rollback()
         raise HTTPException(
-            status_code=409, detail=f"User with email '{update.email}' already exists"
+            status_code=409, detail=f"User with email '{normalized_update_email}' already exists"
         )
     await session.refresh(user)
 

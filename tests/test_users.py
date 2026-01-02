@@ -95,6 +95,57 @@ class TestCreateUser:
         error_text = str(resp_data)
         assert "dupe@example.com" in error_text or "already exists" in error_text.lower()
 
+    async def test_create_user_email_normalization(self, client: AsyncClient):
+        """Test email is normalized (lowercase + trim whitespace) on creation."""
+        raw_email = "  John@Example.COM  "
+        normalized_email = "john@example.com"
+
+        resp = await client.post(
+            "/api/v1/users",
+            json={"email": raw_email, "name": "Normalized User"},
+        )
+
+        assert resp.status_code == 201, f"Create failed: {resp.json()}"
+        data = resp.json()
+        assert data["email"] == normalized_email
+
+    async def test_create_user_duplicate_email_normalized(self, client: AsyncClient):
+        """Test duplicate check works with normalized email (case/space differences)."""
+        base_email = "dupe-normalized@example.com"
+        first_resp = await client.post(
+            "/api/v1/users",
+            json={"email": base_email, "name": "First Normalized User"},
+        )
+        assert first_resp.status_code == 201
+
+        raw_dupe_email = "  Dupe-Normalized@Example.COM  "
+        resp = await client.post(
+            "/api/v1/users",
+            json={"email": raw_dupe_email, "name": "Second Normalized User"},
+        )
+
+        assert resp.status_code == 409, f"Expected 409, got {resp.status_code}: {resp.json()}"
+        resp_data = resp.json()
+        assert base_email in str(resp_data)
+
+    async def test_list_users_email_filter_normalization(self, client: AsyncClient):
+        """Test email filter works with normalized query (case/space differences)."""
+        normalized_email = "filter-test@example.com"
+        await client.post(
+            "/api/v1/users",
+            json={"email": normalized_email, "name": "Filter Test User"},
+        )
+
+        filter_email = "  Filter-Test@Example.COM  "
+        resp = await client.get(
+            f"/api/v1/users?email={filter_email}",
+        )
+
+        assert resp.status_code == 200, f"List failed: {resp.json()}"
+        data = resp.json()
+        assert data["total"] >= 1
+        assert any(user["email"] == normalized_email for user in data["results"])
+
     async def test_create_user_team_not_found(self, client: AsyncClient):
         """Cannot create user with non-existent team."""
         fake_team_id = str(uuid4())

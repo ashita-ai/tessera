@@ -4,6 +4,9 @@ from collections.abc import Awaitable, Callable
 from typing import Annotated
 from uuid import UUID, uuid4
 
+import logging
+logger = logging.getLogger(__name__)
+
 from fastapi import Depends, HTTPException, Request, Security
 from fastapi.security import APIKeyHeader
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -77,7 +80,8 @@ async def _get_session_auth_context(
             api_key=mock_key,
             scopes=scopes,
         )
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Session auth failed: {e}")
         return None
 
 

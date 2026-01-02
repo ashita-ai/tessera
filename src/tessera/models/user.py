@@ -41,6 +41,10 @@ class UserCreate(UserBase):
     team_id: UUID | None = None
     password: str | None = Field(None, min_length=4, max_length=128)
     role: UserRole = UserRole.USER
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, v: str) -> str:
+        return v.lower().strip()
 
 
 class UserUpdate(BaseModel):
