@@ -1,11 +1,9 @@
 """Authentication dependencies for API endpoints."""
 
+import logging
 from collections.abc import Awaitable, Callable
 from typing import Annotated
 from uuid import UUID, uuid4
-
-import logging
-logger = logging.getLogger(__name__)
 
 from fastapi import Depends, HTTPException, Request, Security
 from fastapi.security import APIKeyHeader
@@ -17,6 +15,8 @@ from tessera.db.database import get_session
 from tessera.db.models import APIKeyDB, TeamDB, UserDB
 from tessera.models.enums import APIKeyScope
 from tessera.services.auth import validate_api_key
+
+logger = logging.getLogger(__name__)
 
 # API key header scheme
 api_key_header = APIKeyHeader(name="Authorization", auto_error=False)
