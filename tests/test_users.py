@@ -99,7 +99,7 @@ class TestCreateUser:
         """Test email is normalized (lowercase + trim whitespace) on creation."""
         raw_email = "  John@Example.COM  "
         normalized_email = "john@example.com"
-        
+
         resp = await client.post(
             "/api/v1/users",
             json={"email": raw_email, "name": "Normalized User"},
