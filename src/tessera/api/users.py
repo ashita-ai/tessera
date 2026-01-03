@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.api.auth import Auth, RequireAdmin, RequireRead
+from tessera.api.errors import DuplicateError, ErrorCode
 from tessera.api.pagination import PaginationParams, pagination_params
 from tessera.api.rate_limit import limit_read, limit_write
 from tessera.db import AssetDB, TeamDB, UserDB, get_session
@@ -44,13 +45,15 @@ async def create_user(
         if not team_result.scalar_one_or_none():
             raise HTTPException(status_code=404, detail="Team not found")
 
+    normalized_email = user.email.lower().strip()
+
     # Hash password if provided
     password_hash = None
     if user.password:
         password_hash = _hasher.hash(user.password)
 
     db_user = UserDB(
-        email=user.email,
+        email=normalized_email,
         name=user.name,
         team_id=user.team_id,
         password_hash=password_hash,
@@ -62,8 +65,9 @@ async def create_user(
         await session.flush()
     except IntegrityError:
         await session.rollback()
-        raise HTTPException(
-            status_code=409, detail=f"User with email '{user.email}' already exists"
+        raise DuplicateError(
+            ErrorCode.DUPLICATE_USER,
+            f"User with email '{normalized_email}' already exists",
         )
     await session.refresh(db_user)
 
@@ -218,8 +222,10 @@ async def update_user(
         if not team_result.scalar_one_or_none():
             raise HTTPException(status_code=404, detail="Team not found")
 
+    normalized_update_email = None
     if update.email is not None:
-        user.email = update.email
+        normalized_update_email = update.email.lower().strip()
+        user.email = normalized_update_email
     if update.name is not None:
         user.name = update.name
     if update.team_id is not None:
@@ -237,8 +243,9 @@ async def update_user(
         await session.flush()
     except IntegrityError:
         await session.rollback()
-        raise HTTPException(
-            status_code=409, detail=f"User with email '{update.email}' already exists"
+        raise DuplicateError(
+            ErrorCode.DUPLICATE_USER,
+            f"User with email '{normalized_update_email}' already exists",
         )
     await session.refresh(user)
 

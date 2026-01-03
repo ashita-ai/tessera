@@ -94,6 +94,9 @@ class TestCreateUser:
         resp_data = resp.json()
         error_text = str(resp_data)
         assert "dupe@example.com" in error_text or "already exists" in error_text.lower()
+        assert (
+            resp_data["error"]["code"] == "DUPLICATE_USER"
+            ), f"Expected DUPLICATE_USER, got {resp_data['error'].get('code')}"
 
     async def test_create_user_team_not_found(self, client: AsyncClient):
         """Cannot create user with non-existent team."""
