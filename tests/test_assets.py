@@ -289,7 +289,24 @@ class TestAssetSearch:
         data = resp.json()
         assert all(r["owner_team_id"] == team1_id for r in data["results"])
 
+    async def test_search_query_max_length_validation(self, client: AsyncClient):
+        """Search query exceeding 100 characters returns 422 error with appropriate message."""
+        long_query = "a" * 101
+        resp = await client.get(f"/api/v1/assets/search?q={long_query}")
 
+        assert resp.status_code == 422, f"Expected 422, got {resp.status_code}: {resp.json()}"
+
+        resp_data = resp.json()
+        error_detail = str(resp_data)
+        assert "string should have at most 100 characters" in error_detail.lower()
+
+    async def test_search_query_min_length_validation(self, client: AsyncClient):
+        """Empty search query returns 422 error (min_length=1 validation)."""
+        resp = await client.get("/api/v1/assets/search?q=")
+        assert resp.status_code == 422
+        resp_data = resp.json()
+        error_detail = str(resp_data)
+        assert "string should have at least 1 character" in error_detail.lower()
 class TestAssetDependencies:
     """Tests for asset dependencies endpoints."""
 

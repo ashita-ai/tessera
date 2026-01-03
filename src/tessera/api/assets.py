@@ -460,7 +460,7 @@ async def list_assets(
 async def search_assets(
     request: Request,
     auth: Auth,
-    q: str = Query(..., min_length=1, description="Search query"),
+    q: str = Query(..., min_length=1, max_length=100, description="Search query"),
     owner: UUID | None = Query(None, description="Filter by owner team ID"),
     environment: str | None = Query(None, description="Filter by environment"),
     limit: int = Query(
