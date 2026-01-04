@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from tessera.models.enums import ChangeType, ProposalStatus
 
@@ -60,6 +60,22 @@ class ObjectionCreate(BaseModel):
         max_length=1000,
         description="Reason for objecting to this proposal",
     )
+
+    @field_validator("reason")
+    @classmethod
+    def validate_reason(cls, value: str) -> str:
+        # remove espaços em branco no início e fim
+        stripped = value.strip()
+
+        # rejeita string vazia ou só com whitespace
+        if not stripped:
+            raise ValueError("Reason must not be empty or whitespace only.")
+
+        # valida tamanho após strip
+        if len(stripped) > 1000:
+            raise ValueError("Reason must be at most 1000 characters long.")
+
+        return stripped
 
 
 class ProposalBase(BaseModel):
