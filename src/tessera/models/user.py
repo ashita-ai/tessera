@@ -42,6 +42,12 @@ class UserCreate(UserBase):
     password: str | None = Field(None, min_length=4, max_length=128)
     role: UserRole = UserRole.USER
 
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, v: str) -> str:
+        """Normalize email to lowercase and strip whitespace."""
+        return v.lower().strip()
+
 
 class UserUpdate(BaseModel):
     """Fields for updating a user."""
