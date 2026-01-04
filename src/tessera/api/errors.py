@@ -23,6 +23,7 @@ class ErrorCode(StrEnum):
     REGISTRATION_NOT_FOUND = "REGISTRATION_NOT_FOUND"
     DEPENDENCY_NOT_FOUND = "DEPENDENCY_NOT_FOUND"
     API_KEY_NOT_FOUND = "API_KEY_NOT_FOUND"
+    USER_NOT_FOUND = "USER_NOT_FOUND"
     SYNC_PATH_NOT_FOUND = "SYNC_PATH_NOT_FOUND"
     MANIFEST_NOT_FOUND = "MANIFEST_NOT_FOUND"
 
@@ -53,6 +54,15 @@ class ErrorCode(StrEnum):
     CONTRACT_NOT_ACTIVE = "CONTRACT_NOT_ACTIVE"
     UNAUTHORIZED_TEAM = "UNAUTHORIZED_TEAM"
     INVALID_INPUT = "INVALID_INPUT"
+    TEAM_HAS_ASSETS = "TEAM_HAS_ASSETS"
+    SAME_TEAM = "SAME_TEAM"
+    INSUFFICIENT_PERMISSIONS = "INSUFFICIENT_PERMISSIONS"
+    USER_TEAM_MISMATCH = "USER_TEAM_MISMATCH"
+    AUDIT_REQUIRED = "AUDIT_REQUIRED"
+    AUDIT_FAILED = "AUDIT_FAILED"
+    VERSION_EXISTS = "VERSION_EXISTS"
+    CONFLICT_MODE_INVALID = "CONFLICT_MODE_INVALID"
+    SYNC_CONFLICT = "SYNC_CONFLICT"
 
     # Auth errors
     UNAUTHORIZED = "UNAUTHORIZED"
@@ -109,6 +119,18 @@ class DuplicateError(APIError):
         super().__init__(code, message, status_code=409, details=details)
 
 
+class ConflictError(APIError):
+    """Conflict error (409) for non-duplicate conflicts."""
+
+    def __init__(
+        self,
+        code: ErrorCode,
+        message: str,
+        details: dict[str, Any] | None = None,
+    ):
+        super().__init__(code, message, status_code=409, details=details)
+
+
 class BadRequestError(APIError):
     """Bad request error."""
 
@@ -148,6 +170,18 @@ class ForbiddenError(APIError):
         super().__init__(code, message, status_code=403, details=details)
         if extra:
             self.details.update(extra)
+
+
+class PreconditionFailedError(APIError):
+    """Precondition failed error (412)."""
+
+    def __init__(
+        self,
+        code: ErrorCode,
+        message: str,
+        details: dict[str, Any] | None = None,
+    ):
+        super().__init__(code, message, status_code=412, details=details)
 
 
 class RequestIDMiddleware(BaseHTTPMiddleware):

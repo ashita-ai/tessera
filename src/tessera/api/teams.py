@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -12,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.api.auth import Auth, RequireAdmin, RequireRead
 from tessera.api.errors import (
+    BadRequestError,
+    ConflictError,
     DuplicateError,
     ErrorCode,
     NotFoundError,
@@ -219,13 +221,10 @@ async def delete_team(
     asset_count = asset_count_result.scalar() or 0
 
     if asset_count > 0 and not force:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "TEAM_HAS_ASSETS",
-                "message": f"Team owns {asset_count} asset(s). Reassign or use force=true.",
-                "asset_count": asset_count,
-            },
+        raise ConflictError(
+            ErrorCode.TEAM_HAS_ASSETS,
+            f"Team owns {asset_count} asset(s). Reassign or use force=true.",
+            details={"asset_count": asset_count},
         )
 
     team.deleted_at = datetime.now(UTC)
@@ -295,7 +294,7 @@ async def list_team_members(
     )
     team = result.scalar_one_or_none()
     if not team:
-        raise HTTPException(status_code=404, detail="Team not found")
+        raise NotFoundError(ErrorCode.TEAM_NOT_FOUND, "Team not found")
 
     # Build query for team members
     base_query = (
@@ -349,7 +348,7 @@ async def reassign_team_assets(
     )
     source_team = source_result.scalar_one_or_none()
     if not source_team:
-        raise HTTPException(status_code=404, detail="Source team not found")
+        raise NotFoundError(ErrorCode.TEAM_NOT_FOUND, "Source team not found")
 
     # Verify target team exists
     target_result = await session.execute(
@@ -359,10 +358,10 @@ async def reassign_team_assets(
     )
     target_team = target_result.scalar_one_or_none()
     if not target_team:
-        raise HTTPException(status_code=404, detail="Target team not found")
+        raise NotFoundError(ErrorCode.TEAM_NOT_FOUND, "Target team not found")
 
     if team_id == reassign.target_team_id:
-        raise HTTPException(status_code=400, detail="Source and target team cannot be the same")
+        raise BadRequestError("Source and target team cannot be the same", code=ErrorCode.SAME_TEAM)
 
     # Build query for assets to reassign
     query = (
