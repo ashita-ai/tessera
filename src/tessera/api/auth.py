@@ -80,7 +80,7 @@ async def _get_session_auth_context(
             api_key=mock_key,
             scopes=scopes,
         )
-    except Exception as e:
+    except ValueError as e:
         logger.debug(f"Session auth failed: {e}")
         return None
 

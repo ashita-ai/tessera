@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
+import redis
 from fastapi import APIRouter, Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
@@ -256,7 +257,7 @@ async def health(
     # Update gauge metrics while we have a session
     try:
         await update_gauge_metrics(session)
-    except Exception:
+    except (TimeoutError, redis.ConnectionError, redis.TimeoutError):
         pass  # Don't fail health check if metrics update fails
 
     return {

@@ -6,6 +6,7 @@ Provides application metrics for monitoring and observability.
 import time
 from typing import Any
 
+import redis
 from prometheus_client import (
     REGISTRY,
     Counter,
@@ -232,6 +233,6 @@ async def update_gauge_metrics(session: Any) -> None:
         result = await session.execute(select(func.count(UserDB.id)))
         users_total.set(result.scalar_one())
 
-    except Exception:
+    except (TimeoutError, redis.ConnectionError, redis.TimeoutError):
         # Don't fail if we can't update metrics
         pass
