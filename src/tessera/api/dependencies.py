@@ -4,7 +4,7 @@ from collections import defaultdict
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -50,12 +50,9 @@ async def create_dependency(
         raise NotFoundError(ErrorCode.ASSET_NOT_FOUND, "Asset not found")
 
     if asset.owner_team_id != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": "INSUFFICIENT_PERMISSIONS",
-                "message": "You can only add dependencies to assets belonging to your team",
-            },
+        raise ForbiddenError(
+            "You can only add dependencies to assets belonging to your team",
+            code=ErrorCode.UNAUTHORIZED_TEAM,
         )
 
     result = await session.execute(
