@@ -1,8 +1,8 @@
 """Webhook event models."""
 
-from datetime import datetime
 from enum import StrEnum
 from uuid import UUID
+from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field
 
@@ -91,7 +91,7 @@ class WebhookEvent(BaseModel):
     """A webhook event to be delivered."""
 
     event: WebhookEventType
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     payload: (
         ProposalCreatedPayload
         | AcknowledgmentPayload
