@@ -3,7 +3,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from tessera.models.enums import APIKeyScope
 
@@ -20,6 +20,15 @@ class APIKeyCreate(BaseModel):
         description="Permission scopes for this key",
     )
     expires_at: datetime | None = Field(None, description="Optional expiration time")
+
+    @field_validator("name")
+    @classmethod
+    def validate_and_strip_name(cls, v: str) -> str:
+        """Strip whitespace and validate API key name."""
+        v = v.strip()
+        if not v:
+            raise ValueError("API key name cannot be empty or whitespace only")
+        return v
 
 
 class APIKeyCreated(BaseModel):
