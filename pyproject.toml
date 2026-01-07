@@ -111,7 +111,7 @@ dev = [
     "types-jsonschema>=4.25.1.20251009",
     "types-pyyaml>=6.0.12.20250915",
     "types-redis>=4.6.0,<5.0.0",
-    "uvloop>=0.22.0,<1.0.0",
+    "uvloop>=0.22.0,<1.0.0; sys_platform != 'win32'",
     "httptools>=0.7.0,<1.0.0",
     "watchfiles>=1.0.0,<2.0.0",
     "duckdb>=1.0.0,<2.0.0",
