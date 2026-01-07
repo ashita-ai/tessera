@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import Select, func, select
 from sqlalchemy.exc import IntegrityError
@@ -17,6 +17,7 @@ from tessera.api.errors import (
     ErrorCode,
     ForbiddenError,
     NotFoundError,
+    PreconditionFailedError,
 )
 from tessera.api.pagination import PaginationParams, pagination_params
 from tessera.api.rate_limit import limit_read, limit_write
@@ -282,11 +283,11 @@ async def create_asset(
         )
         user = user_result.scalar_one_or_none()
         if not user:
-            raise HTTPException(status_code=404, detail="Owner user not found")
+            raise NotFoundError(ErrorCode.USER_NOT_FOUND, "Owner user not found")
         if user.team_id != asset.owner_team_id:
-            raise HTTPException(
-                status_code=400,
-                detail="Owner user must belong to the owner team",
+            raise BadRequestError(
+                "Owner user must belong to the owner team",
+                code=ErrorCode.USER_TEAM_MISMATCH,
             )
 
     # Check for duplicate FQN
@@ -639,11 +640,11 @@ async def update_asset(
         )
         user = user_result.scalar_one_or_none()
         if not user:
-            raise HTTPException(status_code=404, detail="Owner user not found")
+            raise NotFoundError(ErrorCode.USER_NOT_FOUND, "Owner user not found")
         if user.team_id != new_team_id:
-            raise HTTPException(
-                status_code=400,
-                detail="Owner user must belong to the owner team",
+            raise BadRequestError(
+                "Owner user must belong to the owner team",
+                code=ErrorCode.USER_TEAM_MISMATCH,
             )
 
     if update.owner_team_id is not None:
@@ -819,25 +820,16 @@ async def create_contract(
 
     if require_audit_pass:
         if audit_status is None:
-            raise HTTPException(
-                status_code=412,
-                detail={
-                    "code": "AUDIT_REQUIRED",
-                    "message": (
-                        "No audit runs found. Run audits before publishing "
-                        "with require_audit_pass=True."
-                    ),
-                },
+            raise PreconditionFailedError(
+                ErrorCode.AUDIT_REQUIRED,
+                "No audit runs found. Run audits before publishing with require_audit_pass=True.",
             )
         if audit_status != AuditRunStatus.PASSED:
-            raise HTTPException(
-                status_code=412,
-                detail={
-                    "code": "AUDIT_FAILED",
-                    "message": (
-                        f"Most recent audit {audit_status.value}. "
-                        "Cannot publish with require_audit_pass=True."
-                    ),
+            raise PreconditionFailedError(
+                ErrorCode.AUDIT_FAILED,
+                f"Most recent audit {audit_status.value}. "
+                "Cannot publish with require_audit_pass=True.",
+                details={
                     "audit_status": audit_status.value,
                     "guarantees_failed": audit_failed,
                     "audit_run_at": audit_run_at.isoformat() if audit_run_at else None,
@@ -992,13 +984,10 @@ async def create_contract(
     )
     existing_version = existing_version_result.scalar_one_or_none()
     if existing_version:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "VERSION_EXISTS",
-                "message": f"Contract version {version} already exists for this asset",
-                "existing_contract_id": str(existing_version.id),
-            },
+        raise DuplicateError(
+            ErrorCode.VERSION_EXISTS,
+            f"Contract version {version} already exists for this asset",
+            details={"existing_contract_id": str(existing_version.id)},
         )
 
     # Helper to create and return the new contract
@@ -1441,7 +1430,7 @@ async def bulk_assign_owner(
             .where(UserDB.deactivated_at.is_(None))
         )
         if not user_result.scalar_one_or_none():
-            raise HTTPException(status_code=404, detail="Owner user not found")
+            raise NotFoundError(ErrorCode.USER_NOT_FOUND, "Owner user not found")
 
     # Get all assets
     result = await session.execute(
