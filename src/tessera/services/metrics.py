@@ -17,6 +17,7 @@ from prometheus_client import (
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import Response
+from sqlalchemy.ext.asyncio import AsyncSession
 
 # HTTP request metrics
 http_requests_total = Counter(
@@ -195,7 +196,7 @@ def record_proposal_acknowledged(response: str) -> None:
     proposals_acknowledged_total.labels(response=response).inc()
 
 
-async def update_gauge_metrics(session: Any) -> None:
+async def update_gauge_metrics(session: AsyncSession) -> None:
     """Update gauge metrics from database counts.
 
     This should be called periodically or on-demand to refresh gauge values.
