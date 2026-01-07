@@ -24,6 +24,7 @@ from tessera.db import AssetDB, TeamDB, UserDB, get_session
 from tessera.models import Team, TeamCreate, TeamUpdate, User
 from tessera.services import audit
 from tessera.services.audit import AuditAction
+from tessera.services.batch import fetch_asset_counts_by_team
 from tessera.services.cache import team_cache
 
 router = APIRouter()
@@ -97,15 +98,7 @@ async def list_teams(
 
     # Batch fetch asset counts for all teams
     team_ids = [t.id for t in teams]
-    asset_counts: dict[UUID, int] = {}
-    if team_ids:
-        counts_result = await session.execute(
-            select(AssetDB.owner_team_id, func.count(AssetDB.id))
-            .where(AssetDB.owner_team_id.in_(team_ids))
-            .where(AssetDB.deleted_at.is_(None))
-            .group_by(AssetDB.owner_team_id)
-        )
-        asset_counts = {team_id: count for team_id, count in counts_result.all()}
+    asset_counts = await fetch_asset_counts_by_team(session, team_ids)
 
     results = []
     for team in teams:

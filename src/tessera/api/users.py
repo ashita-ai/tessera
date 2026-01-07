@@ -14,10 +14,11 @@ from tessera.api.auth import Auth, RequireAdmin, RequireRead
 from tessera.api.errors import DuplicateError, ErrorCode, NotFoundError
 from tessera.api.pagination import PaginationParams, pagination_params
 from tessera.api.rate_limit import limit_read, limit_write
-from tessera.db import AssetDB, TeamDB, UserDB, get_session
+from tessera.db import TeamDB, UserDB, get_session
 from tessera.models import User, UserCreate, UserUpdate, UserWithTeam
 from tessera.services import audit
 from tessera.services.audit import AuditAction
+from tessera.services.batch import fetch_asset_counts_by_user, fetch_team_names
 
 _hasher = PasswordHasher()
 
@@ -127,24 +128,11 @@ async def list_users(
 
     # Batch fetch team names
     team_ids = [u.team_id for u in users if u.team_id]
-    team_names: dict[UUID, str] = {}
-    if team_ids:
-        teams_result = await session.execute(
-            select(TeamDB.id, TeamDB.name).where(TeamDB.id.in_(team_ids))
-        )
-        team_names = {team_id: name for team_id, name in teams_result.all()}
+    team_names = await fetch_team_names(session, team_ids)
 
     # Batch fetch asset counts for all users
     user_ids = [u.id for u in users]
-    asset_counts: dict[UUID, int] = {}
-    if user_ids:
-        counts_result = await session.execute(
-            select(AssetDB.owner_user_id, func.count(AssetDB.id))
-            .where(AssetDB.owner_user_id.in_(user_ids))
-            .where(AssetDB.deleted_at.is_(None))
-            .group_by(AssetDB.owner_user_id)
-        )
-        asset_counts = {user_id: count for user_id, count in counts_result.all()}
+    asset_counts = await fetch_asset_counts_by_user(session, user_ids)
 
     results = []
     for user in users:
