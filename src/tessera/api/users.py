@@ -5,19 +5,20 @@ from typing import Any
 from uuid import UUID
 
 from argon2 import PasswordHasher
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.api.auth import Auth, RequireAdmin, RequireRead
-from tessera.api.errors import DuplicateError, ErrorCode
+from tessera.api.errors import DuplicateError, ErrorCode, NotFoundError
 from tessera.api.pagination import PaginationParams, pagination_params
 from tessera.api.rate_limit import limit_read, limit_write
-from tessera.db import AssetDB, TeamDB, UserDB, get_session
+from tessera.db import TeamDB, UserDB, get_session
 from tessera.models import User, UserCreate, UserUpdate, UserWithTeam
 from tessera.services import audit
 from tessera.services.audit import AuditAction
+from tessera.services.batch import fetch_asset_counts_by_user, fetch_team_names
 
 _hasher = PasswordHasher()
 
@@ -43,7 +44,7 @@ async def create_user(
             select(TeamDB).where(TeamDB.id == user.team_id).where(TeamDB.deleted_at.is_(None))
         )
         if not team_result.scalar_one_or_none():
-            raise HTTPException(status_code=404, detail="Team not found")
+            raise NotFoundError(ErrorCode.TEAM_NOT_FOUND, "Team not found")
 
     normalized_email = user.email.lower().strip()
 
@@ -127,24 +128,11 @@ async def list_users(
 
     # Batch fetch team names
     team_ids = [u.team_id for u in users if u.team_id]
-    team_names: dict[UUID, str] = {}
-    if team_ids:
-        teams_result = await session.execute(
-            select(TeamDB.id, TeamDB.name).where(TeamDB.id.in_(team_ids))
-        )
-        team_names = {team_id: name for team_id, name in teams_result.all()}
+    team_names = await fetch_team_names(session, team_ids)
 
     # Batch fetch asset counts for all users
     user_ids = [u.id for u in users]
-    asset_counts: dict[UUID, int] = {}
-    if user_ids:
-        counts_result = await session.execute(
-            select(AssetDB.owner_user_id, func.count(AssetDB.id))
-            .where(AssetDB.owner_user_id.in_(user_ids))
-            .where(AssetDB.deleted_at.is_(None))
-            .group_by(AssetDB.owner_user_id)
-        )
-        asset_counts = {user_id: count for user_id, count in counts_result.all()}
+    asset_counts = await fetch_asset_counts_by_user(session, user_ids)
 
     results = []
     for user in users:
@@ -179,7 +167,7 @@ async def get_user(
     )
     user = result.scalar_one_or_none()
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise NotFoundError(ErrorCode.USER_NOT_FOUND, "User not found")
 
     user_dict = User.model_validate(user).model_dump()
 
@@ -212,7 +200,7 @@ async def update_user(
     )
     user = result.scalar_one_or_none()
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise NotFoundError(ErrorCode.USER_NOT_FOUND, "User not found")
 
     # Verify team exists if being changed
     if update.team_id is not None:
@@ -220,7 +208,7 @@ async def update_user(
             select(TeamDB).where(TeamDB.id == update.team_id).where(TeamDB.deleted_at.is_(None))
         )
         if not team_result.scalar_one_or_none():
-            raise HTTPException(status_code=404, detail="Team not found")
+            raise NotFoundError(ErrorCode.TEAM_NOT_FOUND, "Team not found")
 
     normalized_update_email = None
     if update.email is not None:
@@ -284,7 +272,7 @@ async def deactivate_user(
     )
     user = result.scalar_one_or_none()
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise NotFoundError(ErrorCode.USER_NOT_FOUND, "User not found")
 
     user.deactivated_at = datetime.now(UTC)
     await session.flush()
@@ -315,7 +303,7 @@ async def reactivate_user(
     result = await session.execute(select(UserDB).where(UserDB.id == user_id))
     user = result.scalar_one_or_none()
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise NotFoundError(ErrorCode.USER_NOT_FOUND, "User not found")
 
     if user.deactivated_at is None:
         return user

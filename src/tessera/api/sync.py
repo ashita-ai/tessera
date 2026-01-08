@@ -11,13 +11,13 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.api.auth import Auth, RequireAdmin
-from tessera.api.errors import BadRequestError, ErrorCode, NotFoundError
+from tessera.api.errors import BadRequestError, ConflictError, ErrorCode, NotFoundError
 from tessera.api.rate_limit import limit_admin
 from tessera.db import AssetDB, ContractDB, ProposalDB, RegistrationDB, TeamDB, UserDB, get_session
 from tessera.models.enums import CompatibilityMode, ContractStatus, RegistrationStatus, ResourceType
@@ -676,9 +676,9 @@ async def upload_dbt_manifest(
     conflict_mode = upload_req.conflict_mode
 
     if conflict_mode not in ("overwrite", "ignore", "fail"):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid conflict_mode: {conflict_mode}. Use 'overwrite', 'ignore', or 'fail'",
+        raise BadRequestError(
+            f"Invalid conflict_mode: {conflict_mode}. Use 'overwrite', 'ignore', or 'fail'",
+            code=ErrorCode.CONFLICT_MODE_INVALID,
         )
 
     assets_created = 0
@@ -1102,12 +1102,10 @@ async def upload_dbt_manifest(
 
     # If fail mode and conflicts found, raise error
     if conflict_mode == "fail" and conflicts:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "message": f"Found {len(conflicts)} existing assets",
-                "conflicts": conflicts[:20],  # Limit to first 20
-            },
+        raise ConflictError(
+            ErrorCode.SYNC_CONFLICT,
+            f"Found {len(conflicts)} existing assets",
+            details={"conflicts": conflicts[:20]},  # Limit to first 20
         )
 
     # Auto-publish contracts for new assets with column schemas

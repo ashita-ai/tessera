@@ -24,10 +24,10 @@ class APIKeyCreate(BaseModel):
     @field_validator("name")
     @classmethod
     def validate_and_strip_name(cls, v: str) -> str:
-        """Strip whitespace and validate name."""
+        """Strip whitespace and validate API key name."""
         v = v.strip()
         if not v:
-            raise ValueError("Name cannot be empty or whitespace only")
+            raise ValueError("API key name cannot be empty or whitespace only")
         return v
 
 

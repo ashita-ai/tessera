@@ -12,6 +12,11 @@ from tessera.services.audit import (
     log_proposal_force_approved,
     log_proposal_rejected,
 )
+from tessera.services.batch import (
+    fetch_asset_counts_by_team,
+    fetch_asset_counts_by_user,
+    fetch_team_names,
+)
 from tessera.services.graphql import (
     AssetFromGraphQL,
     GraphQLOperation,
@@ -47,6 +52,10 @@ from tessera.services.schema_validator import (
 __all__ = [
     # Affected parties
     "get_affected_parties",
+    # Batch fetching
+    "fetch_asset_counts_by_team",
+    "fetch_asset_counts_by_user",
+    "fetch_team_names",
     # Schema diffing
     "BreakingChange",
     "SchemaDiff",
