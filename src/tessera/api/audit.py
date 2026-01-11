@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.api.auth import Auth, RequireAdmin, RequireRead
 from tessera.api.errors import ErrorCode, NotFoundError
+from tessera.api.pagination import PaginationParams, pagination_params
 from tessera.api.rate_limit import limit_admin
 from tessera.db.database import get_session
 from tessera.db.models import AuditEventDB
@@ -63,8 +64,7 @@ async def list_audit_events(
     actor_id: UUID | None = Query(None, description="Filter by actor ID"),
     from_date: datetime | None = Query(None, alias="from", description="Start datetime"),
     to_date: datetime | None = Query(None, alias="to", description="End datetime"),
-    limit: int = Query(50, ge=1, le=100),
-    offset: int = Query(0, ge=0),
+    params: PaginationParams = Depends(pagination_params),
     _: None = RequireAdmin,
     __: None = RequireRead,
     session: AsyncSession = Depends(get_session),
@@ -102,15 +102,15 @@ async def list_audit_events(
 
     # Get paginated results
     query = query.order_by(AuditEventDB.occurred_at.desc())
-    query = query.limit(limit).offset(offset)
+    query = query.limit(params.limit).offset(params.offset)
     result = await session.execute(query)
     events = result.scalars().all()
 
     return AuditEventsListResponse(
         results=[_to_response(e) for e in events],
         total=total,
-        limit=limit,
-        offset=offset,
+        limit=params.limit,
+        offset=params.offset,
     )
 
 
@@ -149,8 +149,7 @@ async def get_entity_history(
     entity_type: str,
     entity_id: UUID,
     auth: Auth,
-    limit: int = Query(50, ge=1, le=100),
-    offset: int = Query(0, ge=0),
+    params: PaginationParams = Depends(pagination_params),
     _: None = RequireAdmin,
     __: None = RequireRead,
     session: AsyncSession = Depends(get_session),
@@ -175,8 +174,8 @@ async def get_entity_history(
             AuditEventDB.entity_id == entity_id,
         )
         .order_by(AuditEventDB.occurred_at.desc())
-        .limit(limit)
-        .offset(offset)
+        .limit(params.limit)
+        .offset(params.offset)
     )
     result = await session.execute(query)
     events = result.scalars().all()
@@ -184,6 +183,6 @@ async def get_entity_history(
     return AuditEventsListResponse(
         results=[_to_response(e) for e in events],
         total=total,
-        limit=limit,
-        offset=offset,
+        limit=params.limit,
+        offset=params.offset,
     )

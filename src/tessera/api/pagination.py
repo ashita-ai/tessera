@@ -3,7 +3,7 @@
 from collections.abc import Sequence
 from typing import Any, Generic, TypeVar
 
-from fastapi import Query
+from fastapi import Query, Response
 from pydantic import BaseModel
 from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -42,11 +42,17 @@ def pagination_params(
     return PaginationParams(limit=limit, offset=offset)
 
 
+def set_total_count_header(response: Response, total: int) -> None:
+    """Set X-Total-Count header on the response."""
+    response.headers["X-Total-Count"] = str(total)
+
+
 async def paginate(
     session: AsyncSession,
     query: Select[tuple[T]],
     params: PaginationParams,
     response_model: type[BaseModel] | None = None,
+    response: Response | None = None,
 ) -> dict[str, Any]:
     """Execute a paginated query and return structured response.
 
@@ -55,6 +61,7 @@ async def paginate(
         query: SQLAlchemy select query (without limit/offset applied)
         params: Pagination parameters
         response_model: Optional Pydantic model to validate/serialize results
+        response: Optional FastAPI Response to set X-Total-Count header
 
     Returns:
         Dict with results, total, limit, offset keys
@@ -63,6 +70,10 @@ async def paginate(
     count_query = select(func.count()).select_from(query.subquery())
     total_result = await session.execute(count_query)
     total = total_result.scalar() or 0
+
+    # Set X-Total-Count header if response provided
+    if response is not None:
+        set_total_count_header(response, total)
 
     # Apply pagination
     paginated_query = query.limit(params.limit).offset(params.offset)
