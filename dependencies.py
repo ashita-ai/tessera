@@ -1,0 +1,5 @@
+LINEAGE_CACHE_TTL = 300
+LINEAGE_CACHE_PREFIX = "lineage"
+
+
+
