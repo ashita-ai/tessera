@@ -268,7 +268,109 @@ class TestListUsers:
         assert len(resp.json()["results"]) == 2
 
 
-class TestGetUser:
+class TestUserFiltering:
+    """Tests for complex filtering on /api/v1/users."""
+
+    async def test_filter_by_team_id(self, client: AsyncClient):
+        """Users filtered by team_id only returns users from that team."""
+        # Setup teams
+        t1 = await client.post("/api/v1/teams", json={"name": "filter-t1"})
+        t1_id = t1.json()["id"]
+        t2 = await client.post("/api/v1/teams", json={"name": "filter-t2"})
+        t2_id = t2.json()["id"]
+
+        # Setup users
+        await client.post(
+            "/api/v1/users",
+            json={"email": "u1@t1.com", "name": "User One", "team_id": t1_id},
+        )
+        await client.post(
+            "/api/v1/users",
+            json={"email": "u2@t1.com", "name": "User Two", "team_id": t1_id},
+        )
+        await client.post(
+            "/api/v1/users",
+            json={"email": "others@t2.com", "name": "Other Team", "team_id": t2_id},
+        )
+
+        resp = await client.get(f"/api/v1/users?team_id={t1_id}")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 2
+        assert all(u["team_id"] == t1_id for u in data["results"])
+
+    async def test_filter_by_email_pattern(self, client: AsyncClient):
+        """Email filter is case-insensitive and partial match."""
+        await client.post(
+            "/api/v1/users",
+            json={"email": "FindMe@Example.com", "name": "Target"},
+        )
+        await client.post(
+            "/api/v1/users",
+            json={"email": "ignore@other.com", "name": "Ignore"},
+        )
+
+        # Partial match, different case
+        resp = await client.get("/api/v1/users?email=findme")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 1
+        assert resp.json()["results"][0]["email"] == "FindMe@Example.com"
+
+    async def test_filter_by_name_pattern(self, client: AsyncClient):
+        """Name filter is case-insensitive and partial match."""
+        await client.post(
+            "/api/v1/users",
+            json={"email": "n1@test.com", "name": "Special Target User"},
+        )
+        await client.post(
+            "/api/v1/users",
+            json={"email": "n2@test.com", "name": "Regular Person"},
+        )
+
+        # Partial match "target"
+        resp = await client.get("/api/v1/users?name=target")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 1
+        assert resp.json()["results"][0]["name"] == "Special Target User"
+
+    async def test_combined_filters(self, client: AsyncClient):
+        """Multiple filters work together (AND logic)."""
+        t1 = await client.post("/api/v1/teams", json={"name": "combo-team"})
+        t1_id = t1.json()["id"]
+
+        # Match team AND name
+        await client.post(
+            "/api/v1/users",
+            json={"email": "combo1@test.com", "name": "Match Name", "team_id": t1_id},
+        )
+        # Match team but NOT name
+        await client.post(
+            "/api/v1/users",
+            json={"email": "combo2@test.com", "name": "Wrong Name", "team_id": t1_id},
+        )
+        # Match name but NOT team
+        await client.post(
+            "/api/v1/users",
+            json={"email": "combo3@test.com", "name": "Match Name"},
+        )
+
+        resp = await client.get(f"/api/v1/users?team_id={t1_id}&name=match")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 1
+        assert resp.json()["results"][0]["email"] == "combo1@test.com"
+
+    async def test_filter_returns_empty_for_no_matches(self, client: AsyncClient):
+        """Filters that match nothing return empty results, not error."""
+        await client.post(
+            "/api/v1/users",
+            json={"email": "exist@test.com", "name": "Existing User"},
+        )
+
+        resp = await client.get("/api/v1/users?name=nonexistentxyz")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 0
+        assert resp.json()["results"] == []
+
     """Tests for GET /api/v1/users/{user_id} endpoint."""
 
     async def test_get_user(self, client: AsyncClient):
