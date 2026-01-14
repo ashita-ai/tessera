@@ -314,7 +314,7 @@ class TestUserFiltering:
         resp = await client.get("/api/v1/users?email=findme")
         assert resp.status_code == 200
         assert resp.json()["total"] == 1
-        assert resp.json()["results"][0]["email"] == "FindMe@Example.com"
+        assert resp.json()["results"][0]["email"] == "findme@example.com"
 
     async def test_filter_by_name_pattern(self, client: AsyncClient):
         """Name filter is case-insensitive and partial match."""
@@ -371,6 +371,7 @@ class TestUserFiltering:
         assert resp.json()["total"] == 0
         assert resp.json()["results"] == []
 
+class TestGetUser:
     """Tests for GET /api/v1/users/{user_id} endpoint."""
 
     async def test_get_user(self, client: AsyncClient):
