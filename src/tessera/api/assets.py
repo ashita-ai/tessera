@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import Select, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import InstrumentedAttribute
 
 from tessera.api.auth import Auth, RequireAdmin, RequireRead, RequireWrite
 from tessera.api.errors import (
@@ -21,6 +22,18 @@ from tessera.api.errors import (
 )
 from tessera.api.pagination import PaginationParams, pagination_params
 from tessera.api.rate_limit import limit_read, limit_write
+from tessera.api.types import (
+    AssetSearchResult,
+    AssetWithOwnerInfo,
+    BulkAssignResponse,
+    ContractHistoryEntry,
+    ContractHistoryResponse,
+    ContractPublishResponse,
+    ContractWithPublisherInfo,
+    ImpactedConsumer,
+    PaginatedResponse,
+    SchemaDiffResponse,
+)
 from tessera.config import settings
 from tessera.db import (
     AssetDB,
@@ -351,7 +364,7 @@ async def list_assets(
     params: PaginationParams = Depends(pagination_params),
     _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
-) -> dict[str, Any]:
+) -> PaginatedResponse[AssetWithOwnerInfo]:
     """List all assets with filtering, sorting, and pagination.
 
     Requires read scope. Returns assets with owner team/user names and active contract version.
@@ -397,7 +410,7 @@ async def list_assets(
         count_base = count_base.where(AssetDB.resource_type == resource_type)
 
     # Apply sorting
-    sort_column: Any = AssetDB.fqn  # default
+    sort_column: InstrumentedAttribute[object] = AssetDB.fqn  # default
     if sort_by == "owner":
         sort_column = TeamDB.name
     elif sort_by == "owner_user":
@@ -439,9 +452,9 @@ async def list_assets(
             if asset_id not in active_contracts_map:
                 active_contracts_map[asset_id] = version
 
-    results = []
+    results: list[AssetWithOwnerInfo] = []
     for asset_db, team_name, user_name, user_email in rows:
-        asset_dict = Asset.model_validate(asset_db).model_dump()
+        asset_dict: AssetWithOwnerInfo = Asset.model_validate(asset_db).model_dump()  # type: ignore[assignment]
         asset_dict["owner_team_name"] = team_name
         asset_dict["owner_user_name"] = user_name
         asset_dict["owner_user_email"] = user_email
@@ -473,14 +486,14 @@ async def search_assets(
     offset: int = Query(0, ge=0, description="Pagination offset"),
     _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
-) -> dict[str, Any]:
+) -> PaginatedResponse[AssetSearchResult]:
     """Search assets by FQN pattern.
 
     Searches for assets whose FQN contains the search query (case-insensitive).
     Requires read scope.
     """
     # Build filters dict for cache key
-    filters = {}
+    filters: dict[str, str] = {}
     if owner:
         filters["owner"] = str(owner)
     if environment:
@@ -490,7 +503,7 @@ async def search_assets(
     if limit == settings.pagination_limit_default and offset == 0:
         cached = await get_cached_asset_search(q, filters)
         if cached:
-            return cached
+            return cached  # type: ignore[return-value]
 
     base_query = _apply_asset_search_filters(select(AssetDB), q, owner, environment)
 
@@ -512,18 +525,18 @@ async def search_assets(
     rows = result.all()
 
     # Build response with owner team names from join
-    results = [
-        {
-            "id": str(asset.id),
-            "fqn": asset.fqn,
-            "owner_team_id": str(asset.owner_team_id),
-            "owner_team_name": team.name,
-            "environment": asset.environment,
-        }
+    results: list[AssetSearchResult] = [
+        AssetSearchResult(
+            id=str(asset.id),
+            fqn=asset.fqn,
+            owner_team_id=str(asset.owner_team_id),
+            owner_team_name=team.name,
+            environment=asset.environment,
+        )
         for asset, team in rows
     ]
 
-    response = {
+    response: PaginatedResponse[AssetSearchResult] = {
         "results": results,
         "total": total,
         "limit": limit,
@@ -532,7 +545,7 @@ async def search_assets(
 
     # Cache result if default pagination
     if limit == settings.pagination_limit_default and offset == 0:
-        await cache_asset_search(q, filters, response)
+        await cache_asset_search(q, filters, response)  # type: ignore[arg-type]
 
     return response
 
@@ -545,7 +558,7 @@ async def get_asset(
     auth: Auth,
     _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
-) -> dict[str, Any]:
+) -> AssetWithOwnerInfo:
     """Get an asset by ID.
 
     Requires read scope. Returns asset with owner team and user names.
@@ -553,7 +566,7 @@ async def get_asset(
     # Try cache first
     cached = await get_cached_asset(str(asset_id))
     if cached:
-        return cached
+        return cached  # type: ignore[return-value]
 
     # Query with joins to get team and user names
     result = await session.execute(
@@ -573,13 +586,13 @@ async def get_asset(
         raise NotFoundError(ErrorCode.ASSET_NOT_FOUND, "Asset not found")
 
     asset, team_name, user_name, user_email = row
-    asset_dict = Asset.model_validate(asset).model_dump()
+    asset_dict: AssetWithOwnerInfo = Asset.model_validate(asset).model_dump()  # type: ignore[assignment]
     asset_dict["owner_team_name"] = team_name
     asset_dict["owner_user_name"] = user_name
     asset_dict["owner_user_email"] = user_email
 
     # Cache result
-    await cache_asset(str(asset_id), asset_dict)
+    await cache_asset(str(asset_id), asset_dict)  # type: ignore[arg-type]
 
     return asset_dict
 
@@ -789,7 +802,7 @@ async def create_contract(
     ),
     _: None = RequireWrite,
     session: AsyncSession = Depends(get_session),
-) -> dict[str, Any] | JSONResponse:
+) -> ContractPublishResponse | JSONResponse:
     """Publish a new contract for an asset.
 
     Requires write scope.
@@ -1027,17 +1040,17 @@ async def create_contract(
         await invalidate_asset(str(asset_id))
         contract_data = Contract.model_validate(new_contract).model_dump()
         await cache_contract(str(new_contract.id), contract_data)
-        response: dict[str, Any] = {
+        publish_response: ContractPublishResponse = {
             "action": "published",
             "contract": contract_data,
         }
         if version_auto_generated:
-            response["version_auto_generated"] = True
+            publish_response["version_auto_generated"] = True
         if original_format == SchemaFormat.AVRO:
-            response["schema_converted_from"] = "avro"
+            publish_response["schema_converted_from"] = "avro"
         if audit_warning:
-            response["audit_warning"] = audit_warning
-        return response
+            publish_response["audit_warning"] = audit_warning
+        return publish_response
 
     # Diff schemas and check compatibility
     is_compatible, breaking_changes = check_compatibility(
@@ -1061,18 +1074,18 @@ async def create_contract(
         await invalidate_asset(str(asset_id))
         contract_data = Contract.model_validate(new_contract).model_dump()
         await cache_contract(str(new_contract.id), contract_data)
-        response = {
+        compat_response: ContractPublishResponse = {
             "action": "published",
             "change_type": str(diff_result.change_type),
             "contract": contract_data,
         }
         if version_auto_generated:
-            response["version_auto_generated"] = True
+            compat_response["version_auto_generated"] = True
         if original_format == SchemaFormat.AVRO:
-            response["schema_converted_from"] = "avro"
+            compat_response["schema_converted_from"] = "avro"
         if audit_warning:
-            response["audit_warning"] = audit_warning
-        return response
+            compat_response["audit_warning"] = audit_warning
+        return compat_response
 
     # Breaking change with force flag = publish anyway (logged)
     if force:
@@ -1089,7 +1102,7 @@ async def create_contract(
         await invalidate_asset(str(asset_id))
         contract_data = Contract.model_validate(new_contract).model_dump()
         await cache_contract(str(new_contract.id), contract_data)
-        response = {
+        force_response: ContractPublishResponse = {
             "action": "force_published",
             "change_type": str(diff_result.change_type),
             "breaking_changes": [bc.to_dict() for bc in breaking_changes],
@@ -1097,12 +1110,12 @@ async def create_contract(
             "warning": "Breaking change was force-published. Consumers may be affected.",
         }
         if version_auto_generated:
-            response["version_auto_generated"] = True
+            force_response["version_auto_generated"] = True
         if original_format == SchemaFormat.AVRO:
-            response["schema_converted_from"] = "avro"
+            force_response["schema_converted_from"] = "avro"
         if audit_warning:
-            response["audit_warning"] = audit_warning
-        return response
+            force_response["audit_warning"] = audit_warning
+        return force_response
 
     # Breaking change without force = create proposal
     # First check if there's already a pending proposal for this asset
@@ -1149,7 +1162,7 @@ async def create_contract(
     )
 
     # Get impacted consumers (active registrations for current contract)
-    impacted_consumers: list[dict[str, Any]] = []
+    impacted_consumers: list[ImpactedConsumer] = []
     if current_contract:
         reg_result = await session.execute(
             select(RegistrationDB, TeamDB)
@@ -1159,11 +1172,11 @@ async def create_contract(
         )
         for reg, team in reg_result.all():
             impacted_consumers.append(
-                {
-                    "team_id": team.id,
-                    "team_name": team.name,
-                    "pinned_version": reg.pinned_version,
-                }
+                ImpactedConsumer(
+                    team_id=team.id,
+                    team_name=team.name,
+                    pinned_version=reg.pinned_version,
+                )
             )
 
     # Notify consumers via webhook
@@ -1175,7 +1188,7 @@ async def create_contract(
         producer_team_name=publisher_team.name,
         proposed_version=version,
         breaking_changes=[bc.to_dict() for bc in breaking_changes],
-        impacted_consumers=impacted_consumers,
+        impacted_consumers=impacted_consumers,  # type: ignore[arg-type]
     )
 
     # Send Slack notification
@@ -1187,13 +1200,14 @@ async def create_contract(
         breaking_changes=[bc.to_dict() for bc in breaking_changes],
     )
 
-    return {
+    proposal_response: ContractPublishResponse = {
         "action": "proposal_created",
         "change_type": str(diff_result.change_type),
         "breaking_changes": [bc.to_dict() for bc in breaking_changes],
         "proposal": Proposal.model_validate(db_proposal).model_dump(),
         "message": "Breaking change detected. Proposal created for consumer acknowledgment.",
     }
+    return proposal_response
 
 
 @router.get("/{asset_id}/contracts")
@@ -1205,7 +1219,7 @@ async def list_asset_contracts(
     params: PaginationParams = Depends(pagination_params),
     _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
-) -> dict[str, Any]:
+) -> PaginatedResponse[ContractWithPublisherInfo]:
     """List all contracts for an asset.
 
     Requires read scope. Returns contracts with publisher team and user names.
@@ -1214,7 +1228,7 @@ async def list_asset_contracts(
     if params.limit == settings.pagination_limit_default and params.offset == 0:
         cached = await get_cached_asset_contracts_list(str(asset_id))
         if cached:
-            return cached
+            return cached  # type: ignore[return-value]
 
     # Query with join to get publisher team and user names
     query = (
@@ -1241,14 +1255,14 @@ async def list_asset_contracts(
     result = await session.execute(paginated_query)
     rows = result.all()
 
-    results = []
+    results: list[ContractWithPublisherInfo] = []
     for contract_db, publisher_team_name, publisher_user_name in rows:
-        contract_dict = Contract.model_validate(contract_db).model_dump()
+        contract_dict: ContractWithPublisherInfo = Contract.model_validate(contract_db).model_dump()  # type: ignore[assignment]
         contract_dict["published_by_team_name"] = publisher_team_name
         contract_dict["published_by_user_name"] = publisher_user_name
         results.append(contract_dict)
 
-    response = {
+    response: PaginatedResponse[ContractWithPublisherInfo] = {
         "results": results,
         "total": total,
         "limit": params.limit,
@@ -1257,7 +1271,7 @@ async def list_asset_contracts(
 
     # Cache result if default pagination
     if params.limit == settings.pagination_limit_default and params.offset == 0:
-        await cache_asset_contracts_list(str(asset_id), response)
+        await cache_asset_contracts_list(str(asset_id), response)  # type: ignore[arg-type]
 
     return response
 
@@ -1270,7 +1284,7 @@ async def get_contract_history(
     auth: Auth,
     _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
-) -> dict[str, Any]:
+) -> ContractHistoryResponse:
     """Get the complete contract history for an asset with change summaries.
 
     Returns all versions ordered by publication date with change type annotations.
@@ -1291,9 +1305,9 @@ async def get_contract_history(
     contracts = list(contracts_result.scalars().all())
 
     # Build history with change analysis
-    history: list[dict[str, Any]] = []
+    history: list[ContractHistoryEntry] = []
     for i, contract in enumerate(contracts):
-        entry: dict[str, Any] = {
+        entry: ContractHistoryEntry = {
             "id": str(contract.id),
             "version": contract.version,
             "status": str(contract.status.value),
@@ -1316,11 +1330,11 @@ async def get_contract_history(
 
         history.append(entry)
 
-    return {
-        "asset_id": str(asset_id),
-        "asset_fqn": asset.fqn,
-        "contracts": history,
-    }
+    return ContractHistoryResponse(
+        asset_id=str(asset_id),
+        asset_fqn=asset.fqn,
+        contracts=history,
+    )
 
 
 @router.get("/{asset_id}/contracts/diff")
@@ -1333,7 +1347,7 @@ async def diff_contract_versions(
     to_version: str = Query(..., description="Target version to compare to"),
     _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
-) -> dict[str, Any]:
+) -> SchemaDiffResponse:
     """Compare two contract versions for an asset.
 
     Returns the diff between from_version and to_version.
@@ -1384,27 +1398,23 @@ async def diff_contract_versions(
         }
         await cache_schema_diff(from_contract.schema_def, to_contract.schema_def, diff_result_data)
 
-    breaking = []  # Re-calculate breaking based on compatibility mode of from_contract
+    # Re-calculate breaking based on compatibility mode of from_contract
     # We need to re-check compatibility because it depends on the mode
-    # actually we should just cache the whole result including compatibility if possible
-    # but the mode can change.
-    # Let's just keep it simple for now.
-
     # re-diff for breaking (fast)
     diff_obj = diff_schemas(from_contract.schema_def, to_contract.schema_def)
     breaking = diff_obj.breaking_for_mode(from_contract.compatibility_mode)
 
-    return {
-        "asset_id": str(asset_id),
-        "asset_fqn": asset.fqn,
-        "from_version": from_version,
-        "to_version": to_version,
-        "change_type": diff_result_data["change_type"],
-        "is_compatible": len(breaking) == 0,
-        "breaking_changes": [bc.to_dict() for bc in breaking],
-        "all_changes": diff_result_data["all_changes"],
-        "compatibility_mode": str(from_contract.compatibility_mode.value),
-    }
+    return SchemaDiffResponse(
+        asset_id=str(asset_id),
+        asset_fqn=asset.fqn,
+        from_version=from_version,
+        to_version=to_version,
+        change_type=diff_result_data["change_type"],
+        is_compatible=len(breaking) == 0,
+        breaking_changes=[bc.to_dict() for bc in breaking],
+        all_changes=diff_result_data["all_changes"],
+        compatibility_mode=str(from_contract.compatibility_mode.value),
+    )
 
 
 @router.post("/bulk-assign")
@@ -1415,7 +1425,7 @@ async def bulk_assign_owner(
     auth: Auth,
     _: None = RequireAdmin,
     session: AsyncSession = Depends(get_session),
-) -> dict[str, Any]:
+) -> BulkAssignResponse:
     """Bulk assign or unassign a user owner for multiple assets.
 
     Requires admin scope.
@@ -1456,8 +1466,8 @@ async def bulk_assign_owner(
     for asset in assets:
         await invalidate_asset(str(asset.id))
 
-    return {
-        "updated": updated,
-        "not_found": not_found,
-        "owner_user_id": str(bulk_request.owner_user_id) if bulk_request.owner_user_id else None,
-    }
+    return BulkAssignResponse(
+        updated=updated,
+        not_found=not_found,
+        owner_user_id=str(bulk_request.owner_user_id) if bulk_request.owner_user_id else None,
+    )
