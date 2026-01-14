@@ -1,7 +1,6 @@
 """Users API endpoints."""
 
 from datetime import UTC, datetime
-from typing import TypedDict
 from uuid import UUID
 
 from argon2 import PasswordHasher
@@ -9,6 +8,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from typing_extensions import TypedDict
 
 from tessera.api.auth import Auth, RequireAdmin, RequireRead
 from tessera.api.errors import DuplicateError, ErrorCode, NotFoundError

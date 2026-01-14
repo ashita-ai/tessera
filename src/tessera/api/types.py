@@ -5,8 +5,10 @@ improving type safety and IDE autocompletion over plain dict[str, Any].
 """
 
 from datetime import datetime
-from typing import Generic, TypedDict, TypeVar
+from typing import Generic, TypeVar
 from uuid import UUID
+
+from typing_extensions import TypedDict
 
 from tessera.models.enums import ContractStatus
 

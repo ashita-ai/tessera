@@ -1,7 +1,6 @@
 """Teams API endpoints."""
 
 from datetime import UTC, datetime
-from typing import TypedDict
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -9,6 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from typing_extensions import TypedDict
 
 from tessera.api.auth import Auth, RequireAdmin, RequireRead
 from tessera.api.errors import (
