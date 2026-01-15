@@ -2688,7 +2688,7 @@ dev = [
     { name = "types-jsonschema" },
     { name = "types-pyyaml" },
     { name = "types-redis" },
-    { name = "uvloop" },
+    { name = "uvloop", marker = "sys_platform != 'win32'" },
     { name = "watchfiles" },
 ]
 
@@ -2744,7 +2744,7 @@ dev = [
     { name = "types-jsonschema", specifier = ">=4.25.1.20251009" },
     { name = "types-pyyaml", specifier = ">=6.0.12.20250915" },
     { name = "types-redis", specifier = ">=4.6.0,<5.0.0" },
-    { name = "uvloop", specifier = ">=0.22.0,<1.0.0" },
+    { name = "uvloop", marker = "sys_platform != 'win32'", specifier = ">=0.22.0,<1.0.0" },
     { name = "watchfiles", specifier = ">=1.0.0,<2.0.0" },
 ]
 
