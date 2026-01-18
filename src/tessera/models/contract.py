@@ -99,6 +99,16 @@ class Contract(ContractBase):
     published_by_user_id: UUID | None = None
 
 
+class VersionSuggestionRequest(BaseModel):
+    """Request body for previewing version suggestion without publishing."""
+
+    schema_def: dict[str, Any] = Field(..., alias="schema", description="JSON Schema definition")
+    schema_format: SchemaFormat = Field(
+        SchemaFormat.JSON_SCHEMA,
+        description="Schema format: 'json_schema' (default) or 'avro'",
+    )
+
+
 class VersionSuggestion(BaseModel):
     """Suggested version based on schema diff analysis.
 
@@ -120,4 +130,8 @@ class VersionSuggestion(BaseModel):
     )
     is_first_contract: bool = Field(
         False, description="True if this is the first contract for the asset"
+    )
+    breaking_changes: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="List of breaking changes detected in the schema diff",
     )
