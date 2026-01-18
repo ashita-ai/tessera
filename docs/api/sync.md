@@ -88,7 +88,7 @@ See [dbt Integration Guide](../guides/dbt-integration.md) for full documentation
 
 Import API schemas from OpenAPI specifications.
 
-### Upload Spec
+### Import Spec
 
 ```http
 POST /api/v1/sync/openapi
@@ -100,28 +100,46 @@ POST /api/v1/sync/openapi
 {
   "spec": { /* OpenAPI 3.x spec */ },
   "owner_team_id": "uuid",
-  "prefix": "api",
-  "auto_publish_contracts": true
+  "environment": "production",
+  "auto_publish_contracts": true,
+  "dry_run": false,
+  "default_guarantees": {
+    "freshness": { "max_staleness_minutes": 60 }
+  }
 }
 ```
-
-#### Parameters
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `spec` | object | required | OpenAPI 3.x specification |
 | `owner_team_id` | UUID | required | Team to own created assets |
-| `prefix` | string | `"api"` | Prefix for asset FQNs |
-| `auto_publish_contracts` | boolean | `false` | Auto-publish contracts |
+| `environment` | string | `"production"` | Environment for assets |
+| `auto_publish_contracts` | boolean | `true` | Auto-publish contracts for new assets |
+| `dry_run` | boolean | `false` | Preview changes without persisting |
+| `default_guarantees` | object | `null` | Default guarantees to apply to all endpoints |
 
 #### Response
 
 ```json
 {
-  "status": "success",
-  "assets": { "created": 15, "updated": 3 },
-  "contracts": { "published": 12 },
-  "endpoints_processed": 18
+  "api_title": "Users API",
+  "api_version": "1.0.0",
+  "endpoints_found": 18,
+  "assets_created": 15,
+  "assets_updated": 3,
+  "assets_skipped": 0,
+  "contracts_published": 15,
+  "endpoints": [
+    {
+      "fqn": "api.users_api.get_users_id",
+      "path": "/users/{id}",
+      "method": "GET",
+      "action": "created",
+      "asset_id": "uuid",
+      "contract_id": "uuid"
+    }
+  ],
+  "parse_errors": []
 }
 ```
 
@@ -131,28 +149,98 @@ POST /api/v1/sync/openapi
 POST /api/v1/sync/openapi/impact
 ```
 
-Preview what would change.
+Check what would change against existing contracts.
 
-### Diff
+#### Request Body
+
+```json
+{
+  "spec": { /* OpenAPI 3.x spec */ },
+  "environment": "production"
+}
+```
+
+#### Response
+
+```json
+{
+  "status": "success",
+  "api_title": "Users API",
+  "api_version": "1.0.0",
+  "total_endpoints": 10,
+  "endpoints_with_contracts": 8,
+  "breaking_changes_count": 2,
+  "results": [
+    {
+      "fqn": "api.users_api.get_users_id",
+      "path": "/users/{id}",
+      "method": "GET",
+      "has_contract": true,
+      "safe_to_publish": false,
+      "change_type": "major",
+      "breaking_changes": [
+        { "type": "property_removed", "path": "$.response.email" }
+      ]
+    }
+  ],
+  "parse_errors": []
+}
+```
+
+### Diff (CI/CD)
 
 ```http
 POST /api/v1/sync/openapi/diff
 ```
 
-CI/CD dry-run.
+Dry-run for CI pipelines with blocking support.
+
+#### Request Body
+
+```json
+{
+  "spec": { /* OpenAPI 3.x spec */ },
+  "environment": "production",
+  "fail_on_breaking": true
+}
+```
+
+#### Response
+
+```json
+{
+  "status": "breaking_changes_detected",
+  "api_title": "Users API",
+  "api_version": "1.0.0",
+  "summary": { "new": 2, "modified": 3, "unchanged": 5, "breaking": 1 },
+  "blocking": true,
+  "endpoints": [
+    {
+      "fqn": "api.users_api.get_users_id",
+      "path": "/users/{id}",
+      "method": "GET",
+      "change_type": "modified",
+      "has_schema": true,
+      "schema_change_type": "breaking",
+      "breaking_changes": []
+    }
+  ],
+  "parse_errors": []
+}
+```
 
 ### What Gets Synced
 
 For each OpenAPI path/operation:
 
-- Creates an asset with FQN: `{prefix}.{path}.{method}`
+- Creates an asset with FQN: `api.<api_title>.<method>_<path>`
 - Extracts request/response schemas
 - Converts to JSON Schema for contracts
 
 Example:
 
 ```yaml
-# OpenAPI
+# OpenAPI spec with title "Users API"
 paths:
   /users/{id}:
     get:
@@ -164,15 +252,15 @@ paths:
                 $ref: '#/components/schemas/User'
 ```
 
-Becomes asset: `api.users.{id}.get`
+Becomes asset: `api.users_api.get_users_id`
 
 ---
 
 ## GraphQL Sync
 
-Import types from GraphQL schemas.
+Import operations from GraphQL introspection responses.
 
-### Upload Schema
+### Import Schema
 
 ```http
 POST /api/v1/sync/graphql
@@ -182,30 +270,69 @@ POST /api/v1/sync/graphql
 
 ```json
 {
-  "schema": "type User { id: ID! name: String! }",
+  "introspection": { /* GraphQL introspection response */ },
+  "schema_name": "Users API",
   "owner_team_id": "uuid",
-  "prefix": "graphql",
-  "auto_publish_contracts": true
+  "environment": "production",
+  "auto_publish_contracts": true,
+  "dry_run": false,
+  "default_guarantees": null
 }
 ```
 
-#### Parameters
-
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `schema` | string | required | GraphQL SDL |
+| `introspection` | object | required | GraphQL introspection response (`__schema` or `data.__schema`) |
+| `schema_name` | string | `"GraphQL API"` | Name for the schema (used in FQN generation) |
 | `owner_team_id` | UUID | required | Team to own created assets |
-| `prefix` | string | `"graphql"` | Prefix for asset FQNs |
-| `auto_publish_contracts` | boolean | `false` | Auto-publish contracts |
+| `environment` | string | `"production"` | Environment for assets |
+| `auto_publish_contracts` | boolean | `true` | Auto-publish contracts for new assets |
+| `dry_run` | boolean | `false` | Preview changes without persisting |
+| `default_guarantees` | object | `null` | Default guarantees to apply to all operations |
+
+To get an introspection response, run the standard introspection query:
+
+```graphql
+query IntrospectionQuery {
+  __schema {
+    queryType { name }
+    mutationType { name }
+    types {
+      kind name description
+      fields { name description args { name type { ...TypeRef } } type { ...TypeRef } }
+      inputFields { name type { ...TypeRef } }
+      enumValues { name description }
+    }
+  }
+}
+
+fragment TypeRef on __Type {
+  kind name
+  ofType { kind name ofType { kind name ofType { kind name } } }
+}
+```
 
 #### Response
 
 ```json
 {
-  "status": "success",
-  "assets": { "created": 8, "updated": 2 },
-  "contracts": { "published": 6 },
-  "types_processed": 10
+  "schema_name": "Users API",
+  "operations_found": 10,
+  "assets_created": 8,
+  "assets_updated": 2,
+  "assets_skipped": 0,
+  "contracts_published": 8,
+  "operations": [
+    {
+      "fqn": "graphql.users_api.query_get_user",
+      "operation_name": "getUser",
+      "operation_type": "query",
+      "action": "created",
+      "asset_id": "uuid",
+      "contract_id": "uuid"
+    }
+  ],
+  "parse_errors": []
 }
 ```
 
@@ -215,52 +342,121 @@ POST /api/v1/sync/graphql
 POST /api/v1/sync/graphql/impact
 ```
 
-Preview what would change.
+Check what would change against existing contracts.
 
-### Diff
+#### Request Body
+
+```json
+{
+  "introspection": { /* GraphQL introspection response */ },
+  "schema_name": "Users API",
+  "environment": "production"
+}
+```
+
+#### Response
+
+```json
+{
+  "status": "success",
+  "schema_name": "Users API",
+  "total_operations": 10,
+  "operations_with_contracts": 8,
+  "breaking_changes_count": 0,
+  "results": [
+    {
+      "fqn": "graphql.users_api.query_get_user",
+      "operation_name": "getUser",
+      "operation_type": "query",
+      "has_contract": true,
+      "safe_to_publish": true,
+      "change_type": "none",
+      "breaking_changes": []
+    }
+  ],
+  "parse_errors": []
+}
+```
+
+### Diff (CI/CD)
 
 ```http
 POST /api/v1/sync/graphql/diff
 ```
 
-CI/CD dry-run.
+Dry-run for CI pipelines with blocking support.
+
+#### Request Body
+
+```json
+{
+  "introspection": { /* GraphQL introspection response */ },
+  "schema_name": "Users API",
+  "environment": "production",
+  "fail_on_breaking": true
+}
+```
+
+#### Response
+
+```json
+{
+  "status": "clean",
+  "schema_name": "Users API",
+  "summary": { "new": 0, "modified": 1, "unchanged": 9, "breaking": 0 },
+  "blocking": false,
+  "operations": [
+    {
+      "fqn": "graphql.users_api.query_get_user",
+      "operation_name": "getUser",
+      "operation_type": "query",
+      "change_type": "unchanged",
+      "has_schema": true,
+      "schema_change_type": "none",
+      "breaking_changes": []
+    }
+  ],
+  "parse_errors": []
+}
+```
 
 ### What Gets Synced
 
-For each GraphQL type:
+For each GraphQL query/mutation:
 
-- Creates an asset with FQN: `{prefix}.{TypeName}`
-- Converts GraphQL type to JSON Schema
-- Handles: Object types, Input types, Enums
+- Creates an asset with FQN: `graphql.<schema_name>.<type>_<operation_name>`
+- Extracts argument and return type schemas
+- Converts to JSON Schema for contracts
 
 Example:
 
 ```graphql
-type User {
-  id: ID!
-  name: String!
-  email: String
-  role: Role!
+# Schema named "Users API"
+type Query {
+  getUser(id: ID!): User
+  listUsers(limit: Int): [User!]!
 }
 
-enum Role {
-  ADMIN
-  USER
+type Mutation {
+  createUser(input: CreateUserInput!): User!
 }
 ```
 
 Becomes:
-- Asset: `graphql.User` with schema for User type
-- Asset: `graphql.Role` with enum schema
+- `graphql.users_api.query_get_user`
+- `graphql.users_api.query_list_users`
+- `graphql.users_api.mutation_create_user`
 
 ---
 
 ## Conflict Modes
 
-All sync endpoints support `conflict_mode`:
+The dbt sync endpoints support `conflict_mode`:
 
 | Mode | Behavior |
 |------|----------|
 | `ignore` | Skip existing assets (default, safe) |
 | `overwrite` | Update existing assets |
 | `fail` | Error if any asset exists |
+
+OpenAPI and GraphQL endpoints handle existing assets by updating metadata (no skip/fail modes).
