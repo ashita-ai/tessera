@@ -53,8 +53,9 @@ from tessera.models import (
     Contract,
     ContractCreate,
     Proposal,
+    VersionSuggestion,
+    VersionSuggestionRequest,
 )
-from tessera.models.contract import VersionSuggestion
 from tessera.models.enums import (
     APIKeyScope,
     AuditRunStatus,
@@ -150,6 +151,7 @@ def compute_version_suggestion(
     current_version: str | None,
     change_type: ChangeType,
     is_compatible: bool,
+    breaking_changes: list[dict[str, Any]] | None = None,
 ) -> VersionSuggestion:
     """Compute the suggested version based on schema diff analysis.
 
@@ -157,10 +159,13 @@ def compute_version_suggestion(
         current_version: The current contract version (None if first contract)
         change_type: The detected change type from schema diff
         is_compatible: Whether the change is backward compatible
+        breaking_changes: List of breaking change details from schema diff
 
     Returns:
         A VersionSuggestion with the suggested version and explanation
     """
+    breaks = breaking_changes or []
+
     if current_version is None:
         return VersionSuggestion(
             suggested_version="1.0.0",
@@ -168,6 +173,7 @@ def compute_version_suggestion(
             change_type=ChangeType.PATCH,
             reason="First contract for this asset",
             is_first_contract=True,
+            breaking_changes=[],
         )
 
     major, minor, patch = parse_semver(current_version)
@@ -198,6 +204,7 @@ def compute_version_suggestion(
         change_type=actual_change_type,
         reason=reason,
         is_first_contract=False,
+        breaking_changes=breaks,
     )
 
 
@@ -930,7 +937,7 @@ async def create_contract(
     version_suggestion: VersionSuggestion | None = None
     if current_contract:
         pre_diff = diff_schemas(current_contract.schema_def, schema_to_store)
-        pre_is_compatible, _pre_breaks = check_compatibility(
+        pre_is_compatible, pre_breaks = check_compatibility(
             current_contract.schema_def,
             schema_to_store,
             current_contract.compatibility_mode,
@@ -939,6 +946,7 @@ async def create_contract(
             current_contract.version,
             pre_diff.change_type,
             pre_is_compatible,
+            breaking_changes=[bc.to_dict() for bc in pre_breaks],
         )
     else:
         version_suggestion = compute_version_suggestion(None, ChangeType.PATCH, True)
@@ -1415,6 +1423,99 @@ async def diff_contract_versions(
         all_changes=diff_result_data["all_changes"],
         compatibility_mode=str(from_contract.compatibility_mode.value),
     )
+
+
+@router.post("/{asset_id}/version-suggestion", response_model=VersionSuggestion)
+@limit_read
+async def preview_version_suggestion(
+    request: Request,
+    asset_id: UUID,
+    body: VersionSuggestionRequest,
+    auth: Auth,
+    _: None = RequireRead,
+    session: AsyncSession = Depends(get_session),
+) -> VersionSuggestion:
+    """Preview version suggestion for a schema change without publishing.
+
+    This endpoint analyzes a proposed schema against the current active contract
+    and returns what version would be suggested, along with any breaking changes.
+    No side effects - no contracts or proposals are created.
+
+    Useful for:
+    - CI/CD pipelines that want to show impact before PR merge
+    - UIs that want to preview "this will be version 2.0.0" before confirmation
+
+    Requires read scope.
+    """
+    # Verify asset exists
+    asset_result = await session.execute(
+        select(AssetDB).where(AssetDB.id == asset_id).where(AssetDB.deleted_at.is_(None))
+    )
+    asset = asset_result.scalar_one_or_none()
+    if not asset:
+        raise NotFoundError(ErrorCode.ASSET_NOT_FOUND, "Asset not found")
+
+    # Validate and normalize schema based on format
+    schema_to_check = body.schema_def
+
+    if body.schema_format == SchemaFormat.AVRO:
+        from tessera.services.avro import (
+            AvroConversionError,
+            avro_to_json_schema,
+            validate_avro_schema,
+        )
+
+        is_valid, avro_errors = validate_avro_schema(body.schema_def)
+        if not is_valid:
+            raise BadRequestError(
+                "Invalid Avro schema",
+                code=ErrorCode.INVALID_SCHEMA,
+                details={"errors": avro_errors, "schema_format": "avro"},
+            )
+        try:
+            schema_to_check = avro_to_json_schema(body.schema_def)
+        except AvroConversionError as e:
+            raise BadRequestError(
+                f"Failed to convert Avro schema: {e.message}",
+                code=ErrorCode.INVALID_SCHEMA,
+                details={"path": e.path, "schema_format": "avro"},
+            )
+    else:
+        is_valid, errors = validate_json_schema(body.schema_def)
+        if not is_valid:
+            raise BadRequestError(
+                "Invalid JSON Schema",
+                code=ErrorCode.INVALID_SCHEMA,
+                details={"errors": errors},
+            )
+
+    # Get current active contract
+    contract_result = await session.execute(
+        select(ContractDB)
+        .where(ContractDB.asset_id == asset_id)
+        .where(ContractDB.status == ContractStatus.ACTIVE)
+        .order_by(ContractDB.published_at.desc())
+        .limit(1)
+    )
+    current_contract = contract_result.scalar_one_or_none()
+
+    # Compute version suggestion
+    if current_contract:
+        diff_result = diff_schemas(current_contract.schema_def, schema_to_check)
+        is_compatible, breaking_changes = check_compatibility(
+            current_contract.schema_def,
+            schema_to_check,
+            current_contract.compatibility_mode,
+        )
+        return compute_version_suggestion(
+            current_contract.version,
+            diff_result.change_type,
+            is_compatible,
+            breaking_changes=[bc.to_dict() for bc in breaking_changes],
+        )
+    else:
+        # First contract for this asset
+        return compute_version_suggestion(None, ChangeType.PATCH, True)
 
 
 @router.post("/bulk-assign")

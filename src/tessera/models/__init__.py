@@ -26,7 +26,13 @@ from tessera.models.bulk import (
     BulkRegistrationRequest,
     BulkRegistrationResponse,
 )
-from tessera.models.contract import Contract, ContractCreate, Guarantees
+from tessera.models.contract import (
+    Contract,
+    ContractCreate,
+    Guarantees,
+    VersionSuggestion,
+    VersionSuggestionRequest,
+)
 from tessera.models.dependency import Dependency, DependencyCreate
 from tessera.models.enums import (
     AcknowledgmentResponseType,
@@ -78,6 +84,8 @@ __all__ = [
     "Contract",
     "ContractCreate",
     "Guarantees",
+    "VersionSuggestion",
+    "VersionSuggestionRequest",
     # Dependency
     "Dependency",
     "DependencyCreate",
