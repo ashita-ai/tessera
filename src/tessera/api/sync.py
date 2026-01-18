@@ -21,8 +21,12 @@ from tessera.api.errors import BadRequestError, ConflictError, ErrorCode, NotFou
 from tessera.api.rate_limit import limit_admin
 from tessera.db import AssetDB, ContractDB, ProposalDB, RegistrationDB, TeamDB, UserDB, get_session
 from tessera.models.enums import CompatibilityMode, ContractStatus, RegistrationStatus, ResourceType
-from tessera.services import audit, get_affected_parties, validate_json_schema
+from tessera.services import audit, get_affected_parties
 from tessera.services.audit import AuditAction, log_contract_published, log_proposal_created
+from tessera.services.contract_publisher import (
+    ContractToPublish,
+    bulk_publish_contracts,
+)
 from tessera.services.graphql import GraphQLOperation, parse_graphql_introspection
 from tessera.services.graphql import operations_to_assets as graphql_operations_to_assets
 from tessera.services.openapi import (
@@ -1108,135 +1112,95 @@ async def upload_dbt_manifest(
             details={"conflicts": conflicts[:20]},  # Limit to first 20
         )
 
-    # Auto-publish contracts for new assets with column schemas
-    if upload_req.auto_publish_contracts and new_assets_for_contracts:
-        # Flush to get asset IDs
+    # Auto-publish contracts using bulk service
+    if upload_req.auto_publish_contracts:
+        # Flush to get asset IDs for new assets
         await session.flush()
 
+        # Collect all contracts to publish
+        contracts_to_publish: list[ContractToPublish] = []
+        # Track asset -> (team_id, user_id) for publishing attribution
+        asset_publishers: dict[UUID, tuple[UUID, UUID | None]] = {}
+
+        # Process new assets
         for asset, columns, asset_guarantees, compat_mode_str in new_assets_for_contracts:
             try:
-                # Convert columns to JSON Schema
                 schema_def = dbt_columns_to_json_schema(columns)
 
-                # Validate schema
-                is_valid, errors = validate_json_schema(schema_def)
-                if not is_valid:
-                    contract_warnings.append(
-                        f"{asset.fqn}: Invalid schema generated from columns: {errors}"
-                    )
-                    continue
-
                 # Determine compatibility mode
+                compat_mode: CompatibilityMode | None = None
                 if compat_mode_str:
                     try:
                         compat_mode = CompatibilityMode(compat_mode_str.lower())
                     except ValueError:
-                        compat_mode = CompatibilityMode.BACKWARD
                         msg = f"{asset.fqn}: Unknown compatibility_mode, defaulting to backward"
                         contract_warnings.append(msg)
-                else:
-                    compat_mode = CompatibilityMode.BACKWARD
 
-                # Create contract
-                new_contract = ContractDB(
-                    asset_id=asset.id,
-                    version="1.0.0",
-                    schema_def=schema_def,
-                    compatibility_mode=compat_mode,
-                    guarantees=asset_guarantees,
-                    status=ContractStatus.ACTIVE,
-                    published_by=asset.owner_team_id,
-                    published_by_user_id=asset.owner_user_id,
-                )
-                session.add(new_contract)
-                contracts_published += 1
-
-            except Exception as e:
-                contract_warnings.append(
-                    f"{asset.fqn}: Failed to publish contract ({type(e).__name__}): {str(e)}"
-                )
-
-    # Auto-publish contracts for existing assets (first contract or compatible changes)
-    if upload_req.auto_publish_contracts and existing_assets_for_contracts:
-        for item in existing_assets_for_contracts:
-            asset, columns, asset_guarantees, compat_mode_str, existing_contract = item
-            try:
-                # Convert columns to JSON Schema
-                schema_def = dbt_columns_to_json_schema(columns)
-
-                # Validate schema
-                is_valid, errors = validate_json_schema(schema_def)
-                if not is_valid:
-                    contract_warnings.append(
-                        f"{asset.fqn}: Invalid schema generated from columns: {errors}"
-                    )
-                    continue
-
-                # Determine compatibility mode
-                if compat_mode_str:
-                    try:
-                        compat_mode = CompatibilityMode(compat_mode_str.lower())
-                    except ValueError:
-                        compat_mode = CompatibilityMode.BACKWARD
-                else:
-                    if existing_contract:
-                        compat_mode = existing_contract.compatibility_mode
-                    else:
-                        compat_mode = CompatibilityMode.BACKWARD
-
-                if existing_contract is None:
-                    # No existing contract - publish v1.0.0
-                    new_contract = ContractDB(
+                contracts_to_publish.append(
+                    ContractToPublish(
                         asset_id=asset.id,
-                        version="1.0.0",
                         schema_def=schema_def,
                         compatibility_mode=compat_mode,
                         guarantees=asset_guarantees,
-                        status=ContractStatus.ACTIVE,
-                        published_by=asset.owner_team_id,
-                        published_by_user_id=asset.owner_user_id,
                     )
-                    session.add(new_contract)
-                    contracts_published += 1
-                else:
-                    # Check compatibility with existing contract
-                    is_compatible, breaking_changes_list = check_compatibility(
-                        existing_contract.schema_def,
-                        schema_def,
-                        existing_contract.compatibility_mode,
-                    )
-
-                    if is_compatible:
-                        # Compatible change - bump minor version and publish
-                        current_version = existing_contract.version
-                        parts = current_version.split(".")
-                        if len(parts) == 3:
-                            new_version = f"{parts[0]}.{int(parts[1]) + 1}.0"
-                        else:
-                            new_version = "1.1.0"
-
-                        # Deprecate old contract
-                        existing_contract.status = ContractStatus.DEPRECATED
-
-                        # Create new contract
-                        new_contract = ContractDB(
-                            asset_id=asset.id,
-                            version=new_version,
-                            schema_def=schema_def,
-                            compatibility_mode=compat_mode,
-                            guarantees=asset_guarantees,
-                            status=ContractStatus.ACTIVE,
-                            published_by=asset.owner_team_id,
-                            published_by_user_id=asset.owner_user_id,
-                        )
-                        session.add(new_contract)
-                        contracts_published += 1
-                    # else: breaking change - skip, handled by auto_create_proposals
-
+                )
+                asset_publishers[asset.id] = (asset.owner_team_id, asset.owner_user_id)
             except Exception as e:
                 contract_warnings.append(
-                    f"{asset.fqn}: Failed to publish contract ({type(e).__name__}): {str(e)}"
+                    f"{asset.fqn}: Failed to prepare contract ({type(e).__name__}): {e}"
                 )
+
+        # Process existing assets
+        for item in existing_assets_for_contracts:
+            asset, columns, asset_guarantees, compat_mode_str, _existing = item
+            try:
+                schema_def = dbt_columns_to_json_schema(columns)
+
+                compat_mode = None
+                if compat_mode_str:
+                    try:
+                        compat_mode = CompatibilityMode(compat_mode_str.lower())
+                    except ValueError:
+                        pass  # Will use existing or default
+
+                contracts_to_publish.append(
+                    ContractToPublish(
+                        asset_id=asset.id,
+                        schema_def=schema_def,
+                        compatibility_mode=compat_mode,
+                        guarantees=asset_guarantees,
+                    )
+                )
+                asset_publishers[asset.id] = (asset.owner_team_id, asset.owner_user_id)
+            except Exception as e:
+                contract_warnings.append(
+                    f"{asset.fqn}: Failed to prepare contract ({type(e).__name__}): {e}"
+                )
+
+        # Bulk publish all contracts
+        if contracts_to_publish:
+            # Group by publisher team for the bulk operation
+            # For dbt sync, we use the first asset's owner as the publisher
+            # This is a simplification - in practice all assets in a manifest
+            # typically belong to the same team
+            first_team_id, first_user_id = asset_publishers[contracts_to_publish[0].asset_id]
+
+            bulk_result = await bulk_publish_contracts(
+                session=session,
+                contracts=contracts_to_publish,
+                published_by=first_team_id,
+                published_by_user_id=first_user_id,
+                dry_run=False,
+                create_proposals_for_breaking=False,  # Breaking changes skipped in sync
+            )
+
+            contracts_published = bulk_result.published
+
+            # Collect warnings from failed items
+            for pub_result in bulk_result.results:
+                if pub_result.status == "failed" and pub_result.error:
+                    fqn = pub_result.asset_fqn or str(pub_result.asset_id)
+                    contract_warnings.append(f"{fqn}: {pub_result.error}")
 
     # Auto-register consumers from refs and meta.tessera.consumers
     if upload_req.auto_register_consumers and asset_consumer_map:

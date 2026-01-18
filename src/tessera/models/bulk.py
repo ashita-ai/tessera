@@ -123,3 +123,70 @@ class BulkAcknowledgmentResponse(BulkOperationResponse):
     """Response for bulk acknowledgment creation."""
 
     pass
+
+
+# Bulk Contract Models
+class BulkContractItem(BaseModel):
+    """A single contract to publish in a bulk request."""
+
+    asset_id: UUID = Field(..., description="ID of the asset to publish contract for")
+    schema_def: dict[str, Any] = Field(..., alias="schema", description="JSON Schema definition")
+    compatibility_mode: str | None = Field(
+        None,
+        description="Compatibility mode (backward, forward, full, none). "
+        "Uses asset default if not specified.",
+    )
+    guarantees: dict[str, Any] | None = Field(None, description="Contract guarantees")
+
+
+class BulkContractRequest(BaseModel):
+    """Request to publish multiple contracts at once."""
+
+    contracts: list[BulkContractItem] = Field(
+        ..., min_length=1, max_length=100, description="List of contracts to publish (max 100)"
+    )
+    published_by: UUID = Field(..., description="Team ID of the publisher")
+    published_by_user_id: UUID | None = Field(None, description="User ID who published")
+
+
+class BulkContractResultStatus(str):
+    """Status values for bulk contract results."""
+
+    # Preview statuses
+    WILL_PUBLISH = "will_publish"
+    WILL_SKIP = "will_skip"
+    BREAKING = "breaking"
+    # Execution statuses
+    PUBLISHED = "published"
+    SKIPPED = "skipped"
+    PROPOSAL_CREATED = "proposal_created"
+    FAILED = "failed"
+
+
+class BulkContractResultItem(BaseModel):
+    """Result for a single contract in a bulk operation."""
+
+    asset_id: UUID
+    asset_fqn: str | None = Field(default=None, description="FQN of the asset")
+    status: str = Field(..., description="Result status")
+    contract_id: UUID | None = Field(default=None, description="ID of published contract")
+    proposal_id: UUID | None = Field(default=None, description="ID of created proposal")
+    suggested_version: str | None = Field(default=None, description="Suggested version")
+    current_version: str | None = Field(default=None, description="Current active version")
+    reason: str | None = Field(default=None, description="Reason for status")
+    breaking_changes: list[dict[str, Any]] = Field(
+        default_factory=list, description="Breaking changes detected"
+    )
+    error: str | None = Field(default=None, description="Error message if failed")
+
+
+class BulkContractResponse(BaseModel):
+    """Response for bulk contract publishing."""
+
+    preview: bool = Field(..., description="True if this is a dry-run preview")
+    total: int = Field(..., description="Total contracts in request")
+    published: int = Field(0, description="Contracts published (or would_publish in preview)")
+    skipped: int = Field(0, description="Contracts skipped due to no changes")
+    proposals_created: int = Field(0, description="Proposals created for breaking changes")
+    failed: int = Field(0, description="Contracts that failed validation/processing")
+    results: list[BulkContractResultItem] = Field(default_factory=list)
