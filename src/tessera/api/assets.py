@@ -1,7 +1,7 @@
 """Assets API endpoints."""
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Final
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -98,6 +98,10 @@ from tessera.services.cache import (
 from tessera.services.slack import notify_proposal_created
 from tessera.services.webhooks import send_proposal_created
 
+# Named constants for version handling
+INITIAL_VERSION: Final[str] = "1.0.0"
+"""Version assigned to the first contract published for an asset."""
+
 router = APIRouter()
 
 
@@ -168,7 +172,7 @@ def compute_version_suggestion(
 
     if current_version is None:
         return VersionSuggestion(
-            suggested_version="1.0.0",
+            suggested_version=INITIAL_VERSION,
             current_version=None,
             change_type=ChangeType.PATCH,
             reason="First contract for this asset",

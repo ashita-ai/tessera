@@ -5,7 +5,7 @@ used by both the /api/v1/contracts/bulk endpoint and dbt sync.
 """
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Final
 from uuid import UUID
 
 from sqlalchemy import select
@@ -17,6 +17,10 @@ from tessera.services import get_affected_parties, validate_json_schema
 from tessera.services.audit import log_contract_published, log_proposal_created
 from tessera.services.cache import invalidate_asset
 from tessera.services.schema_diff import check_compatibility, diff_schemas
+
+# Named constants for version handling
+INITIAL_VERSION: Final[str] = "1.0.0"
+"""Version assigned to the first contract published for an asset."""
 
 
 @dataclass
@@ -59,10 +63,14 @@ class BulkPublishResult:
 
 
 def parse_semver(version: str) -> tuple[int, int, int]:
-    """Parse a semantic version string into (major, minor, patch)."""
+    """Parse a semantic version string into (major, minor, patch).
+
+    Returns (1, 0, 0) as a fallback if the version string is malformed.
+    """
     base = version.split("-")[0].split("+")[0]
     parts = base.split(".")
     if len(parts) != 3:
+        # Fallback to initial version components for malformed input
         return (1, 0, 0)
     return (int(parts[0]), int(parts[1]), int(parts[2]))
 
@@ -74,7 +82,7 @@ def compute_next_version(
 ) -> str:
     """Compute the next version based on compatibility and change type."""
     if current_version is None:
-        return "1.0.0"
+        return INITIAL_VERSION
 
     major, minor, patch = parse_semver(current_version)
 
@@ -200,7 +208,7 @@ async def bulk_publish_contracts(
 
         # First contract - always publishable
         if not current_contract:
-            suggested_version = "1.0.0"
+            suggested_version = INITIAL_VERSION
             if dry_run:
                 results.append(
                     PublishResult(
