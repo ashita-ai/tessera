@@ -25,6 +25,22 @@ Tessera is configured via environment variables.
 | `BOOTSTRAP_API_KEY` | Initial admin API key for setup | None |
 | `AUTH_DISABLED` | Disable auth (dev only) | `false` |
 
+### Admin Bootstrap
+
+For initial setup or Kubernetes deployments, you can bootstrap an admin user:
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `ADMIN_EMAIL` | Bootstrap admin email address | None |
+| `ADMIN_PASSWORD` | Bootstrap admin password | None |
+| `ADMIN_NAME` | Bootstrap admin display name | `Admin` |
+
+### Demo Mode
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `DEMO_MODE` | Show demo credentials on login page | `false` |
+
 ### CORS
 
 | Variable | Description | Default |
@@ -69,6 +85,7 @@ Tessera is configured via environment variables.
 | `MAX_SCHEMA_PROPERTIES` | Maximum properties in schema | `1000` |
 | `MAX_FQN_LENGTH` | Maximum FQN length | `1000` |
 | `MAX_TEAM_NAME_LENGTH` | Maximum team name length | `255` |
+| `DEFAULT_ENVIRONMENT` | Default environment for assets | `production` |
 
 ## Pagination
 
@@ -83,6 +100,13 @@ Tessera is configured via environment variables.
 |----------|-------------|---------|
 | `IMPACT_DEPTH_DEFAULT` | Default dependency depth | `5` |
 | `IMPACT_DEPTH_MAX` | Maximum dependency depth | `10` |
+
+## Proposals
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `PROPOSAL_DEFAULT_EXPIRATION_DAYS` | Days until proposals expire | `30` |
+| `PROPOSAL_AUTO_EXPIRE_ENABLED` | Enable automatic proposal expiration | `true` |
 
 ## Database Connection Pool
 
@@ -106,19 +130,23 @@ DATABASE_URL=postgresql+asyncpg://tessera:tessera@localhost:5432/tessera
 SESSION_SECRET_KEY=your-super-secret-key-at-least-32-characters-long
 BOOTSTRAP_API_KEY=tsk_bootstrap_key_for_initial_setup
 
-# Webhooks
+# Webhooks (optional)
 WEBHOOK_URL=https://your-service.com/webhooks/tessera
 WEBHOOK_SECRET=your-webhook-signing-secret
 
-# Optional: Redis caching
+# Redis caching (optional)
 REDIS_URL=redis://localhost:6379/0
 
-# Optional: Slack notifications
+# Slack notifications (optional)
 SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
 
 # Rate limiting
 RATE_LIMIT_ENABLED=true
 RATE_LIMIT_WRITE=100/minute
+
+# Proposals
+PROPOSAL_DEFAULT_EXPIRATION_DAYS=30
+PROPOSAL_AUTO_EXPIRE_ENABLED=true
 ```
 
 ## Docker Compose Override
