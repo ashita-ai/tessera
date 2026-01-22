@@ -36,6 +36,7 @@ import httpx
 # Publish a contract for your model
 response = httpx.post(
     "http://localhost:8000/api/v1/assets/my-asset-id/contracts",
+    params={"published_by": "your-team-id"},
     json={
         "schema": {
             "type": "object",
@@ -47,8 +48,7 @@ response = httpx.post(
             "required": ["user_id", "email"]
         },
         "compatibility_mode": "backward"
-    },
-    headers={"Authorization": "Bearer your-api-key"}
+    }
 )
 ```
 

@@ -82,10 +82,10 @@ The `schema_format` field indicates the format of the `schema_def`:
 
 | Format | Description |
 |--------|-------------|
-| `json_schema` | JSON Schema (default for dbt models) |
+| `json_schema` | JSON Schema (default) |
 | `avro` | Apache Avro schema (Kafka topics) |
-| `openapi` | OpenAPI operation schema (REST APIs) |
-| `graphql` | GraphQL type definition (GraphQL APIs) |
+
+Note: OpenAPI and GraphQL imports are converted to JSON Schema internally.
 
 ## Get Contract Registrations
 
@@ -110,6 +110,33 @@ List all consumer registrations for a contract.
   ]
 }
 ```
+
+## Update Guarantees
+
+```http
+PATCH /api/v1/contracts/{contract_id}/guarantees
+```
+
+Update the guarantees on an existing contract without changing the schema.
+
+### Request Body
+
+```json
+{
+  "guarantees": {
+    "freshness": {
+      "max_staleness_minutes": 120
+    },
+    "volume": {
+      "min_rows": 1000
+    }
+  }
+}
+```
+
+### Response
+
+Returns the updated contract.
 
 ## Compare Contracts
 
@@ -154,5 +181,57 @@ Compare two schemas to see differences.
       "description": "Optional property 'phone' was added"
     }
   ]
+}
+```
+
+## Bulk Publish Contracts
+
+```http
+POST /api/v1/contracts/bulk
+```
+
+Publish multiple contracts in a single request. Useful for CI/CD pipelines.
+
+### Request Body
+
+```json
+{
+  "contracts": [
+    {
+      "asset_fqn": "warehouse.analytics.users",
+      "schema": {...},
+      "version": "1.0.0"
+    },
+    {
+      "asset_fqn": "warehouse.analytics.orders",
+      "schema": {...},
+      "version": "2.1.0"
+    }
+  ],
+  "published_by": "team-uuid"
+}
+```
+
+### Response
+
+```json
+{
+  "results": [
+    {
+      "asset_fqn": "warehouse.analytics.users",
+      "status": "published",
+      "contract_id": "uuid"
+    },
+    {
+      "asset_fqn": "warehouse.analytics.orders",
+      "status": "proposal_created",
+      "proposal_id": "uuid"
+    }
+  ],
+  "summary": {
+    "published": 1,
+    "proposals_created": 1,
+    "failed": 0
+  }
 }
 ```
