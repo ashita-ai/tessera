@@ -17,6 +17,12 @@ from tessera.services.batch import (
     fetch_asset_counts_by_user,
     fetch_team_names,
 )
+from tessera.services.contract_publisher import (
+    ContractPublishingWorkflow,
+    PublishAction,
+    SinglePublishResult,
+    get_last_audit_status,
+)
 from tessera.services.graphql import (
     AssetFromGraphQL,
     GraphQLOperation,
@@ -91,4 +97,9 @@ __all__ = [
     "generate_graphql_fqn",
     "operations_to_assets",
     "parse_graphql_introspection",
+    # Contract publishing
+    "ContractPublishingWorkflow",
+    "PublishAction",
+    "SinglePublishResult",
+    "get_last_audit_status",
 ]
