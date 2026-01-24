@@ -458,3 +458,310 @@ class TestVersionSuggestionModel:
         data = resp.json()
         assert "reason" in data["version_suggestion"]
         assert len(data["version_suggestion"]["reason"]) > 0
+
+
+class TestPrereleaseVersions:
+    """Test pre-release version handling (Issue #229)."""
+
+    async def test_accepts_alpha_version(self, client: AsyncClient):
+        """1.0.0-alpha should be valid and publishable."""
+        resp = await client.post("/api/v1/teams", json=make_team("test-team"))
+        team_id = resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/assets",
+            json=make_asset("db.schema.alpha_table", team_id),
+        )
+        asset_id = resp.json()["id"]
+
+        schema = make_schema(id="integer", name="string")
+        resp = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts",
+            params={"published_by": team_id},
+            json={"schema": schema, "version": "1.0.0-alpha"},
+        )
+        assert resp.status_code == 201
+        assert resp.json()["contract"]["version"] == "1.0.0-alpha"
+
+    async def test_accepts_beta_version(self, client: AsyncClient):
+        """1.0.0-beta.1 should be valid and publishable."""
+        resp = await client.post("/api/v1/teams", json=make_team("test-team"))
+        team_id = resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/assets",
+            json=make_asset("db.schema.beta_table", team_id),
+        )
+        asset_id = resp.json()["id"]
+
+        schema = make_schema(id="integer", name="string")
+        resp = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts",
+            params={"published_by": team_id},
+            json={"schema": schema, "version": "1.0.0-beta.1"},
+        )
+        assert resp.status_code == 201
+        assert resp.json()["contract"]["version"] == "1.0.0-beta.1"
+
+    async def test_accepts_rc_version(self, client: AsyncClient):
+        """1.0.0-rc.1 should be valid and publishable."""
+        resp = await client.post("/api/v1/teams", json=make_team("test-team"))
+        team_id = resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/assets",
+            json=make_asset("db.schema.rc_table", team_id),
+        )
+        asset_id = resp.json()["id"]
+
+        schema = make_schema(id="integer", name="string")
+        resp = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts",
+            params={"published_by": team_id},
+            json={"schema": schema, "version": "1.0.0-rc.1"},
+        )
+        assert resp.status_code == 201
+        assert resp.json()["contract"]["version"] == "1.0.0-rc.1"
+
+    async def test_accepts_build_metadata(self, client: AsyncClient):
+        """1.0.0+build.123 should be valid (build metadata, not prerelease)."""
+        resp = await client.post("/api/v1/teams", json=make_team("test-team"))
+        team_id = resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/assets",
+            json=make_asset("db.schema.build_table", team_id),
+        )
+        asset_id = resp.json()["id"]
+
+        schema = make_schema(id="integer", name="string")
+        resp = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts",
+            params={"published_by": team_id},
+            json={"schema": schema, "version": "1.0.0+build.123"},
+        )
+        assert resp.status_code == 201
+        assert resp.json()["contract"]["version"] == "1.0.0+build.123"
+
+    async def test_prerelease_skips_proposal_workflow(self, client: AsyncClient):
+        """Breaking changes in prerelease shouldn't require acknowledgment."""
+        resp = await client.post("/api/v1/teams", json=make_team("test-team"))
+        team_id = resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/assets",
+            json=make_asset("db.schema.prerelease_table", team_id),
+        )
+        asset_id = resp.json()["id"]
+
+        # Publish first contract
+        schema_v1 = make_schema(id="integer", name="string")
+        resp = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts",
+            params={"published_by": team_id},
+            json={"schema": schema_v1, "version": "1.0.0-alpha"},
+        )
+        assert resp.status_code == 201
+
+        # Register a consumer (would normally block breaking changes)
+        consumer_resp = await client.post("/api/v1/teams", json=make_team("consumer-team"))
+        consumer_team_id = consumer_resp.json()["id"]
+        contract_id = resp.json()["contract"]["id"]
+
+        await client.post(
+            "/api/v1/registrations",
+            json={"contract_id": contract_id, "consumer_team_id": consumer_team_id},
+        )
+
+        # Publish breaking change with prerelease version - should NOT create proposal
+        schema_v2 = make_schema(id="integer")  # Removed 'name' field
+        resp = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts",
+            params={"published_by": team_id},
+            json={"schema": schema_v2, "version": "1.0.0-alpha.2"},
+        )
+        # Should publish directly, not create a proposal
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["action"] == "published"
+        assert "Pre-release" in data.get("message", "")
+
+    async def test_release_version_requires_proposal(self, client: AsyncClient):
+        """Non-prerelease breaking changes should still create proposals."""
+        resp = await client.post("/api/v1/teams", json=make_team("test-team"))
+        team_id = resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/assets",
+            json=make_asset("db.schema.release_table", team_id),
+        )
+        asset_id = resp.json()["id"]
+
+        # Publish first contract (stable version)
+        schema_v1 = make_schema(id="integer", name="string")
+        resp = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts",
+            params={"published_by": team_id},
+            json={"schema": schema_v1, "version": "1.0.0"},
+        )
+        assert resp.status_code == 201
+
+        # Register a consumer
+        consumer_resp = await client.post("/api/v1/teams", json=make_team("consumer-team"))
+        consumer_team_id = consumer_resp.json()["id"]
+        contract_id = resp.json()["contract"]["id"]
+
+        await client.post(
+            "/api/v1/registrations",
+            json={"contract_id": contract_id, "consumer_team_id": consumer_team_id},
+        )
+
+        # Breaking change with stable version - should create proposal
+        schema_v2 = make_schema(id="integer")  # Removed 'name' field
+        resp = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts",
+            params={"published_by": team_id},
+            json={"schema": schema_v2, "version": "2.0.0"},
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["action"] == "proposal_created"
+
+
+class TestPrereleaseGraduation:
+    """Test graduating pre-release versions to stable releases."""
+
+    async def test_graduate_alpha_to_release_compatible(self, client: AsyncClient):
+        """1.0.0-alpha -> 1.0.0 with same schema should auto-publish."""
+        resp = await client.post("/api/v1/teams", json=make_team("test-team"))
+        team_id = resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/assets",
+            json=make_asset("db.schema.grad_alpha", team_id),
+        )
+        asset_id = resp.json()["id"]
+
+        # Publish alpha version
+        schema = make_schema(id="integer", name="string")
+        resp = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts",
+            params={"published_by": team_id},
+            json={"schema": schema, "version": "1.0.0-alpha"},
+        )
+        assert resp.status_code == 201
+
+        # Graduate to stable - same schema (compatible, auto-publishes)
+        resp = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts",
+            params={"published_by": team_id},
+            json={"schema": schema, "version": "1.0.0"},
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["action"] == "published"
+        assert data["contract"]["version"] == "1.0.0"
+
+    async def test_graduate_rc_to_release_compatible(self, client: AsyncClient):
+        """1.0.0-rc.1 -> 1.0.0 with same schema should auto-publish."""
+        resp = await client.post("/api/v1/teams", json=make_team("test-team"))
+        team_id = resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/assets",
+            json=make_asset("db.schema.grad_rc", team_id),
+        )
+        asset_id = resp.json()["id"]
+
+        # Publish RC version
+        schema = make_schema(id="integer", name="string")
+        resp = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts",
+            params={"published_by": team_id},
+            json={"schema": schema, "version": "1.0.0-rc.1"},
+        )
+        assert resp.status_code == 201
+
+        # Graduate to stable (compatible, auto-publishes)
+        resp = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts",
+            params={"published_by": team_id},
+            json={"schema": schema, "version": "1.0.0"},
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["action"] == "published"
+        assert data["contract"]["version"] == "1.0.0"
+
+    async def test_graduate_with_breaking_change_skips_proposal(self, client: AsyncClient):
+        """Graduation with schema changes should skip proposal workflow."""
+        resp = await client.post("/api/v1/teams", json=make_team("test-team"))
+        team_id = resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/assets",
+            json=make_asset("db.schema.grad_break", team_id),
+        )
+        asset_id = resp.json()["id"]
+
+        # Publish alpha with full schema
+        schema_v1 = make_schema(id="integer", name="string", email="string")
+        resp = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts",
+            params={"published_by": team_id},
+            json={"schema": schema_v1, "version": "1.0.0-alpha"},
+        )
+        assert resp.status_code == 201
+
+        # Register a consumer
+        consumer_resp = await client.post("/api/v1/teams", json=make_team("consumer"))
+        consumer_id = consumer_resp.json()["id"]
+        contract_id = resp.json()["contract"]["id"]
+        await client.post(
+            "/api/v1/registrations",
+            json={"contract_id": contract_id, "consumer_team_id": consumer_id},
+        )
+
+        # Graduate with breaking change (removed email field)
+        schema_v2 = make_schema(id="integer", name="string")
+        resp = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts",
+            params={"published_by": team_id},
+            json={"schema": schema_v2, "version": "1.0.0"},
+        )
+        # Should graduate, not create proposal
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["action"] == "published"
+        assert "Graduated" in data.get("message", "")
+
+    async def test_different_base_version_not_graduation(self, client: AsyncClient):
+        """1.0.0-alpha -> 1.1.0 is NOT a graduation (different base)."""
+        resp = await client.post("/api/v1/teams", json=make_team("test-team"))
+        team_id = resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/assets",
+            json=make_asset("db.schema.not_grad", team_id),
+        )
+        asset_id = resp.json()["id"]
+
+        # Publish alpha
+        schema = make_schema(id="integer", name="string")
+        resp = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts",
+            params={"published_by": team_id},
+            json={"schema": schema, "version": "1.0.0-alpha"},
+        )
+        assert resp.status_code == 201
+
+        # Publish 1.1.0 (different base version) - this is a normal publish
+        resp = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts",
+            params={"published_by": team_id},
+            json={"schema": schema, "version": "1.1.0"},
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        # Should be normal publish, not graduation
+        assert "Graduated" not in data.get("message", "")
