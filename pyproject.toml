@@ -117,4 +117,5 @@ dev = [
     "duckdb>=1.0.0,<2.0.0",
     "pyarrow>=15.0.0",
     "dbt-duckdb>=1.10.0",
+    "pip-audit>=2.10.0",
 ]
