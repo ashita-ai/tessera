@@ -9,6 +9,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -158,6 +159,9 @@ class ContractDB(Base):
         Uuid, ForeignKey("users.id"), nullable=True, index=True
     )  # Individual who published
 
+    # Composite index for finding active contracts by asset (common query pattern)
+    __table_args__ = (Index("idx_contract_asset_status", "asset_id", "status"),)
+
     # Relationships
     asset: Mapped["AssetDB"] = relationship(back_populates="contracts")
     registrations: Mapped[list["RegistrationDB"]] = relationship(back_populates="contract")
@@ -226,6 +230,9 @@ class ProposalDB(Base):
     affected_assets: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
     # Objections filed by affected teams (non-blocking but visible)
     objections: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+
+    # Composite index for finding pending proposals by asset (common query pattern)
+    __table_args__ = (Index("idx_proposal_asset_status", "asset_id", "status"),)
 
     # Relationships
     asset: Mapped["AssetDB"] = relationship(back_populates="proposals")
