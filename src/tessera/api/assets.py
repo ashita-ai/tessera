@@ -139,6 +139,61 @@ def parse_semver(version: str) -> tuple[int, int, int]:
         raise ValueError(f"Cannot parse version '{version}': {e}") from e
 
 
+def is_prerelease(version: str) -> bool:
+    """Check if a version is a pre-release (contains hyphen before any build metadata).
+
+    Examples:
+        1.0.0 -> False
+        1.0.0-alpha -> True
+        1.0.0-beta.1 -> True
+        1.0.0-rc.1 -> True
+        1.0.0+build.123 -> False (build metadata only, not prerelease)
+        1.0.0-alpha+build.123 -> True
+    """
+    # Remove build metadata first (everything after +)
+    version_without_build = version.split("+")[0]
+    # Check if there's a hyphen indicating prerelease
+    return "-" in version_without_build
+
+
+def get_base_version(version: str) -> str:
+    """Get the base version (X.Y.Z) without prerelease or build metadata.
+
+    Examples:
+        1.0.0 -> 1.0.0
+        1.0.0-alpha -> 1.0.0
+        1.0.0-beta.1 -> 1.0.0
+        1.0.0+build.123 -> 1.0.0
+        1.0.0-rc.1+build.456 -> 1.0.0
+    """
+    # Remove build metadata first, then prerelease
+    without_build = version.split("+")[0]
+    without_prerelease = without_build.split("-")[0]
+    return without_prerelease
+
+
+def is_graduation(current_version: str, new_version: str) -> bool:
+    """Check if publishing new_version is graduating from a prerelease.
+
+    A graduation occurs when:
+    - Current version is a prerelease (e.g., 1.0.0-alpha, 1.0.0-rc.1)
+    - New version is NOT a prerelease
+    - Base versions match (1.0.0-alpha -> 1.0.0)
+
+    Examples:
+        1.0.0-alpha -> 1.0.0: True (graduation)
+        1.0.0-rc.1 -> 1.0.0: True (graduation)
+        1.0.0-alpha -> 1.0.1: False (different base)
+        1.0.0-alpha -> 1.0.0-beta: False (still prerelease)
+        1.0.0 -> 1.1.0: False (not from prerelease)
+    """
+    if not is_prerelease(current_version):
+        return False
+    if is_prerelease(new_version):
+        return False
+    return get_base_version(current_version) == get_base_version(new_version)
+
+
 def bump_version(current: str, bump_type: str) -> str:
     """Bump a semantic version based on change type.
 
@@ -1128,6 +1183,64 @@ async def create_contract(
         if audit_warning:
             force_response["audit_warning"] = audit_warning
         return force_response
+
+    # Pre-release versions skip proposal workflow (breaking changes allowed without ack)
+    if is_prerelease(version):
+        new_contract = await publish_contract()
+        await log_contract_published(
+            session=session,
+            contract_id=new_contract.id,
+            publisher_id=published_by,
+            version=new_contract.version,
+            change_type=str(diff_result.change_type),
+            prerelease=True,
+        )
+        await invalidate_asset(str(asset_id))
+        contract_data = Contract.model_validate(new_contract).model_dump()
+        await cache_contract(str(new_contract.id), contract_data)
+        prerelease_response: ContractPublishResponse = {
+            "action": "published",
+            "change_type": str(diff_result.change_type),
+            "breaking_changes": [bc.to_dict() for bc in breaking_changes],
+            "contract": contract_data,
+            "message": "Pre-release version published. Breaking changes allowed without ack.",
+        }
+        if version_auto_generated:
+            prerelease_response["version_auto_generated"] = True
+        if original_format == SchemaFormat.AVRO:
+            prerelease_response["schema_converted_from"] = "avro"
+        if audit_warning:
+            prerelease_response["audit_warning"] = audit_warning
+        return prerelease_response
+
+    # Graduation: prerelease -> release (e.g., 1.0.0-rc.1 -> 1.0.0) skips proposal
+    if is_graduation(current_contract.version, version):
+        new_contract = await publish_contract()
+        await log_contract_published(
+            session=session,
+            contract_id=new_contract.id,
+            publisher_id=published_by,
+            version=new_contract.version,
+            change_type=str(diff_result.change_type),
+        )
+        await invalidate_asset(str(asset_id))
+        contract_data = Contract.model_validate(new_contract).model_dump()
+        await cache_contract(str(new_contract.id), contract_data)
+        graduation_response: ContractPublishResponse = {
+            "action": "published",
+            "change_type": str(diff_result.change_type),
+            "contract": contract_data,
+            "message": f"Graduated from {current_contract.version} to stable release.",
+        }
+        if breaking_changes:
+            graduation_response["breaking_changes"] = [bc.to_dict() for bc in breaking_changes]
+        if version_auto_generated:
+            graduation_response["version_auto_generated"] = True
+        if original_format == SchemaFormat.AVRO:
+            graduation_response["schema_converted_from"] = "avro"
+        if audit_warning:
+            graduation_response["audit_warning"] = audit_warning
+        return graduation_response
 
     # Breaking change without force = create proposal
     # First check if there's already a pending proposal for this asset
