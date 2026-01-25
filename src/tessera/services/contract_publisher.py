@@ -25,11 +25,12 @@ from tessera.models.enums import (
     SchemaFormat,
     SemverMode,
 )
-from tessera.services import get_affected_parties, validate_json_schema
+from tessera.services.affected_parties import get_affected_parties
 from tessera.services.audit import log_contract_published, log_proposal_created
 from tessera.services.avro import AvroConversionError, avro_to_json_schema, validate_avro_schema
 from tessera.services.cache import cache_contract, invalidate_asset
 from tessera.services.schema_diff import check_compatibility, diff_schemas
+from tessera.services.schema_validator import validate_json_schema
 from tessera.services.slack import notify_proposal_created
 from tessera.services.webhooks import send_proposal_created
 
