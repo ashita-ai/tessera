@@ -4,12 +4,17 @@
 # Demonstrates using the Tessera CLI for data contract management.
 #
 # Prerequisites:
-#   1. Start the server: tessera serve
-#   2. Or use Docker: docker compose up -d
+#   1. Start the server: uv run tessera serve (or docker compose up -d)
+#   2. Run from project root with uv installed
 #
-# Run this script: chmod +x examples/cli_example.sh && ./examples/cli_example.sh
+# Run this script: ./examples/cli_example.sh
 
 set -e
+
+# Helper function to run tessera commands via uv
+tessera() {
+    uv run tessera "$@"
+}
 
 echo "======================================"
 echo "  TESSERA CLI EXAMPLES"
@@ -19,7 +24,7 @@ echo
 # Check if server is running
 if ! curl -s http://localhost:8000/health > /dev/null 2>&1; then
     echo "Error: Tessera server not running."
-    echo "Start it with: tessera serve"
+    echo "Start it with: uv run tessera serve"
     exit 1
 fi
 
@@ -44,9 +49,9 @@ echo "Step 2: List Teams"
 echo "------------------"
 tessera team list
 
-# Get team IDs for subsequent commands
-PRODUCER_ID=$(tessera team list 2>/dev/null | grep "data-platform" | awk '{print $2}' | head -1)
-CONSUMER_ID=$(tessera team list 2>/dev/null | grep "analytics-team" | awk '{print $2}' | head -1)
+# Get team IDs for subsequent commands (extract UUID from table output)
+PRODUCER_ID=$(tessera team list 2>/dev/null | grep "data-platform" | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
+CONSUMER_ID=$(tessera team list 2>/dev/null | grep "analytics-team" | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
 
 echo
 echo "Step 3: Create an Asset"
@@ -63,8 +68,8 @@ echo "Step 4: Search Assets"
 echo "---------------------"
 tessera asset search "orders"
 
-# Get asset ID
-ASSET_ID=$(tessera asset search "orders" 2>/dev/null | grep "orders" | awk '{print $2}' | head -1)
+# Get asset ID (extract UUID from table output)
+ASSET_ID=$(tessera asset search "orders" 2>/dev/null | grep "orders" | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
 
 echo
 echo "Step 5: Publish a Contract"
