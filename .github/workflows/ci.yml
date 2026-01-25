@@ -111,7 +111,8 @@ jobs:
         run: uv sync --all-extras
 
       - name: Run pip-audit
-        run: uv run pip-audit --local --strict
+        # CVE-2026-0994: protobuf vulnerability with no fix available yet (transitive dep)
+        run: uv run pip-audit --local --strict --ignore-vuln CVE-2026-0994
 
   test-sqlite:
     name: Test (SQLite)
