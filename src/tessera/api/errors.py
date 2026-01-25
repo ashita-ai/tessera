@@ -195,6 +195,59 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
         return response
 
 
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Middleware that adds security headers to all responses.
+
+    Headers added:
+    - X-Frame-Options: Prevents clickjacking by denying framing
+    - X-Content-Type-Options: Prevents MIME-type sniffing
+    - X-XSS-Protection: Legacy XSS filter (defense in depth)
+    - Referrer-Policy: Controls referrer information sent
+    - Strict-Transport-Security: HSTS (production only)
+    - Content-Security-Policy: Restricts resource loading
+    - Permissions-Policy: Restricts browser features
+    """
+
+    def __init__(self, app: Any, environment: str = "development") -> None:
+        super().__init__(app)
+        self.environment = environment
+
+    async def dispatch(self, request: Request, call_next: Any) -> Any:
+        response = await call_next(request)
+
+        # Always set these headers
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = (
+            "geolocation=(), microphone=(), camera=(), payment=()"
+        )
+
+        # HSTS only in production (requires HTTPS)
+        if self.environment == "production":
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+
+        # CSP: Allow self for API, more permissive for web UI static assets
+        # Web UI paths need 'unsafe-inline' for styles and scripts
+        if request.url.path.startswith("/web") or request.url.path.startswith("/static"):
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; "
+                "script-src 'self' 'unsafe-inline'; "
+                "style-src 'self' 'unsafe-inline'; "
+                "img-src 'self' data:; "
+                "font-src 'self'; "
+                "frame-ancestors 'none'"
+            )
+        else:
+            # Strict CSP for API endpoints
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'none'; frame-ancestors 'none'"
+            )
+
+        return response
+
+
 def get_request_id(request: Request) -> str:
     """Get the request ID from the request state."""
     return getattr(request.state, "request_id", str(uuid4()))
