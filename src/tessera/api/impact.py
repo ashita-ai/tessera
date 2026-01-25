@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.api.auth import Auth, RequireRead
 from tessera.api.errors import BadRequestError, ErrorCode, ForbiddenError, NotFoundError
-from tessera.api.rate_limit import limit_read
+from tessera.api.rate_limit import limit_expensive, limit_read
 from tessera.config import settings
 from tessera.db import (
     AssetDB,
@@ -27,6 +27,7 @@ router = APIRouter()
 
 @router.post("/{asset_id}/impact")
 @limit_read
+@limit_expensive  # Per-team rate limit for expensive lineage analysis
 async def analyze_impact(
     request: Request,
     asset_id: UUID,

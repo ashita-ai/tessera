@@ -84,6 +84,10 @@ class Settings(BaseSettings):  # type: ignore[misc]
     rate_limit_global: str = "5000/minute"
     rate_limit_enabled: bool = True
 
+    # Per-team rate limits (for expensive operations)
+    rate_limit_expensive: str = "20/minute"  # Schema diff, lineage analysis
+    rate_limit_bulk: str = "10/minute"  # Bulk operations
+
     # Resource Constraints
     max_schema_size_bytes: int = 1_000_000  # 1MB
     max_schema_properties: int = 1000

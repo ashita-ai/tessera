@@ -21,7 +21,7 @@ from tessera.api.errors import (
     PreconditionFailedError,
 )
 from tessera.api.pagination import PaginationParams, pagination_params
-from tessera.api.rate_limit import limit_read, limit_write
+from tessera.api.rate_limit import limit_expensive, limit_read, limit_write
 from tessera.api.types import (
     AssetSearchResult,
     AssetWithOwnerInfo,
@@ -1464,6 +1464,7 @@ async def get_contract_history(
 
 @router.get("/{asset_id}/contracts/diff")
 @limit_read
+@limit_expensive  # Per-team rate limit for expensive schema diff operation
 async def diff_contract_versions(
     request: Request,
     auth: Auth,
