@@ -125,14 +125,41 @@ async def get_auth_context(
     authorization: str | None = Security(api_key_header),
     session: AsyncSession = Depends(get_session),
 ) -> AuthContext:
-    """Get authentication context from the request.
+    """Get authentication context from the request with rate limiting.
 
     This dependency validates the API key and returns the authenticated
-    team and key information.
+    team and key information. Rate limited to prevent brute force attacks.
 
     Raises:
-        HTTPException: If authentication fails
+        HTTPException: If authentication fails or rate limit is exceeded
     """
+    # Apply rate limiting for authentication attempts
+    # This is done inline rather than with a decorator because dependencies
+    # need manual rate limit checking
+    if settings.rate_limit_enabled:
+        from limits import parse
+
+        from tessera.api.rate_limit import get_rate_limit_key, limiter
+
+        # Parse the rate limit string into a RateLimitItem
+        rate_limit_item = parse(settings.rate_limit_auth)
+
+        # Get the rate limit key (per-API-key or per-IP)
+        limit_key = get_rate_limit_key(request)
+
+        # Test if the limit would be exceeded
+        if not limiter.limiter.test(rate_limit_item, limit_key):
+            # Limit exceeded - raise HTTPException with 429 status
+            # This will be caught by the rate_limit_exceeded_handler
+            raise HTTPException(
+                status_code=429,
+                detail=f"Rate limit exceeded: {settings.rate_limit_auth}",
+                headers={"Retry-After": "60"},
+            )
+
+        # Hit the limiter to count this request
+        limiter.limiter.hit(rate_limit_item, limit_key)
+
     # Check if auth is disabled (development only)
     if settings.auth_disabled:
         # Return a mock auth context for development
@@ -249,6 +276,7 @@ async def get_optional_auth_context(
 
     Returns None if no authentication is provided, instead of raising an error.
     Useful for endpoints that work with or without authentication.
+    Note: This does not apply rate limiting since it's optional authentication.
     """
     if not authorization and not settings.auth_disabled:
         return None

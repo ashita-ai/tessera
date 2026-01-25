@@ -1,11 +1,15 @@
 """Bulk operation models."""
 
+import re
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from tessera.models.enums import AcknowledgmentResponseType, GuaranteeMode, ResourceType
+
+# FQN pattern: alphanumeric/underscores separated by dots, at least 2 segments
+FQN_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)+$")
 
 
 class BulkItemResult(BaseModel):
@@ -72,6 +76,18 @@ class BulkAssetItem(BaseModel):
     resource_type: ResourceType = ResourceType.OTHER
     guarantee_mode: GuaranteeMode = GuaranteeMode.NOTIFY
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("fqn")
+    @classmethod
+    def validate_fqn_format(cls, v: str) -> str:
+        """Validate FQN format: alphanumeric segments separated by dots."""
+        if not FQN_PATTERN.match(v):
+            raise ValueError(
+                "FQN must be dot-separated segments (e.g., 'database.schema.table'). "
+                "Each segment must start with a letter or underscore and contain only "
+                "alphanumeric characters and underscores."
+            )
+        return v
 
 
 class BulkAssetRequest(BaseModel):

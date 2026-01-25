@@ -96,7 +96,7 @@ class TestCreateUser:
         assert "dupe@example.com" in error_text or "already exists" in error_text.lower()
         assert (
             resp_data["error"]["code"] == "DUPLICATE_USER"
-            ), f"Expected DUPLICATE_USER, got {resp_data['error'].get('code')}"
+        ), f"Expected DUPLICATE_USER, got {resp_data['error'].get('code')}"
 
     async def test_create_user_team_not_found(self, client: AsyncClient):
         """Cannot create user with non-existent team."""
@@ -370,6 +370,89 @@ class TestUserFiltering:
         assert resp.status_code == 200
         assert resp.json()["total"] == 0
         assert resp.json()["results"] == []
+
+    async def test_filter_email_case_insensitive_partial(self, client: AsyncClient):
+        """Email filter should be case-insensitive and match partial strings."""
+        await client.post(
+            "/api/v1/users",
+            json={"email": "TestUser@EXAMPLE.com", "name": "Test User"},
+        )
+        await client.post(
+            "/api/v1/users",
+            json={"email": "another@domain.org", "name": "Another User"},
+        )
+
+        # Test partial match with different case
+        resp = await client.get("/api/v1/users?email=TESTUSER")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 1
+        assert "testuser@example.com" in resp.json()["results"][0]["email"].lower()
+
+        # Test domain partial match
+        resp = await client.get("/api/v1/users?email=example")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 1
+
+    async def test_filter_name_case_insensitive_partial(self, client: AsyncClient):
+        """Name filter should be case-insensitive and match partial strings."""
+        await client.post(
+            "/api/v1/users",
+            json={"email": "n1@test.com", "name": "John Smith Engineer"},
+        )
+        await client.post(
+            "/api/v1/users",
+            json={"email": "n2@test.com", "name": "Jane Doe Manager"},
+        )
+
+        # Test partial match with different case
+        resp = await client.get("/api/v1/users?name=SMITH")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 1
+        assert "smith" in resp.json()["results"][0]["name"].lower()
+
+    async def test_combined_filters_team_and_email(self, client: AsyncClient):
+        """Test combining team_id and email filters."""
+        t1 = await client.post("/api/v1/teams", json={"name": "team-alpha"})
+        t1_id = t1.json()["id"]
+
+        await client.post(
+            "/api/v1/users",
+            json={"email": "alice@alpha.com", "name": "Alice", "team_id": t1_id},
+        )
+        await client.post(
+            "/api/v1/users",
+            json={"email": "bob@beta.com", "name": "Bob", "team_id": t1_id},
+        )
+        await client.post(
+            "/api/v1/users",
+            json={"email": "charlie@alpha.com", "name": "Charlie"},
+        )
+
+        # Should only match alice (team_id AND email pattern)
+        resp = await client.get(f"/api/v1/users?team_id={t1_id}&email=alpha")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 1
+        assert resp.json()["results"][0]["email"] == "alice@alpha.com"
+
+    async def test_filter_no_matches_returns_empty_not_error(self, client: AsyncClient):
+        """Filtering with no results returns empty list, not 404 or error."""
+        await client.post(
+            "/api/v1/users",
+            json={"email": "real@example.com", "name": "Real User"},
+        )
+
+        # No match on email
+        resp = await client.get("/api/v1/users?email=nonexistent")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 0
+        assert resp.json()["results"] == []
+
+        # No match on name
+        resp = await client.get("/api/v1/users?name=nonexistent")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 0
+        assert resp.json()["results"] == []
+
 
 class TestGetUser:
     """Tests for GET /api/v1/users/{user_id} endpoint."""

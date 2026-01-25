@@ -51,9 +51,11 @@ async def client(session) -> AsyncGenerator[AsyncClient, None]:
     # Enable rate limiting for tests
     original_rate_limit_enabled = settings.rate_limit_enabled
     original_rate_limit_read = settings.rate_limit_read
+    original_rate_limit_auth = settings.rate_limit_auth
 
     settings.rate_limit_enabled = True
     settings.rate_limit_read = "2/minute"  # Low limit for testing
+    settings.rate_limit_auth = "100/minute"  # High enough to not interfere with endpoint tests
 
     async def get_test_session() -> AsyncGenerator[AsyncSession, None]:
         yield session
@@ -65,6 +67,7 @@ async def client(session) -> AsyncGenerator[AsyncClient, None]:
     app.dependency_overrides.clear()
     settings.rate_limit_enabled = original_rate_limit_enabled
     settings.rate_limit_read = original_rate_limit_read
+    settings.rate_limit_auth = original_rate_limit_auth
 
 
 async def create_team_and_key(session: AsyncSession, name: str, scopes: list[APIKeyScope]):

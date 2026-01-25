@@ -23,6 +23,11 @@ from tessera.config import settings
 P = ParamSpec("P")
 T = TypeVar("T")
 
+# Hash key length for rate limit key generation
+# Using first 16 characters of SHA256 hex digest provides sufficient uniqueness
+# while keeping keys compact (collision probability < 2^-64)
+HASH_KEY_LENGTH = 16
+
 
 def get_rate_limit_key(request: Request) -> str:
     """Get a unique key for rate limiting.
@@ -37,8 +42,8 @@ def get_rate_limit_key(request: Request) -> str:
     if auth_header and auth_header.startswith("Bearer "):
         api_key = auth_header[7:]
         # Hash the full API key to create a unique, stable bucket per key
-        # Using SHA256 and taking first 16 chars for a compact but unique key
-        key_hash = hashlib.sha256(api_key.encode()).hexdigest()[:16]
+        # Using SHA256 and taking first HASH_KEY_LENGTH chars for a compact but unique key
+        key_hash = hashlib.sha256(api_key.encode()).hexdigest()[:HASH_KEY_LENGTH]
         return f"key:{key_hash}"
 
     # Fallback to IP address
@@ -116,6 +121,7 @@ def _get_rate_limit(limit_str: str) -> str:
 limit_read = limiter.limit(lambda: _get_rate_limit(settings.rate_limit_read))
 limit_write = limiter.limit(lambda: _get_rate_limit(settings.rate_limit_write))
 limit_admin = limiter.limit(lambda: _get_rate_limit(settings.rate_limit_admin))
+limit_auth = limiter.limit(lambda: _get_rate_limit(settings.rate_limit_auth))
 
 # Per-team rate limit decorators for expensive operations
 limit_expensive = team_limiter.limit(lambda: _get_rate_limit(settings.rate_limit_expensive))
