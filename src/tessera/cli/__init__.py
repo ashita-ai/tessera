@@ -109,7 +109,8 @@ def team_create(
 def team_list() -> None:
     """List all teams."""
     response = make_request("GET", "/teams")
-    teams = handle_response(response)
+    result = handle_response(response)
+    teams = result.get("results", []) if isinstance(result, dict) else result
 
     if not teams:
         console.print("[dim]No teams found[/dim]")
@@ -319,7 +320,8 @@ def contract_diff(
 
     console.print(f"[bold]Comparing:[/bold] v{result['from_version']} -> v{result['to_version']}")
     console.print(f"[bold]Change type:[/bold] {result['change_type']}")
-    console.print(f"[bold]Is breaking:[/bold] {result['is_breaking']}")
+    is_breaking = not result.get("is_compatible", True)
+    console.print(f"[bold]Is breaking:[/bold] {is_breaking}")
 
     if result.get("changes"):
         console.print("\n[bold]Changes:[/bold]")
@@ -347,7 +349,10 @@ def contract_impact(
     result = handle_response(response)
 
     console.print(f"[bold]Change type:[/bold] {result['change_type']}")
-    console.print(f"[bold]Is breaking:[/bold] {result['is_breaking']}")
+    is_breaking = (
+        not result.get("safe_to_publish", True) or len(result.get("breaking_changes", [])) > 0
+    )
+    console.print(f"[bold]Is breaking:[/bold] {is_breaking}")
 
     if result.get("breaking_changes"):
         console.print("\n[red]Breaking changes:[/red]")
