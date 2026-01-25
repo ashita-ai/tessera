@@ -41,7 +41,15 @@ _webhook_semaphore: asyncio.Semaphore | None = None
 
 
 def _get_webhook_semaphore() -> asyncio.Semaphore:
-    """Get or create the webhook semaphore for the current event loop."""
+    """Get or create the webhook semaphore for the current event loop.
+
+    Uses a global semaphore to limit concurrent webhook deliveries across all
+    event handlers. This prevents resource exhaustion when many webhooks are
+    triggered simultaneously (backpressure).
+
+    Returns:
+        asyncio.Semaphore: Semaphore limiting concurrent webhooks to MAX_CONCURRENT_WEBHOOKS.
+    """
     global _webhook_semaphore
     if _webhook_semaphore is None:
         _webhook_semaphore = asyncio.Semaphore(MAX_CONCURRENT_WEBHOOKS)
@@ -49,7 +57,18 @@ def _get_webhook_semaphore() -> asyncio.Semaphore:
 
 
 def _is_blocked_ip(ip_obj: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
-    """Return True if the IP should be blocked for SSRF protection."""
+    """Return True if the IP should be blocked for SSRF protection.
+
+    Blocks non-global IPs to prevent SSRF attacks targeting internal services.
+    This includes private networks (10.0.0.0/8, 192.168.0.0/16, 172.16.0.0/12),
+    localhost (127.0.0.0/8), link-local (169.254.0.0/16), and multicast addresses.
+
+    Args:
+        ip_obj: IPv4 or IPv6 address object to check.
+
+    Returns:
+        bool: True if the IP should be blocked (is non-global), False otherwise.
+    """
     return not ip_obj.is_global
 
 
@@ -97,7 +116,7 @@ async def validate_webhook_url(url: str) -> tuple[bool, str]:
                     parsed.port or (443 if parsed.scheme == "https" else 80),
                     family=socket.AF_UNSPEC,
                 ),
-                timeout=5.0,  # 5 second DNS timeout
+                timeout=settings.webhook_dns_timeout,
             )
 
             for family, _, _, _, sockaddr in addrinfo:
@@ -129,7 +148,18 @@ async def validate_webhook_url(url: str) -> tuple[bool, str]:
 
 
 def _sign_payload(payload: str, secret: str) -> str:
-    """Sign a payload with HMAC-SHA256."""
+    """Sign a payload with HMAC-SHA256.
+
+    Creates a cryptographic signature for webhook payloads to allow receivers
+    to verify authenticity. Uses HMAC-SHA256 with the configured webhook secret.
+
+    Args:
+        payload: JSON string payload to sign.
+        secret: Secret key used for HMAC signing.
+
+    Returns:
+        str: Hex-encoded HMAC-SHA256 signature.
+    """
     return hmac.new(
         secret.encode("utf-8"),
         payload.encode("utf-8"),
@@ -138,7 +168,21 @@ def _sign_payload(payload: str, secret: str) -> str:
 
 
 def _build_webhook_headers(event: WebhookEvent, payload: str) -> dict[str, str]:
-    """Build webhook delivery headers, including signature if configured."""
+    """Build webhook delivery headers, including signature if configured.
+
+    Constructs HTTP headers for webhook delivery including:
+    - Content-Type: application/json
+    - X-Tessera-Event: Event type identifier
+    - X-Tessera-Timestamp: ISO 8601 timestamp
+    - X-Tessera-Signature: HMAC-SHA256 signature (if webhook_secret is configured)
+
+    Args:
+        event: Webhook event containing metadata.
+        payload: JSON string payload (used for signature computation).
+
+    Returns:
+        dict[str, str]: HTTP headers for the webhook request.
+    """
     headers: dict[str, str] = {
         "Content-Type": "application/json",
         "X-Tessera-Event": event.event.value,
@@ -155,10 +199,27 @@ def _build_webhook_headers(event: WebhookEvent, payload: str) -> dict[str, str]:
 async def _deliver_webhook(event: WebhookEvent, delivery_id: UUID | None = None) -> bool:
     """Deliver a webhook event to the configured URL.
 
-    Returns True if delivery succeeded, False otherwise.
-
-    Uses a semaphore to limit concurrent deliveries (backpressure) and
+    Attempts delivery with exponential backoff retries (1s, 5s, 30s). Uses
+    semaphore-based concurrency control to prevent resource exhaustion and
     validates URLs to prevent SSRF attacks.
+
+    SSRF protection:
+    - Validates URL scheme (HTTPS in production)
+    - Checks hostname against optional allowlist
+    - Resolves DNS and blocks non-global IPs (private networks, localhost, etc.)
+    - Times out DNS resolution after 5 seconds
+
+    Retry behavior:
+    - Retries up to MAX_RETRIES times (3) with delays of [1, 5, 30] seconds
+    - Updates delivery record status after each attempt
+    - Returns True only if delivery succeeds (HTTP status < 300)
+
+    Args:
+        event: Webhook event to deliver.
+        delivery_id: Optional delivery record ID for tracking.
+
+    Returns:
+        bool: True if delivery succeeded, False otherwise.
     """
     if not settings.webhook_url:
         logger.debug("No webhook URL configured, skipping delivery")

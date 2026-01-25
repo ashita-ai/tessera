@@ -52,6 +52,7 @@ class TestWebhookDelivery:
         ):
             mock_settings.webhook_url = "https://example.com/webhook"
             mock_settings.webhook_secret = None
+            mock_settings.webhook_dns_timeout = 5.0
 
             mock_response = AsyncMock()
             mock_response.status_code = 200
@@ -87,6 +88,7 @@ class TestWebhookDelivery:
         ):
             mock_settings.webhook_url = "https://example.com/webhook"
             mock_settings.webhook_secret = "my-secret-key"
+            mock_settings.webhook_dns_timeout = 5.0
 
             mock_response = AsyncMock()
             mock_response.status_code = 200
@@ -130,6 +132,7 @@ class TestWebhookDelivery:
         ):
             mock_settings.webhook_url = "https://example.com/webhook"
             mock_settings.webhook_secret = None
+            mock_settings.webhook_dns_timeout = 5.0
 
             # Fail first two attempts, succeed on third
             mock_response_fail = AsyncMock()
@@ -179,6 +182,7 @@ class TestWebhookDelivery:
         ):
             mock_settings.webhook_url = "https://example.com/webhook"
             mock_settings.webhook_secret = None
+            mock_settings.webhook_dns_timeout = 5.0
 
             # All attempts fail
             mock_response = AsyncMock()
@@ -661,6 +665,7 @@ class TestDeliverWebhookWithDeliveryId:
         ):
             mock_settings.webhook_url = "https://example.com/webhook"
             mock_settings.webhook_secret = None
+            mock_settings.webhook_dns_timeout = 5.0
 
             mock_response = AsyncMock()
             mock_response.status_code = 200
@@ -703,6 +708,7 @@ class TestDeliverWebhookWithDeliveryId:
         ):
             mock_settings.webhook_url = "https://example.com/webhook"
             mock_settings.webhook_secret = None
+            mock_settings.webhook_dns_timeout = 5.0
 
             mock_response = AsyncMock()
             mock_response.status_code = 500
@@ -746,6 +752,7 @@ class TestDeliverWebhookWithDeliveryId:
         ):
             mock_settings.webhook_url = "https://example.com/webhook"
             mock_settings.webhook_secret = None
+            mock_settings.webhook_dns_timeout = 5.0
 
             mock_client = AsyncMock()
             mock_client.post = AsyncMock(side_effect=httpx.RequestError("Connection failed"))
@@ -785,6 +792,7 @@ class TestDeliverWebhookWithDeliveryId:
         ):
             mock_settings.webhook_url = "https://example.com/webhook"
             mock_settings.webhook_secret = None
+            mock_settings.webhook_dns_timeout = 5.0
 
             mock_client = AsyncMock()
             mock_client.post = AsyncMock(side_effect=httpx.RequestError("Connection refused"))

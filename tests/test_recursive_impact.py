@@ -173,3 +173,136 @@ class TestRecursiveImpact:
             json={"type": "object", "properties": {"new": {"type": "string"}}},
         )
         assert response.status_code == 200
+
+    async def test_lineage_circular_dependency_completes(
+        self, session: AsyncSession, client: AsyncClient
+    ):
+        """Lineage traversal with A->B->A circular dependency completes without infinite loop."""
+        team = TeamDB(name="circular-team")
+        session.add(team)
+        await session.flush()
+
+        asset_a = AssetDB(fqn="circular.a", owner_team_id=team.id)
+        asset_b = AssetDB(fqn="circular.b", owner_team_id=team.id)
+        session.add_all([asset_a, asset_b])
+        await session.flush()
+
+        # Create circular dependency: A -> B -> A
+        dep_ab = AssetDependencyDB(
+            dependent_asset_id=asset_b.id,
+            dependency_asset_id=asset_a.id,
+            dependency_type=DependencyType.TRANSFORMS,
+        )
+        dep_ba = AssetDependencyDB(
+            dependent_asset_id=asset_a.id,
+            dependency_asset_id=asset_b.id,
+            dependency_type=DependencyType.TRANSFORMS,
+        )
+        session.add_all([dep_ab, dep_ba])
+        await session.flush()
+
+        # Lineage query should complete without hanging
+        response = await client.get(f"/api/v1/assets/{asset_a.id}/lineage")
+        assert response.status_code == 200
+        data = response.json()
+        assert "upstream" in data
+        assert "downstream_assets" in data
+
+    async def test_deep_circular_chain_a_b_c_a(self, session: AsyncSession, client: AsyncClient):
+        """Deep circular dependency chain A->B->C->A completes without infinite loop."""
+        team = TeamDB(name="deep-circular-team")
+        session.add(team)
+        await session.flush()
+
+        asset_a = AssetDB(fqn="deep.a", owner_team_id=team.id)
+        asset_b = AssetDB(fqn="deep.b", owner_team_id=team.id)
+        asset_c = AssetDB(fqn="deep.c", owner_team_id=team.id)
+        session.add_all([asset_a, asset_b, asset_c])
+        await session.flush()
+
+        # Create circular chain: A -> B -> C -> A
+        dep_ab = AssetDependencyDB(
+            dependent_asset_id=asset_b.id,
+            dependency_asset_id=asset_a.id,
+            dependency_type=DependencyType.TRANSFORMS,
+        )
+        dep_bc = AssetDependencyDB(
+            dependent_asset_id=asset_c.id,
+            dependency_asset_id=asset_b.id,
+            dependency_type=DependencyType.TRANSFORMS,
+        )
+        dep_ca = AssetDependencyDB(
+            dependent_asset_id=asset_a.id,
+            dependency_asset_id=asset_c.id,
+            dependency_type=DependencyType.TRANSFORMS,
+        )
+        session.add_all([dep_ab, dep_bc, dep_ca])
+
+        contract_a = ContractDB(
+            asset_id=asset_a.id,
+            version="1.0.0",
+            schema_def={"type": "object", "properties": {"id": {"type": "integer"}}},
+            published_by=team.id,
+        )
+        session.add(contract_a)
+        await session.flush()
+
+        # Impact analysis should complete without hanging
+        proposed_schema = {
+            "type": "object",
+            "properties": {"id": {"type": "string"}},  # Breaking change
+        }
+        response = await client.post(f"/api/v1/assets/{asset_a.id}/impact", json=proposed_schema)
+        assert response.status_code == 200
+        data = response.json()
+
+        # Should detect impacted assets (B and C) but not infinite loop
+        impacted_fqns = [a["fqn"] for a in data["impacted_assets"]]
+        assert "deep.b" in impacted_fqns or "deep.c" in impacted_fqns
+        # Verify it didn't visit each asset multiple times by checking reasonable result size
+        assert len(data["impacted_assets"]) <= 3  # At most A, B, C (not infinite)
+
+    async def test_impact_analysis_circular_depth_limit(
+        self, session: AsyncSession, client: AsyncClient
+    ):
+        """Impact analysis respects depth limit even with circular dependencies."""
+        team = TeamDB(name="depth-limit-team")
+        session.add(team)
+        await session.flush()
+
+        asset_a = AssetDB(fqn="depth.a", owner_team_id=team.id)
+        asset_b = AssetDB(fqn="depth.b", owner_team_id=team.id)
+        session.add_all([asset_a, asset_b])
+        await session.flush()
+
+        # Circular: A -> B -> A
+        dep_ab = AssetDependencyDB(
+            dependent_asset_id=asset_b.id,
+            dependency_asset_id=asset_a.id,
+            dependency_type=DependencyType.TRANSFORMS,
+        )
+        dep_ba = AssetDependencyDB(
+            dependent_asset_id=asset_a.id,
+            dependency_asset_id=asset_b.id,
+            dependency_type=DependencyType.TRANSFORMS,
+        )
+        session.add_all([dep_ab, dep_ba])
+
+        contract_a = ContractDB(
+            asset_id=asset_a.id,
+            version="1.0.0",
+            schema_def={"type": "object"},
+            published_by=team.id,
+        )
+        session.add(contract_a)
+        await session.flush()
+
+        # Test with different depth limits
+        for depth in [1, 2, 5]:
+            response = await client.post(
+                f"/api/v1/assets/{asset_a.id}/impact?depth={depth}",
+                json={"type": "object", "properties": {"new": {"type": "string"}}},
+            )
+            assert response.status_code == 200
+            data = response.json()
+            assert data["traversal_depth"] == depth

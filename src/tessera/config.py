@@ -44,6 +44,7 @@ class Settings(BaseSettings):  # type: ignore[misc]
     webhook_url: str | None = None
     webhook_secret: str | None = None
     webhook_allowed_domains: list[str] = []  # Comma-separated allowlist (optional)
+    webhook_dns_timeout: float = 5.0  # DNS resolution timeout in seconds
 
     @field_validator("webhook_allowed_domains", mode="before")
     @classmethod
@@ -81,6 +82,7 @@ class Settings(BaseSettings):  # type: ignore[misc]
     rate_limit_read: str = "1000/minute"
     rate_limit_write: str = "100/minute"
     rate_limit_admin: str = "50/minute"
+    rate_limit_auth: str = "30/minute"  # Authentication attempts (stricter to prevent brute force)
     rate_limit_global: str = "5000/minute"
     rate_limit_enabled: bool = True
 
