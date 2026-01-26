@@ -1,7 +1,7 @@
 """Expand api_keys.key_prefix length.
 
-Revision ID: 006
-Revises: 005
+Revision ID: 006b
+Revises: 006
 Create Date: 2025-01-03
 
 """
@@ -13,8 +13,8 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "006"
-down_revision: str | None = "005"
+revision: str = "006b"
+down_revision: str | None = "006"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

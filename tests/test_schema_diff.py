@@ -11,6 +11,7 @@ from tessera.services.schema_diff import (
     diff_contracts,
     diff_guarantees,
     diff_schemas,
+    resolve_refs,
 )
 
 
@@ -629,6 +630,217 @@ class TestCheckGuaranteeCompatibility:
         is_compatible, breaking = check_guarantee_compatibility(old, new, GuaranteeMode.STRICT)
         assert not is_compatible
         assert len(breaking) > 0
+
+
+class TestRefResolution:
+    """Test $ref resolution before schema diffing."""
+
+    def test_resolve_simple_def(self):
+        """Resolve a simple $ref to $defs."""
+        schema = {
+            "type": "object",
+            "properties": {"user": {"$ref": "#/$defs/User"}},
+            "$defs": {"User": {"type": "object", "properties": {"name": {"type": "string"}}}},
+        }
+        resolved = resolve_refs(schema)
+        # The $ref should be replaced with the actual definition
+        assert resolved["properties"]["user"]["type"] == "object"
+        assert "name" in resolved["properties"]["user"]["properties"]
+
+    def test_resolve_definitions_key(self):
+        """Resolve $ref using 'definitions' instead of '$defs'."""
+        schema = {
+            "type": "object",
+            "properties": {"user": {"$ref": "#/definitions/User"}},
+            "definitions": {"User": {"type": "object", "properties": {"name": {"type": "string"}}}},
+        }
+        resolved = resolve_refs(schema)
+        assert resolved["properties"]["user"]["type"] == "object"
+
+    def test_resolve_nested_refs(self):
+        """Resolve nested $ref pointers."""
+        schema = {
+            "type": "object",
+            "properties": {"user": {"$ref": "#/$defs/User"}},
+            "$defs": {
+                "User": {
+                    "type": "object",
+                    "properties": {"address": {"$ref": "#/$defs/Address"}},
+                },
+                "Address": {"type": "object", "properties": {"city": {"type": "string"}}},
+            },
+        }
+        resolved = resolve_refs(schema)
+        # Both $refs should be resolved
+        user = resolved["properties"]["user"]
+        assert user["type"] == "object"
+        assert user["properties"]["address"]["properties"]["city"]["type"] == "string"
+
+    def test_circular_refs_handled(self):
+        """Circular $refs should be handled without infinite recursion."""
+        schema = {
+            "type": "object",
+            "properties": {"node": {"$ref": "#/$defs/Node"}},
+            "$defs": {
+                "Node": {
+                    "type": "object",
+                    "properties": {
+                        "value": {"type": "string"},
+                        "next": {"$ref": "#/$defs/Node"},  # Circular!
+                    },
+                }
+            },
+        }
+        # Should not raise RecursionError
+        resolved = resolve_refs(schema)
+        assert resolved is not None
+
+    def test_external_refs_preserved(self):
+        """External $ref (not starting with #) should be preserved."""
+        schema = {
+            "type": "object",
+            "properties": {"external": {"$ref": "https://example.com/schema.json"}},
+        }
+        resolved = resolve_refs(schema)
+        # External refs should remain as-is
+        assert resolved["properties"]["external"]["$ref"] == "https://example.com/schema.json"
+
+    def test_diff_with_refs_resolved(self):
+        """Two semantically identical schemas with different ref usage should be equal."""
+        # Schema using $ref
+        schema_with_ref = {
+            "type": "object",
+            "properties": {"email": {"$ref": "#/$defs/Email"}},
+            "$defs": {"Email": {"type": "string", "format": "email"}},
+        }
+        # Schema with inline definition (semantically identical)
+        schema_inline = {
+            "type": "object",
+            "properties": {"email": {"type": "string", "format": "email"}},
+        }
+
+        # With ref resolution (default), these should be identical
+        result = diff_schemas(schema_with_ref, schema_inline)
+        # The only difference should be the $defs being present in one schema
+        # but not used in the resolved comparison, so no property changes
+        property_changes = [c for c in result.changes if "properties" in c.path]
+        assert len(property_changes) == 0
+
+    def test_diff_detects_changes_after_ref_resolution(self):
+        """Changes should be detected after $ref resolution."""
+        old = {
+            "type": "object",
+            "properties": {"data": {"$ref": "#/$defs/Data"}},
+            "$defs": {"Data": {"type": "string"}},
+        }
+        new = {
+            "type": "object",
+            "properties": {"data": {"$ref": "#/$defs/Data"}},
+            "$defs": {"Data": {"type": "integer"}},  # Type changed!
+        }
+
+        result = diff_schemas(old, new)
+        assert result.has_changes
+        assert any(c.kind == ChangeKind.TYPE_CHANGED for c in result.changes)
+
+    def test_resolve_with_additional_properties(self):
+        """$ref with additional sibling properties should merge them."""
+        schema = {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "$ref": "#/$defs/String",
+                    "description": "User's name",  # Additional property
+                }
+            },
+            "$defs": {"String": {"type": "string", "maxLength": 100}},
+        }
+        resolved = resolve_refs(schema)
+        # Should have both the ref content and the additional property
+        name_prop = resolved["properties"]["name"]
+        assert name_prop["type"] == "string"
+        assert name_prop["maxLength"] == 100
+        assert name_prop["description"] == "User's name"
+
+
+class TestDepthProtection:
+    """Test protection against circular/deeply nested schemas."""
+
+    def test_deeply_nested_schema_does_not_overflow(self):
+        """Schemas nested deeper than MAX_DEPTH should not cause stack overflow."""
+
+        # Create a schema nested deeper than MAX_DEPTH (50)
+        def create_nested_schema(depth: int) -> dict:
+            if depth == 0:
+                return {"type": "string"}
+            return {
+                "type": "object",
+                "properties": {"nested": create_nested_schema(depth - 1)},
+            }
+
+        old = create_nested_schema(60)  # 60 levels deep
+        new = create_nested_schema(60)
+
+        # This should not raise RecursionError
+        result = diff_schemas(old, new)
+        assert not result.has_changes
+
+    def test_array_nesting_does_not_overflow(self):
+        """Deeply nested arrays should not cause stack overflow."""
+
+        # Create a schema with deeply nested arrays
+        def create_nested_array(depth: int) -> dict:
+            if depth == 0:
+                return {"type": "string"}
+            return {"type": "array", "items": create_nested_array(depth - 1)}
+
+        old = create_nested_array(60)  # 60 levels of nested arrays
+        new = create_nested_array(60)
+
+        # Should complete without overflow
+        result = diff_schemas(old, new)
+        assert not result.has_changes
+
+    def test_changes_detected_within_max_depth(self):
+        """Changes within MAX_DEPTH should still be detected."""
+        # Create a schema with a change at a moderate depth
+        old = {
+            "type": "object",
+            "properties": {
+                "level1": {
+                    "type": "object",
+                    "properties": {
+                        "level2": {
+                            "type": "object",
+                            "properties": {
+                                "level3": {"type": "string"},
+                            },
+                        },
+                    },
+                },
+            },
+        }
+        new = {
+            "type": "object",
+            "properties": {
+                "level1": {
+                    "type": "object",
+                    "properties": {
+                        "level2": {
+                            "type": "object",
+                            "properties": {
+                                "level3": {"type": "integer"},  # Changed from string
+                            },
+                        },
+                    },
+                },
+            },
+        }
+
+        result = diff_schemas(old, new)
+        assert result.has_changes
+        # Should detect the type change
+        assert any(c.kind == ChangeKind.TYPE_CHANGED for c in result.changes)
 
 
 class TestDiffContracts:
