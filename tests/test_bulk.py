@@ -9,7 +9,7 @@ pytestmark = pytest.mark.asyncio
 class TestBulkRegistrations:
     """Tests for bulk registration creation."""
 
-    async def test_bulk_create_registrations_success(self, client: AsyncClient):
+    async def test_bulk_create_registrations_success(self, client: AsyncClient) -> None:
         """Create multiple registrations at once."""
         # Create teams
         team_resp = await client.post("/api/v1/teams", json={"name": "bulk-reg-team"})
@@ -65,7 +65,7 @@ class TestBulkRegistrations:
         assert len(data["results"]) == 2
         assert all(r["success"] for r in data["results"])
 
-    async def test_bulk_registrations_skip_duplicates(self, client: AsyncClient):
+    async def test_bulk_registrations_skip_duplicates(self, client: AsyncClient) -> None:
         """Skip duplicate registrations when skip_duplicates is true."""
         # Create teams
         team_resp = await client.post("/api/v1/teams", json={"name": "dup-reg-team"})
@@ -109,7 +109,7 @@ class TestBulkRegistrations:
         assert data["results"][0]["success"] is True
         assert data["results"][0]["details"].get("skipped") is True
 
-    async def test_bulk_registrations_duplicate_fails(self, client: AsyncClient):
+    async def test_bulk_registrations_duplicate_fails(self, client: AsyncClient) -> None:
         """Duplicate registration fails when skip_duplicates is false."""
         # Create teams
         team_resp = await client.post("/api/v1/teams", json={"name": "fail-dup-team"})
@@ -153,7 +153,7 @@ class TestBulkRegistrations:
         assert data["results"][0]["success"] is False
         assert "already exists" in data["results"][0]["error"]
 
-    async def test_bulk_registrations_invalid_contract(self, client: AsyncClient):
+    async def test_bulk_registrations_invalid_contract(self, client: AsyncClient) -> None:
         """Registration with invalid contract fails."""
         consumer_resp = await client.post("/api/v1/teams", json={"name": "inv-contract-consumer"})
         consumer_id = consumer_resp.json()["id"]
@@ -178,7 +178,7 @@ class TestBulkRegistrations:
 class TestBulkAssets:
     """Tests for bulk asset creation."""
 
-    async def test_bulk_create_assets_success(self, client: AsyncClient):
+    async def test_bulk_create_assets_success(self, client: AsyncClient) -> None:
         """Create multiple assets at once."""
         team_resp = await client.post("/api/v1/teams", json={"name": "bulk-assets-team"})
         team_id = team_resp.json()["id"]
@@ -201,7 +201,7 @@ class TestBulkAssets:
         assert all(r["success"] for r in data["results"])
         assert all(r["id"] is not None for r in data["results"])
 
-    async def test_bulk_assets_skip_duplicates(self, client: AsyncClient):
+    async def test_bulk_assets_skip_duplicates(self, client: AsyncClient) -> None:
         """Skip duplicate assets when skip_duplicates is true."""
         team_resp = await client.post("/api/v1/teams", json={"name": "dup-assets-team"})
         team_id = team_resp.json()["id"]
@@ -225,7 +225,7 @@ class TestBulkAssets:
         assert data["succeeded"] == 1
         assert data["results"][0]["details"].get("skipped") is True
 
-    async def test_bulk_assets_duplicate_fails(self, client: AsyncClient):
+    async def test_bulk_assets_duplicate_fails(self, client: AsyncClient) -> None:
         """Duplicate asset fails when skip_duplicates is false."""
         team_resp = await client.post("/api/v1/teams", json={"name": "fail-dup-assets-team"})
         team_id = team_resp.json()["id"]
@@ -249,7 +249,7 @@ class TestBulkAssets:
         assert data["failed"] == 1
         assert "already exists" in data["results"][0]["error"]
 
-    async def test_bulk_assets_invalid_team(self, client: AsyncClient):
+    async def test_bulk_assets_invalid_team(self, client: AsyncClient) -> None:
         """Asset with invalid team fails."""
         resp = await client.post(
             "/api/v1/bulk/assets",
@@ -268,7 +268,7 @@ class TestBulkAssets:
         # Could fail on authorization or team not found
         assert data["results"][0]["success"] is False
 
-    async def test_bulk_assets_with_metadata(self, client: AsyncClient):
+    async def test_bulk_assets_with_metadata(self, client: AsyncClient) -> None:
         """Create assets with metadata."""
         team_resp = await client.post("/api/v1/teams", json={"name": "meta-assets-team"})
         team_id = team_resp.json()["id"]
@@ -293,7 +293,7 @@ class TestBulkAssets:
 class TestBulkAcknowledgments:
     """Tests for bulk acknowledgment creation."""
 
-    async def test_bulk_acknowledge_proposals_success(self, client: AsyncClient):
+    async def test_bulk_acknowledge_proposals_success(self, client: AsyncClient) -> None:
         """Acknowledge multiple proposals at once."""
         # Create producer and consumer teams
         producer_resp = await client.post("/api/v1/teams", json={"name": "bulk-ack-producer"})
@@ -368,7 +368,7 @@ class TestBulkAcknowledgments:
             assert result["success"] is True
             assert result["details"]["proposal_status"] == "approved"
 
-    async def test_bulk_acknowledge_with_block(self, client: AsyncClient):
+    async def test_bulk_acknowledge_with_block(self, client: AsyncClient) -> None:
         """Blocking acknowledgment rejects proposal."""
         producer_resp = await client.post("/api/v1/teams", json={"name": "bulk-block-producer"})
         consumer_resp = await client.post("/api/v1/teams", json={"name": "bulk-block-consumer"})
@@ -426,7 +426,7 @@ class TestBulkAcknowledgments:
         assert data["succeeded"] == 1
         assert data["results"][0]["details"]["proposal_status"] == "rejected"
 
-    async def test_bulk_acknowledge_duplicate_fails(self, client: AsyncClient):
+    async def test_bulk_acknowledge_duplicate_fails(self, client: AsyncClient) -> None:
         """Duplicate acknowledgment fails."""
         producer_resp = await client.post("/api/v1/teams", json={"name": "dup-ack-producer"})
         consumer_resp = await client.post("/api/v1/teams", json={"name": "dup-ack-consumer"})
@@ -524,7 +524,7 @@ class TestBulkAcknowledgments:
         # Should fail because already acknowledged or proposal not pending
         assert data["results"][0]["success"] is False
 
-    async def test_bulk_acknowledge_invalid_proposal(self, client: AsyncClient):
+    async def test_bulk_acknowledge_invalid_proposal(self, client: AsyncClient) -> None:
         """Acknowledgment with invalid proposal fails."""
         consumer_resp = await client.post("/api/v1/teams", json={"name": "inv-prop-consumer"})
         consumer_id = consumer_resp.json()["id"]
@@ -546,7 +546,7 @@ class TestBulkAcknowledgments:
         assert data["failed"] == 1
         assert "not found" in data["results"][0]["error"]
 
-    async def test_bulk_acknowledge_continues_on_error(self, client: AsyncClient):
+    async def test_bulk_acknowledge_continues_on_error(self, client: AsyncClient) -> None:
         """Bulk acknowledgment continues processing after error."""
         producer_resp = await client.post("/api/v1/teams", json={"name": "cont-err-producer"})
         consumer_resp = await client.post("/api/v1/teams", json={"name": "cont-err-consumer"})
@@ -617,7 +617,7 @@ class TestBulkAcknowledgments:
 class TestBulkValidation:
     """Tests for bulk request validation."""
 
-    async def test_bulk_registrations_empty_list(self, client: AsyncClient):
+    async def test_bulk_registrations_empty_list(self, client: AsyncClient) -> None:
         """Empty registrations list fails validation."""
         resp = await client.post(
             "/api/v1/bulk/registrations",
@@ -625,7 +625,7 @@ class TestBulkValidation:
         )
         assert resp.status_code == 422  # Validation error
 
-    async def test_bulk_assets_empty_list(self, client: AsyncClient):
+    async def test_bulk_assets_empty_list(self, client: AsyncClient) -> None:
         """Empty assets list fails validation."""
         resp = await client.post(
             "/api/v1/bulk/assets",
@@ -633,7 +633,7 @@ class TestBulkValidation:
         )
         assert resp.status_code == 422  # Validation error
 
-    async def test_bulk_acknowledgments_empty_list(self, client: AsyncClient):
+    async def test_bulk_acknowledgments_empty_list(self, client: AsyncClient) -> None:
         """Empty acknowledgments list fails validation."""
         resp = await client.post(
             "/api/v1/bulk/acknowledgments",
@@ -641,7 +641,7 @@ class TestBulkValidation:
         )
         assert resp.status_code == 422  # Validation error
 
-    async def test_bulk_assets_invalid_fqn_format(self, client: AsyncClient):
+    async def test_bulk_assets_invalid_fqn_format(self, client: AsyncClient) -> None:
         """Invalid FQN format fails validation."""
         team_resp = await client.post("/api/v1/teams", json={"name": "fqn-validation-team"})
         team_id = team_resp.json()["id"]
@@ -657,7 +657,7 @@ class TestBulkValidation:
         assert resp.status_code == 422
         assert "FQN must be dot-separated segments" in resp.text
 
-    async def test_bulk_assets_valid_fqn_format(self, client: AsyncClient):
+    async def test_bulk_assets_valid_fqn_format(self, client: AsyncClient) -> None:
         """Valid FQN format passes validation."""
         team_resp = await client.post("/api/v1/teams", json={"name": "valid-fqn-team"})
         team_id = team_resp.json()["id"]
@@ -673,7 +673,7 @@ class TestBulkValidation:
         assert resp.status_code == 200
         assert resp.json()["succeeded"] == 1
 
-    async def test_bulk_assets_fqn_starts_with_number(self, client: AsyncClient):
+    async def test_bulk_assets_fqn_starts_with_number(self, client: AsyncClient) -> None:
         """FQN starting with number fails validation."""
         team_resp = await client.post("/api/v1/teams", json={"name": "num-fqn-team"})
         team_id = team_resp.json()["id"]
