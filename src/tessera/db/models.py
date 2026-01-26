@@ -16,7 +16,12 @@ from sqlalchemy import (
     UniqueConstraint,
     Uuid,
 )
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.orm import (
+    DeclarativeBase,
+    Mapped,
+    mapped_column,
+    relationship,
+)
 
 from tessera.models.enums import (
     AcknowledgmentResponseType,
@@ -122,8 +127,10 @@ class AssetDB(Base):
     __table_args__ = (UniqueConstraint("fqn", "environment", name="uq_asset_fqn_environment"),)
 
     # Relationships
-    owner_team: Mapped["TeamDB"] = relationship(back_populates="assets")
+    # Use selectin for owner_team since it's often needed for auth checks
+    owner_team: Mapped["TeamDB"] = relationship(back_populates="assets", lazy="selectin")
     owner_user: Mapped["UserDB | None"] = relationship(back_populates="owned_assets")
+    # Contracts and proposals use default lazy loading - use explicit options() when needed
     contracts: Mapped[list["ContractDB"]] = relationship(back_populates="asset")
     proposals: Mapped[list["ProposalDB"]] = relationship(back_populates="asset")
 
@@ -163,7 +170,9 @@ class ContractDB(Base):
     __table_args__ = (Index("idx_contract_asset_status", "asset_id", "status"),)
 
     # Relationships
-    asset: Mapped["AssetDB"] = relationship(back_populates="contracts")
+    # Use selectin for asset since contract details often need asset info
+    asset: Mapped["AssetDB"] = relationship(back_populates="contracts", lazy="selectin")
+    # Registrations use default lazy - use explicit options() for impact analysis
     registrations: Mapped[list["RegistrationDB"]] = relationship(back_populates="contract")
     published_by_user: Mapped["UserDB | None"] = relationship()
 
