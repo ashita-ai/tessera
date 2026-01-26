@@ -640,3 +640,51 @@ class TestBulkValidation:
             json={"acknowledgments": []},
         )
         assert resp.status_code == 422  # Validation error
+
+    async def test_bulk_assets_invalid_fqn_format(self, client: AsyncClient):
+        """Invalid FQN format fails validation."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "fqn-validation-team"})
+        team_id = team_resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/bulk/assets",
+            json={
+                "assets": [
+                    {"fqn": "invalid-fqn", "owner_team_id": team_id},
+                ]
+            },
+        )
+        assert resp.status_code == 422
+        assert "FQN must be dot-separated segments" in resp.text
+
+    async def test_bulk_assets_valid_fqn_format(self, client: AsyncClient):
+        """Valid FQN format passes validation."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "valid-fqn-team"})
+        team_id = team_resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/bulk/assets",
+            json={
+                "assets": [
+                    {"fqn": "database.schema.table", "owner_team_id": team_id},
+                ]
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.json()["succeeded"] == 1
+
+    async def test_bulk_assets_fqn_starts_with_number(self, client: AsyncClient):
+        """FQN starting with number fails validation."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "num-fqn-team"})
+        team_id = team_resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/bulk/assets",
+            json={
+                "assets": [
+                    {"fqn": "1database.schema.table", "owner_team_id": team_id},
+                ]
+            },
+        )
+        assert resp.status_code == 422
+        assert "FQN must be dot-separated segments" in resp.text

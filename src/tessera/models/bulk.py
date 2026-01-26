@@ -3,8 +3,9 @@
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
+from tessera.models.asset import FQN_PATTERN
 from tessera.models.enums import AcknowledgmentResponseType, GuaranteeMode, ResourceType
 
 
@@ -72,6 +73,18 @@ class BulkAssetItem(BaseModel):
     resource_type: ResourceType = ResourceType.OTHER
     guarantee_mode: GuaranteeMode = GuaranteeMode.NOTIFY
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("fqn")
+    @classmethod
+    def validate_fqn_format(cls, v: str) -> str:
+        """Validate FQN format: alphanumeric segments separated by dots."""
+        if not FQN_PATTERN.match(v):
+            raise ValueError(
+                "FQN must be dot-separated segments (e.g., 'database.schema.table'). "
+                "Each segment must start with a letter or underscore and contain only "
+                "alphanumeric characters and underscores."
+            )
+        return v
 
 
 class BulkAssetRequest(BaseModel):
