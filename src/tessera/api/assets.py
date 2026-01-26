@@ -1,14 +1,15 @@
 """Assets API endpoints."""
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Final
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import Select, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import InstrumentedAttribute
 
 from tessera.api.auth import Auth, RequireAdmin, RequireRead, RequireWrite
 from tessera.api.errors import (
@@ -17,9 +18,22 @@ from tessera.api.errors import (
     ErrorCode,
     ForbiddenError,
     NotFoundError,
+    PreconditionFailedError,
 )
 from tessera.api.pagination import PaginationParams, pagination_params
-from tessera.api.rate_limit import limit_read, limit_write
+from tessera.api.rate_limit import limit_expensive, limit_read, limit_write
+from tessera.api.types import (
+    AssetSearchResult,
+    AssetWithOwnerInfo,
+    BulkAssignResponse,
+    ContractHistoryEntry,
+    ContractHistoryResponse,
+    ContractPublishResponse,
+    ContractWithPublisherInfo,
+    ImpactedConsumer,
+    PaginatedResponse,
+    SchemaDiffResponse,
+)
 from tessera.config import settings
 from tessera.db import (
     AssetDB,
@@ -39,8 +53,9 @@ from tessera.models import (
     Contract,
     ContractCreate,
     Proposal,
+    VersionSuggestion,
+    VersionSuggestionRequest,
 )
-from tessera.models.contract import VersionSuggestion
 from tessera.models.enums import (
     APIKeyScope,
     AuditRunStatus,
@@ -83,6 +98,10 @@ from tessera.services.cache import (
 from tessera.services.slack import notify_proposal_created
 from tessera.services.webhooks import send_proposal_created
 
+# Named constants for version handling
+INITIAL_VERSION: Final[str] = "1.0.0"
+"""Version assigned to the first contract published for an asset."""
+
 router = APIRouter()
 
 
@@ -120,6 +139,61 @@ def parse_semver(version: str) -> tuple[int, int, int]:
         raise ValueError(f"Cannot parse version '{version}': {e}") from e
 
 
+def is_prerelease(version: str) -> bool:
+    """Check if a version is a pre-release (contains hyphen before any build metadata).
+
+    Examples:
+        1.0.0 -> False
+        1.0.0-alpha -> True
+        1.0.0-beta.1 -> True
+        1.0.0-rc.1 -> True
+        1.0.0+build.123 -> False (build metadata only, not prerelease)
+        1.0.0-alpha+build.123 -> True
+    """
+    # Remove build metadata first (everything after +)
+    version_without_build = version.split("+")[0]
+    # Check if there's a hyphen indicating prerelease
+    return "-" in version_without_build
+
+
+def get_base_version(version: str) -> str:
+    """Get the base version (X.Y.Z) without prerelease or build metadata.
+
+    Examples:
+        1.0.0 -> 1.0.0
+        1.0.0-alpha -> 1.0.0
+        1.0.0-beta.1 -> 1.0.0
+        1.0.0+build.123 -> 1.0.0
+        1.0.0-rc.1+build.456 -> 1.0.0
+    """
+    # Remove build metadata first, then prerelease
+    without_build = version.split("+")[0]
+    without_prerelease = without_build.split("-")[0]
+    return without_prerelease
+
+
+def is_graduation(current_version: str, new_version: str) -> bool:
+    """Check if publishing new_version is graduating from a prerelease.
+
+    A graduation occurs when:
+    - Current version is a prerelease (e.g., 1.0.0-alpha, 1.0.0-rc.1)
+    - New version is NOT a prerelease
+    - Base versions match (1.0.0-alpha -> 1.0.0)
+
+    Examples:
+        1.0.0-alpha -> 1.0.0: True (graduation)
+        1.0.0-rc.1 -> 1.0.0: True (graduation)
+        1.0.0-alpha -> 1.0.1: False (different base)
+        1.0.0-alpha -> 1.0.0-beta: False (still prerelease)
+        1.0.0 -> 1.1.0: False (not from prerelease)
+    """
+    if not is_prerelease(current_version):
+        return False
+    if is_prerelease(new_version):
+        return False
+    return get_base_version(current_version) == get_base_version(new_version)
+
+
 def bump_version(current: str, bump_type: str) -> str:
     """Bump a semantic version based on change type.
 
@@ -136,6 +210,7 @@ def compute_version_suggestion(
     current_version: str | None,
     change_type: ChangeType,
     is_compatible: bool,
+    breaking_changes: list[dict[str, Any]] | None = None,
 ) -> VersionSuggestion:
     """Compute the suggested version based on schema diff analysis.
 
@@ -143,17 +218,21 @@ def compute_version_suggestion(
         current_version: The current contract version (None if first contract)
         change_type: The detected change type from schema diff
         is_compatible: Whether the change is backward compatible
+        breaking_changes: List of breaking change details from schema diff
 
     Returns:
         A VersionSuggestion with the suggested version and explanation
     """
+    breaks = breaking_changes or []
+
     if current_version is None:
         return VersionSuggestion(
-            suggested_version="1.0.0",
+            suggested_version=INITIAL_VERSION,
             current_version=None,
             change_type=ChangeType.PATCH,
             reason="First contract for this asset",
             is_first_contract=True,
+            breaking_changes=[],
         )
 
     major, minor, patch = parse_semver(current_version)
@@ -184,6 +263,7 @@ def compute_version_suggestion(
         change_type=actual_change_type,
         reason=reason,
         is_first_contract=False,
+        breaking_changes=breaks,
     )
 
 
@@ -282,11 +362,11 @@ async def create_asset(
         )
         user = user_result.scalar_one_or_none()
         if not user:
-            raise HTTPException(status_code=404, detail="Owner user not found")
+            raise NotFoundError(ErrorCode.USER_NOT_FOUND, "Owner user not found")
         if user.team_id != asset.owner_team_id:
-            raise HTTPException(
-                status_code=400,
-                detail="Owner user must belong to the owner team",
+            raise BadRequestError(
+                "Owner user must belong to the owner team",
+                code=ErrorCode.USER_TEAM_MISMATCH,
             )
 
     # Check for duplicate FQN
@@ -350,7 +430,7 @@ async def list_assets(
     params: PaginationParams = Depends(pagination_params),
     _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
-) -> dict[str, Any]:
+) -> PaginatedResponse[AssetWithOwnerInfo]:
     """List all assets with filtering, sorting, and pagination.
 
     Requires read scope. Returns assets with owner team/user names and active contract version.
@@ -396,7 +476,7 @@ async def list_assets(
         count_base = count_base.where(AssetDB.resource_type == resource_type)
 
     # Apply sorting
-    sort_column: Any = AssetDB.fqn  # default
+    sort_column: InstrumentedAttribute[object] = AssetDB.fqn  # default
     if sort_by == "owner":
         sort_column = TeamDB.name
     elif sort_by == "owner_user":
@@ -438,9 +518,9 @@ async def list_assets(
             if asset_id not in active_contracts_map:
                 active_contracts_map[asset_id] = version
 
-    results = []
+    results: list[AssetWithOwnerInfo] = []
     for asset_db, team_name, user_name, user_email in rows:
-        asset_dict = Asset.model_validate(asset_db).model_dump()
+        asset_dict: AssetWithOwnerInfo = Asset.model_validate(asset_db).model_dump()  # type: ignore[assignment]
         asset_dict["owner_team_name"] = team_name
         asset_dict["owner_user_name"] = user_name
         asset_dict["owner_user_email"] = user_email
@@ -472,14 +552,14 @@ async def search_assets(
     offset: int = Query(0, ge=0, description="Pagination offset"),
     _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
-) -> dict[str, Any]:
+) -> PaginatedResponse[AssetSearchResult]:
     """Search assets by FQN pattern.
 
     Searches for assets whose FQN contains the search query (case-insensitive).
     Requires read scope.
     """
     # Build filters dict for cache key
-    filters = {}
+    filters: dict[str, str] = {}
     if owner:
         filters["owner"] = str(owner)
     if environment:
@@ -489,7 +569,7 @@ async def search_assets(
     if limit == settings.pagination_limit_default and offset == 0:
         cached = await get_cached_asset_search(q, filters)
         if cached:
-            return cached
+            return cached  # type: ignore[return-value]
 
     base_query = _apply_asset_search_filters(select(AssetDB), q, owner, environment)
 
@@ -511,18 +591,18 @@ async def search_assets(
     rows = result.all()
 
     # Build response with owner team names from join
-    results = [
-        {
-            "id": str(asset.id),
-            "fqn": asset.fqn,
-            "owner_team_id": str(asset.owner_team_id),
-            "owner_team_name": team.name,
-            "environment": asset.environment,
-        }
+    results: list[AssetSearchResult] = [
+        AssetSearchResult(
+            id=str(asset.id),
+            fqn=asset.fqn,
+            owner_team_id=str(asset.owner_team_id),
+            owner_team_name=team.name,
+            environment=asset.environment,
+        )
         for asset, team in rows
     ]
 
-    response = {
+    response: PaginatedResponse[AssetSearchResult] = {
         "results": results,
         "total": total,
         "limit": limit,
@@ -531,7 +611,7 @@ async def search_assets(
 
     # Cache result if default pagination
     if limit == settings.pagination_limit_default and offset == 0:
-        await cache_asset_search(q, filters, response)
+        await cache_asset_search(q, filters, response)  # type: ignore[arg-type]
 
     return response
 
@@ -544,7 +624,7 @@ async def get_asset(
     auth: Auth,
     _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
-) -> dict[str, Any]:
+) -> AssetWithOwnerInfo:
     """Get an asset by ID.
 
     Requires read scope. Returns asset with owner team and user names.
@@ -552,7 +632,7 @@ async def get_asset(
     # Try cache first
     cached = await get_cached_asset(str(asset_id))
     if cached:
-        return cached
+        return cached  # type: ignore[return-value]
 
     # Query with joins to get team and user names
     result = await session.execute(
@@ -572,13 +652,13 @@ async def get_asset(
         raise NotFoundError(ErrorCode.ASSET_NOT_FOUND, "Asset not found")
 
     asset, team_name, user_name, user_email = row
-    asset_dict = Asset.model_validate(asset).model_dump()
+    asset_dict: AssetWithOwnerInfo = Asset.model_validate(asset).model_dump()  # type: ignore[assignment]
     asset_dict["owner_team_name"] = team_name
     asset_dict["owner_user_name"] = user_name
     asset_dict["owner_user_email"] = user_email
 
     # Cache result
-    await cache_asset(str(asset_id), asset_dict)
+    await cache_asset(str(asset_id), asset_dict)  # type: ignore[arg-type]
 
     return asset_dict
 
@@ -639,11 +719,11 @@ async def update_asset(
         )
         user = user_result.scalar_one_or_none()
         if not user:
-            raise HTTPException(status_code=404, detail="Owner user not found")
+            raise NotFoundError(ErrorCode.USER_NOT_FOUND, "Owner user not found")
         if user.team_id != new_team_id:
-            raise HTTPException(
-                status_code=400,
-                detail="Owner user must belong to the owner team",
+            raise BadRequestError(
+                "Owner user must belong to the owner team",
+                code=ErrorCode.USER_TEAM_MISMATCH,
             )
 
     if update.owner_team_id is not None:
@@ -788,7 +868,7 @@ async def create_contract(
     ),
     _: None = RequireWrite,
     session: AsyncSession = Depends(get_session),
-) -> dict[str, Any] | JSONResponse:
+) -> ContractPublishResponse | JSONResponse:
     """Publish a new contract for an asset.
 
     Requires write scope.
@@ -819,25 +899,16 @@ async def create_contract(
 
     if require_audit_pass:
         if audit_status is None:
-            raise HTTPException(
-                status_code=412,
-                detail={
-                    "code": "AUDIT_REQUIRED",
-                    "message": (
-                        "No audit runs found. Run audits before publishing "
-                        "with require_audit_pass=True."
-                    ),
-                },
+            raise PreconditionFailedError(
+                ErrorCode.AUDIT_REQUIRED,
+                "No audit runs found. Run audits before publishing with require_audit_pass=True.",
             )
         if audit_status != AuditRunStatus.PASSED:
-            raise HTTPException(
-                status_code=412,
-                detail={
-                    "code": "AUDIT_FAILED",
-                    "message": (
-                        f"Most recent audit {audit_status.value}. "
-                        "Cannot publish with require_audit_pass=True."
-                    ),
+            raise PreconditionFailedError(
+                ErrorCode.AUDIT_FAILED,
+                f"Most recent audit {audit_status.value}. "
+                "Cannot publish with require_audit_pass=True.",
+                details={
                     "audit_status": audit_status.value,
                     "guarantees_failed": audit_failed,
                     "audit_run_at": audit_run_at.isoformat() if audit_run_at else None,
@@ -925,7 +996,7 @@ async def create_contract(
     version_suggestion: VersionSuggestion | None = None
     if current_contract:
         pre_diff = diff_schemas(current_contract.schema_def, schema_to_store)
-        pre_is_compatible, _pre_breaks = check_compatibility(
+        pre_is_compatible, pre_breaks = check_compatibility(
             current_contract.schema_def,
             schema_to_store,
             current_contract.compatibility_mode,
@@ -934,6 +1005,7 @@ async def create_contract(
             current_contract.version,
             pre_diff.change_type,
             pre_is_compatible,
+            breaking_changes=[bc.to_dict() for bc in pre_breaks],
         )
     else:
         version_suggestion = compute_version_suggestion(None, ChangeType.PATCH, True)
@@ -992,13 +1064,10 @@ async def create_contract(
     )
     existing_version = existing_version_result.scalar_one_or_none()
     if existing_version:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "VERSION_EXISTS",
-                "message": f"Contract version {version} already exists for this asset",
-                "existing_contract_id": str(existing_version.id),
-            },
+        raise DuplicateError(
+            ErrorCode.VERSION_EXISTS,
+            f"Contract version {version} already exists for this asset",
+            details={"existing_contract_id": str(existing_version.id)},
         )
 
     # Helper to create and return the new contract
@@ -1038,17 +1107,17 @@ async def create_contract(
         await invalidate_asset(str(asset_id))
         contract_data = Contract.model_validate(new_contract).model_dump()
         await cache_contract(str(new_contract.id), contract_data)
-        response: dict[str, Any] = {
+        publish_response: ContractPublishResponse = {
             "action": "published",
             "contract": contract_data,
         }
         if version_auto_generated:
-            response["version_auto_generated"] = True
+            publish_response["version_auto_generated"] = True
         if original_format == SchemaFormat.AVRO:
-            response["schema_converted_from"] = "avro"
+            publish_response["schema_converted_from"] = "avro"
         if audit_warning:
-            response["audit_warning"] = audit_warning
-        return response
+            publish_response["audit_warning"] = audit_warning
+        return publish_response
 
     # Diff schemas and check compatibility
     is_compatible, breaking_changes = check_compatibility(
@@ -1072,18 +1141,18 @@ async def create_contract(
         await invalidate_asset(str(asset_id))
         contract_data = Contract.model_validate(new_contract).model_dump()
         await cache_contract(str(new_contract.id), contract_data)
-        response = {
+        compat_response: ContractPublishResponse = {
             "action": "published",
             "change_type": str(diff_result.change_type),
             "contract": contract_data,
         }
         if version_auto_generated:
-            response["version_auto_generated"] = True
+            compat_response["version_auto_generated"] = True
         if original_format == SchemaFormat.AVRO:
-            response["schema_converted_from"] = "avro"
+            compat_response["schema_converted_from"] = "avro"
         if audit_warning:
-            response["audit_warning"] = audit_warning
-        return response
+            compat_response["audit_warning"] = audit_warning
+        return compat_response
 
     # Breaking change with force flag = publish anyway (logged)
     if force:
@@ -1100,7 +1169,7 @@ async def create_contract(
         await invalidate_asset(str(asset_id))
         contract_data = Contract.model_validate(new_contract).model_dump()
         await cache_contract(str(new_contract.id), contract_data)
-        response = {
+        force_response: ContractPublishResponse = {
             "action": "force_published",
             "change_type": str(diff_result.change_type),
             "breaking_changes": [bc.to_dict() for bc in breaking_changes],
@@ -1108,12 +1177,70 @@ async def create_contract(
             "warning": "Breaking change was force-published. Consumers may be affected.",
         }
         if version_auto_generated:
-            response["version_auto_generated"] = True
+            force_response["version_auto_generated"] = True
         if original_format == SchemaFormat.AVRO:
-            response["schema_converted_from"] = "avro"
+            force_response["schema_converted_from"] = "avro"
         if audit_warning:
-            response["audit_warning"] = audit_warning
-        return response
+            force_response["audit_warning"] = audit_warning
+        return force_response
+
+    # Pre-release versions skip proposal workflow (breaking changes allowed without ack)
+    if is_prerelease(version):
+        new_contract = await publish_contract()
+        await log_contract_published(
+            session=session,
+            contract_id=new_contract.id,
+            publisher_id=published_by,
+            version=new_contract.version,
+            change_type=str(diff_result.change_type),
+            prerelease=True,
+        )
+        await invalidate_asset(str(asset_id))
+        contract_data = Contract.model_validate(new_contract).model_dump()
+        await cache_contract(str(new_contract.id), contract_data)
+        prerelease_response: ContractPublishResponse = {
+            "action": "published",
+            "change_type": str(diff_result.change_type),
+            "breaking_changes": [bc.to_dict() for bc in breaking_changes],
+            "contract": contract_data,
+            "message": "Pre-release version published. Breaking changes allowed without ack.",
+        }
+        if version_auto_generated:
+            prerelease_response["version_auto_generated"] = True
+        if original_format == SchemaFormat.AVRO:
+            prerelease_response["schema_converted_from"] = "avro"
+        if audit_warning:
+            prerelease_response["audit_warning"] = audit_warning
+        return prerelease_response
+
+    # Graduation: prerelease -> release (e.g., 1.0.0-rc.1 -> 1.0.0) skips proposal
+    if is_graduation(current_contract.version, version):
+        new_contract = await publish_contract()
+        await log_contract_published(
+            session=session,
+            contract_id=new_contract.id,
+            publisher_id=published_by,
+            version=new_contract.version,
+            change_type=str(diff_result.change_type),
+        )
+        await invalidate_asset(str(asset_id))
+        contract_data = Contract.model_validate(new_contract).model_dump()
+        await cache_contract(str(new_contract.id), contract_data)
+        graduation_response: ContractPublishResponse = {
+            "action": "published",
+            "change_type": str(diff_result.change_type),
+            "contract": contract_data,
+            "message": f"Graduated from {current_contract.version} to stable release.",
+        }
+        if breaking_changes:
+            graduation_response["breaking_changes"] = [bc.to_dict() for bc in breaking_changes]
+        if version_auto_generated:
+            graduation_response["version_auto_generated"] = True
+        if original_format == SchemaFormat.AVRO:
+            graduation_response["schema_converted_from"] = "avro"
+        if audit_warning:
+            graduation_response["audit_warning"] = audit_warning
+        return graduation_response
 
     # Breaking change without force = create proposal
     # First check if there's already a pending proposal for this asset
@@ -1160,7 +1287,7 @@ async def create_contract(
     )
 
     # Get impacted consumers (active registrations for current contract)
-    impacted_consumers: list[dict[str, Any]] = []
+    impacted_consumers: list[ImpactedConsumer] = []
     if current_contract:
         reg_result = await session.execute(
             select(RegistrationDB, TeamDB)
@@ -1170,11 +1297,11 @@ async def create_contract(
         )
         for reg, team in reg_result.all():
             impacted_consumers.append(
-                {
-                    "team_id": team.id,
-                    "team_name": team.name,
-                    "pinned_version": reg.pinned_version,
-                }
+                ImpactedConsumer(
+                    team_id=team.id,
+                    team_name=team.name,
+                    pinned_version=reg.pinned_version,
+                )
             )
 
     # Notify consumers via webhook
@@ -1186,7 +1313,7 @@ async def create_contract(
         producer_team_name=publisher_team.name,
         proposed_version=version,
         breaking_changes=[bc.to_dict() for bc in breaking_changes],
-        impacted_consumers=impacted_consumers,
+        impacted_consumers=impacted_consumers,  # type: ignore[arg-type]
     )
 
     # Send Slack notification
@@ -1198,13 +1325,14 @@ async def create_contract(
         breaking_changes=[bc.to_dict() for bc in breaking_changes],
     )
 
-    return {
+    proposal_response: ContractPublishResponse = {
         "action": "proposal_created",
         "change_type": str(diff_result.change_type),
         "breaking_changes": [bc.to_dict() for bc in breaking_changes],
         "proposal": Proposal.model_validate(db_proposal).model_dump(),
         "message": "Breaking change detected. Proposal created for consumer acknowledgment.",
     }
+    return proposal_response
 
 
 @router.get("/{asset_id}/contracts")
@@ -1216,7 +1344,7 @@ async def list_asset_contracts(
     params: PaginationParams = Depends(pagination_params),
     _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
-) -> dict[str, Any]:
+) -> PaginatedResponse[ContractWithPublisherInfo]:
     """List all contracts for an asset.
 
     Requires read scope. Returns contracts with publisher team and user names.
@@ -1225,7 +1353,7 @@ async def list_asset_contracts(
     if params.limit == settings.pagination_limit_default and params.offset == 0:
         cached = await get_cached_asset_contracts_list(str(asset_id))
         if cached:
-            return cached
+            return cached  # type: ignore[return-value]
 
     # Query with join to get publisher team and user names
     query = (
@@ -1252,14 +1380,14 @@ async def list_asset_contracts(
     result = await session.execute(paginated_query)
     rows = result.all()
 
-    results = []
+    results: list[ContractWithPublisherInfo] = []
     for contract_db, publisher_team_name, publisher_user_name in rows:
-        contract_dict = Contract.model_validate(contract_db).model_dump()
+        contract_dict: ContractWithPublisherInfo = Contract.model_validate(contract_db).model_dump()  # type: ignore[assignment]
         contract_dict["published_by_team_name"] = publisher_team_name
         contract_dict["published_by_user_name"] = publisher_user_name
         results.append(contract_dict)
 
-    response = {
+    response: PaginatedResponse[ContractWithPublisherInfo] = {
         "results": results,
         "total": total,
         "limit": params.limit,
@@ -1268,7 +1396,7 @@ async def list_asset_contracts(
 
     # Cache result if default pagination
     if params.limit == settings.pagination_limit_default and params.offset == 0:
-        await cache_asset_contracts_list(str(asset_id), response)
+        await cache_asset_contracts_list(str(asset_id), response)  # type: ignore[arg-type]
 
     return response
 
@@ -1281,7 +1409,7 @@ async def get_contract_history(
     auth: Auth,
     _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
-) -> dict[str, Any]:
+) -> ContractHistoryResponse:
     """Get the complete contract history for an asset with change summaries.
 
     Returns all versions ordered by publication date with change type annotations.
@@ -1302,9 +1430,9 @@ async def get_contract_history(
     contracts = list(contracts_result.scalars().all())
 
     # Build history with change analysis
-    history: list[dict[str, Any]] = []
+    history: list[ContractHistoryEntry] = []
     for i, contract in enumerate(contracts):
-        entry: dict[str, Any] = {
+        entry: ContractHistoryEntry = {
             "id": str(contract.id),
             "version": contract.version,
             "status": str(contract.status.value),
@@ -1327,15 +1455,16 @@ async def get_contract_history(
 
         history.append(entry)
 
-    return {
-        "asset_id": str(asset_id),
-        "asset_fqn": asset.fqn,
-        "contracts": history,
-    }
+    return ContractHistoryResponse(
+        asset_id=str(asset_id),
+        asset_fqn=asset.fqn,
+        contracts=history,
+    )
 
 
 @router.get("/{asset_id}/contracts/diff")
 @limit_read
+@limit_expensive  # Per-team rate limit for expensive schema diff operation
 async def diff_contract_versions(
     request: Request,
     auth: Auth,
@@ -1344,7 +1473,7 @@ async def diff_contract_versions(
     to_version: str = Query(..., description="Target version to compare to"),
     _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
-) -> dict[str, Any]:
+) -> SchemaDiffResponse:
     """Compare two contract versions for an asset.
 
     Returns the diff between from_version and to_version.
@@ -1395,27 +1524,116 @@ async def diff_contract_versions(
         }
         await cache_schema_diff(from_contract.schema_def, to_contract.schema_def, diff_result_data)
 
-    breaking = []  # Re-calculate breaking based on compatibility mode of from_contract
+    # Re-calculate breaking based on compatibility mode of from_contract
     # We need to re-check compatibility because it depends on the mode
-    # actually we should just cache the whole result including compatibility if possible
-    # but the mode can change.
-    # Let's just keep it simple for now.
-
     # re-diff for breaking (fast)
     diff_obj = diff_schemas(from_contract.schema_def, to_contract.schema_def)
     breaking = diff_obj.breaking_for_mode(from_contract.compatibility_mode)
 
-    return {
-        "asset_id": str(asset_id),
-        "asset_fqn": asset.fqn,
-        "from_version": from_version,
-        "to_version": to_version,
-        "change_type": diff_result_data["change_type"],
-        "is_compatible": len(breaking) == 0,
-        "breaking_changes": [bc.to_dict() for bc in breaking],
-        "all_changes": diff_result_data["all_changes"],
-        "compatibility_mode": str(from_contract.compatibility_mode.value),
-    }
+    return SchemaDiffResponse(
+        asset_id=str(asset_id),
+        asset_fqn=asset.fqn,
+        from_version=from_version,
+        to_version=to_version,
+        change_type=diff_result_data["change_type"],
+        is_compatible=len(breaking) == 0,
+        breaking_changes=[bc.to_dict() for bc in breaking],
+        all_changes=diff_result_data["all_changes"],
+        compatibility_mode=str(from_contract.compatibility_mode.value),
+    )
+
+
+@router.post("/{asset_id}/version-suggestion", response_model=VersionSuggestion)
+@limit_read
+async def preview_version_suggestion(
+    request: Request,
+    asset_id: UUID,
+    body: VersionSuggestionRequest,
+    auth: Auth,
+    _: None = RequireRead,
+    session: AsyncSession = Depends(get_session),
+) -> VersionSuggestion:
+    """Preview version suggestion for a schema change without publishing.
+
+    This endpoint analyzes a proposed schema against the current active contract
+    and returns what version would be suggested, along with any breaking changes.
+    No side effects - no contracts or proposals are created.
+
+    Useful for:
+    - CI/CD pipelines that want to show impact before PR merge
+    - UIs that want to preview "this will be version 2.0.0" before confirmation
+
+    Requires read scope.
+    """
+    # Verify asset exists
+    asset_result = await session.execute(
+        select(AssetDB).where(AssetDB.id == asset_id).where(AssetDB.deleted_at.is_(None))
+    )
+    asset = asset_result.scalar_one_or_none()
+    if not asset:
+        raise NotFoundError(ErrorCode.ASSET_NOT_FOUND, "Asset not found")
+
+    # Validate and normalize schema based on format
+    schema_to_check = body.schema_def
+
+    if body.schema_format == SchemaFormat.AVRO:
+        from tessera.services.avro import (
+            AvroConversionError,
+            avro_to_json_schema,
+            validate_avro_schema,
+        )
+
+        is_valid, avro_errors = validate_avro_schema(body.schema_def)
+        if not is_valid:
+            raise BadRequestError(
+                "Invalid Avro schema",
+                code=ErrorCode.INVALID_SCHEMA,
+                details={"errors": avro_errors, "schema_format": "avro"},
+            )
+        try:
+            schema_to_check = avro_to_json_schema(body.schema_def)
+        except AvroConversionError as e:
+            raise BadRequestError(
+                f"Failed to convert Avro schema: {e.message}",
+                code=ErrorCode.INVALID_SCHEMA,
+                details={"path": e.path, "schema_format": "avro"},
+            )
+    else:
+        is_valid, errors = validate_json_schema(body.schema_def)
+        if not is_valid:
+            raise BadRequestError(
+                "Invalid JSON Schema",
+                code=ErrorCode.INVALID_SCHEMA,
+                details={"errors": errors},
+            )
+
+    # Get current active contract
+    contract_result = await session.execute(
+        select(ContractDB)
+        .where(ContractDB.asset_id == asset_id)
+        .where(ContractDB.status == ContractStatus.ACTIVE)
+        .order_by(ContractDB.published_at.desc())
+        .limit(1)
+    )
+    current_contract = contract_result.scalar_one_or_none()
+
+    # Compute version suggestion
+    if current_contract:
+        diff_result = diff_schemas(current_contract.schema_def, schema_to_check)
+        is_compatible, breaking_changes = check_compatibility(
+            current_contract.schema_def,
+            schema_to_check,
+            current_contract.compatibility_mode,
+        )
+        return compute_version_suggestion(
+            current_contract.version,
+            diff_result.change_type,
+            is_compatible,
+            breaking_changes=[bc.to_dict() for bc in breaking_changes],
+        )
+    else:
+        # First contract for this asset
+        return compute_version_suggestion(None, ChangeType.PATCH, True)
 
 
 @router.post("/bulk-assign")
@@ -1426,7 +1644,7 @@ async def bulk_assign_owner(
     auth: Auth,
     _: None = RequireAdmin,
     session: AsyncSession = Depends(get_session),
-) -> dict[str, Any]:
+) -> BulkAssignResponse:
     """Bulk assign or unassign a user owner for multiple assets.
 
     Requires admin scope.
@@ -1441,7 +1659,7 @@ async def bulk_assign_owner(
             .where(UserDB.deactivated_at.is_(None))
         )
         if not user_result.scalar_one_or_none():
-            raise HTTPException(status_code=404, detail="Owner user not found")
+            raise NotFoundError(ErrorCode.USER_NOT_FOUND, "Owner user not found")
 
     # Get all assets
     result = await session.execute(
@@ -1467,8 +1685,8 @@ async def bulk_assign_owner(
     for asset in assets:
         await invalidate_asset(str(asset.id))
 
-    return {
-        "updated": updated,
-        "not_found": not_found,
-        "owner_user_id": str(bulk_request.owner_user_id) if bulk_request.owner_user_id else None,
-    }
+    return BulkAssignResponse(
+        updated=updated,
+        not_found=not_found,
+        owner_user_id=str(bulk_request.owner_user_id) if bulk_request.owner_user_id else None,
+    )

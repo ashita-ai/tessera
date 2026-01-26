@@ -18,7 +18,6 @@ Run with: uv run python examples/staging_validation.py
 """
 
 import asyncio
-import json
 import os
 from pathlib import Path
 
@@ -78,7 +77,12 @@ def setup_tessera():
             raise Exception("Could not create or find asset")
 
     # Publish contract
-    contracts = CLIENT.get(f"{BASE_URL}/assets/{asset['id']}/contracts").json()
+    contracts_resp = CLIENT.get(f"{BASE_URL}/assets/{asset['id']}/contracts").json()
+    contracts = (
+        contracts_resp.get("results", contracts_resp)
+        if isinstance(contracts_resp, dict)
+        else contracts_resp
+    )
     if not any(c["status"] == "active" for c in contracts):
         resp = CLIENT.post(
             f"{BASE_URL}/assets/{asset['id']}/contracts",
@@ -94,7 +98,7 @@ def setup_tessera():
 
     print(f"  Team: {team['name']}")
     print(f"  Asset: {asset['fqn']}")
-    print(f"  Contract: v1.0.0")
+    print("  Contract: v1.0.0")
     print()
 
     return asset
@@ -127,7 +131,7 @@ async def example_1_validate_matching_file(asset: dict):
 
     file_path = DATA_DIR / "customers_v1.parquet"
     print(f"\nValidating: {file_path}")
-    print(f"Against contract schema...")
+    print("Against contract schema...")
 
     result = await validate_staging_file(file_path, CUSTOMERS_CONTRACT_SCHEMA)
 

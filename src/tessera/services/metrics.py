@@ -3,8 +3,8 @@
 Provides application metrics for monitoring and observability.
 """
 
+import re
 import time
-from typing import Any
 
 import redis
 from prometheus_client import (
@@ -14,9 +14,14 @@ from prometheus_client import (
     Histogram,
     generate_latest,
 )
+from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import Response
+
+# Histogram bucket definitions
+# HTTP request duration buckets: optimized for typical API response times
+HTTP_REQUEST_DURATION_BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0)
 
 # HTTP request metrics
 http_requests_total = Counter(
@@ -29,7 +34,7 @@ http_request_duration_seconds = Histogram(
     "tessera_http_request_duration_seconds",
     "HTTP request duration in seconds",
     ["method", "endpoint"],
-    buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0),
+    buckets=HTTP_REQUEST_DURATION_BUCKETS,
 )
 
 http_requests_in_progress = Gauge(
@@ -91,14 +96,6 @@ users_total = Gauge(
     "Total number of users",
 )
 
-# Database metrics
-db_query_duration_seconds = Histogram(
-    "tessera_db_query_duration_seconds",
-    "Database query duration in seconds",
-    ["operation"],
-    buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0),
-)
-
 # Application info
 app_info = Gauge(
     "tessera_app_info",
@@ -132,8 +129,6 @@ def _normalize_path(path: str) -> str:
 
     Replaces UUIDs and numeric IDs with placeholders.
     """
-    import re
-
     # Replace UUIDs
     path = re.sub(
         r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
@@ -179,23 +174,7 @@ class MetricsMiddleware(BaseHTTPMiddleware):
         return response
 
 
-# Helper functions for recording business metrics
-def record_contract_published(change_type: str = "patch") -> None:
-    """Record a contract publication."""
-    contracts_published_total.labels(change_type=change_type).inc()
-
-
-def record_proposal_created() -> None:
-    """Record a proposal creation."""
-    proposals_created_total.inc()
-
-
-def record_proposal_acknowledged(response: str) -> None:
-    """Record a proposal acknowledgment."""
-    proposals_acknowledged_total.labels(response=response).inc()
-
-
-async def update_gauge_metrics(session: Any) -> None:
+async def update_gauge_metrics(session: AsyncSession) -> None:
     """Update gauge metrics from database counts.
 
     This should be called periodically or on-demand to refresh gauge values.

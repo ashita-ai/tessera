@@ -20,13 +20,23 @@ from tessera.models.bulk import (
     BulkAssetItem,
     BulkAssetRequest,
     BulkAssetResponse,
+    BulkContractItem,
+    BulkContractRequest,
+    BulkContractResponse,
+    BulkContractResultItem,
     BulkItemResult,
     BulkOperationResponse,
     BulkRegistrationItem,
     BulkRegistrationRequest,
     BulkRegistrationResponse,
 )
-from tessera.models.contract import Contract, ContractCreate, Guarantees
+from tessera.models.contract import (
+    Contract,
+    ContractCreate,
+    Guarantees,
+    VersionSuggestion,
+    VersionSuggestionRequest,
+)
 from tessera.models.dependency import Dependency, DependencyCreate
 from tessera.models.enums import (
     AcknowledgmentResponseType,
@@ -78,6 +88,8 @@ __all__ = [
     "Contract",
     "ContractCreate",
     "Guarantees",
+    "VersionSuggestion",
+    "VersionSuggestionRequest",
     # Dependency
     "Dependency",
     "DependencyCreate",
@@ -108,4 +120,8 @@ __all__ = [
     "BulkAcknowledgmentItem",
     "BulkAcknowledgmentRequest",
     "BulkAcknowledgmentResponse",
+    "BulkContractItem",
+    "BulkContractRequest",
+    "BulkContractResponse",
+    "BulkContractResultItem",
 ]

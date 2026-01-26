@@ -46,6 +46,28 @@ def verify_api_key(key: str, key_hash: str) -> bool:
         return False
 
 
+def _db_to_api_key(api_key_db: APIKeyDB) -> APIKey:
+    """Convert APIKeyDB model to APIKey response model.
+
+    Args:
+        api_key_db: Database model instance
+
+    Returns:
+        APIKey response model
+    """
+    return APIKey(
+        id=api_key_db.id,
+        key_prefix=api_key_db.key_prefix,
+        name=api_key_db.name,
+        team_id=api_key_db.team_id,
+        scopes=[APIKeyScope(s) for s in api_key_db.scopes],
+        created_at=api_key_db.created_at,
+        expires_at=api_key_db.expires_at,
+        last_used_at=api_key_db.last_used_at,
+        revoked_at=api_key_db.revoked_at,
+    )
+
+
 async def create_api_key(
     session: AsyncSession,
     key_data: APIKeyCreate,
@@ -166,17 +188,7 @@ async def get_api_key(
     if not api_key_db:
         return None
 
-    return APIKey(
-        id=api_key_db.id,
-        key_prefix=api_key_db.key_prefix,
-        name=api_key_db.name,
-        team_id=api_key_db.team_id,
-        scopes=[APIKeyScope(s) for s in api_key_db.scopes],
-        created_at=api_key_db.created_at,
-        expires_at=api_key_db.expires_at,
-        last_used_at=api_key_db.last_used_at,
-        revoked_at=api_key_db.revoked_at,
-    )
+    return _db_to_api_key(api_key_db)
 
 
 async def list_api_keys(
@@ -207,20 +219,7 @@ async def list_api_keys(
     result = await session.execute(query)
     api_keys_db = result.scalars().all()
 
-    return [
-        APIKey(
-            id=k.id,
-            key_prefix=k.key_prefix,
-            name=k.name,
-            team_id=k.team_id,
-            scopes=[APIKeyScope(s) for s in k.scopes],
-            created_at=k.created_at,
-            expires_at=k.expires_at,
-            last_used_at=k.last_used_at,
-            revoked_at=k.revoked_at,
-        )
-        for k in api_keys_db
-    ]
+    return [_db_to_api_key(k) for k in api_keys_db]
 
 
 async def revoke_api_key(
@@ -243,29 +242,9 @@ async def revoke_api_key(
 
     if api_key_db.revoked_at is not None:
         # Already revoked
-        return APIKey(
-            id=api_key_db.id,
-            key_prefix=api_key_db.key_prefix,
-            name=api_key_db.name,
-            team_id=api_key_db.team_id,
-            scopes=[APIKeyScope(s) for s in api_key_db.scopes],
-            created_at=api_key_db.created_at,
-            expires_at=api_key_db.expires_at,
-            last_used_at=api_key_db.last_used_at,
-            revoked_at=api_key_db.revoked_at,
-        )
+        return _db_to_api_key(api_key_db)
 
     api_key_db.revoked_at = datetime.now(UTC)
     await session.flush()
 
-    return APIKey(
-        id=api_key_db.id,
-        key_prefix=api_key_db.key_prefix,
-        name=api_key_db.name,
-        team_id=api_key_db.team_id,
-        scopes=[APIKeyScope(s) for s in api_key_db.scopes],
-        created_at=api_key_db.created_at,
-        expires_at=api_key_db.expires_at,
-        last_used_at=api_key_db.last_used_at,
-        revoked_at=api_key_db.revoked_at,
-    )
+    return _db_to_api_key(api_key_db)

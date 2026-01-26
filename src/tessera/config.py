@@ -44,6 +44,7 @@ class Settings(BaseSettings):  # type: ignore[misc]
     webhook_url: str | None = None
     webhook_secret: str | None = None
     webhook_allowed_domains: list[str] = []  # Comma-separated allowlist (optional)
+    webhook_dns_timeout: float = 5.0  # DNS resolution timeout in seconds
 
     @field_validator("webhook_allowed_domains", mode="before")
     @classmethod
@@ -81,8 +82,13 @@ class Settings(BaseSettings):  # type: ignore[misc]
     rate_limit_read: str = "1000/minute"
     rate_limit_write: str = "100/minute"
     rate_limit_admin: str = "50/minute"
+    rate_limit_auth: str = "30/minute"  # Authentication attempts (stricter to prevent brute force)
     rate_limit_global: str = "5000/minute"
     rate_limit_enabled: bool = True
+
+    # Per-team rate limits (for expensive operations)
+    rate_limit_expensive: str = "20/minute"  # Schema diff, lineage analysis
+    rate_limit_bulk: str = "10/minute"  # Bulk operations
 
     # Resource Constraints
     max_schema_size_bytes: int = 1_000_000  # 1MB
@@ -110,13 +116,50 @@ class Settings(BaseSettings):  # type: ignore[misc]
     db_pool_recycle: int = 3600  # Recycle connections after 1 hour
 
     @model_validator(mode="after")
-    def validate_production_secrets(self) -> "Settings":
-        """Fail fast if production uses default session secret."""
-        if self.environment == "production" and self.session_secret_key == DEFAULT_SESSION_SECRET:
-            raise ValueError(
+    def validate_production_config(self) -> "Settings":
+        """Validate configuration is safe for production deployment.
+
+        Fails fast if production environment has dangerous settings that could
+        compromise security or data integrity.
+        """
+        if self.environment != "production":
+            return self
+
+        errors: list[str] = []
+
+        # Session secret must be changed from default
+        if self.session_secret_key == DEFAULT_SESSION_SECRET:
+            errors.append(
                 "SESSION_SECRET_KEY must be set to a unique value in production. "
                 'Generate one with: python -c "import secrets; print(secrets.token_hex(32))"'
             )
+
+        # Auto-create tables should be disabled (use migrations instead)
+        if self.auto_create_tables:
+            errors.append(
+                "AUTO_CREATE_TABLES must be False in production. "
+                "Use Alembic migrations for schema changes."
+            )
+
+        # Authentication must be enabled
+        if self.auth_disabled:
+            errors.append(
+                "AUTH_DISABLED must be False in production. "
+                "Authentication is required for security."
+            )
+
+        # Rate limiting should be enabled
+        if not self.rate_limit_enabled:
+            errors.append(
+                "RATE_LIMIT_ENABLED should be True in production. "
+                "Disabling rate limits exposes the API to abuse."
+            )
+
+        if errors:
+            raise ValueError(
+                "Production configuration validation failed:\n- " + "\n- ".join(errors)
+            )
+
         return self
 
 

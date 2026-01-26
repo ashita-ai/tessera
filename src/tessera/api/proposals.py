@@ -17,6 +17,7 @@ from tessera.api.errors import (
     ForbiddenError,
     NotFoundError,
 )
+from tessera.api.pagination import PaginationParams, pagination_params
 from tessera.api.rate_limit import limit_read, limit_write
 from tessera.db import (
     AcknowledgmentDB,
@@ -161,8 +162,7 @@ async def list_proposals(
         description="Filter to only pending proposals that need acknowledgment from this team "
         "(not yet acknowledged by them)",
     ),
-    limit: int = Query(50, ge=1, le=100, description="Results per page"),
-    offset: int = Query(0, ge=0, description="Pagination offset"),
+    params: PaginationParams = Depends(pagination_params),
     _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
@@ -185,7 +185,7 @@ async def list_proposals(
 
         if not registered_contract_ids:
             # No registrations, return empty result
-            return {"results": [], "total": 0, "limit": limit, "offset": offset}
+            return {"results": [], "total": 0, "limit": params.limit, "offset": params.offset}
 
         # Find assets that have these contracts as their active contract
         asset_ids_result = await session.execute(
@@ -196,7 +196,7 @@ async def list_proposals(
         relevant_asset_ids = [a[0] for a in asset_ids_result.all()]
 
         if not relevant_asset_ids:
-            return {"results": [], "total": 0, "limit": limit, "offset": offset}
+            return {"results": [], "total": 0, "limit": params.limit, "offset": params.offset}
 
         # Get proposals for these assets
         proposal_query = select(ProposalDB.id).where(ProposalDB.asset_id.in_(relevant_asset_ids))
@@ -207,7 +207,7 @@ async def list_proposals(
             candidate_proposal_ids = [p[0] for p in proposals_result.all()]
 
             if not candidate_proposal_ids:
-                return {"results": [], "total": 0, "limit": limit, "offset": offset}
+                return {"results": [], "total": 0, "limit": params.limit, "offset": params.offset}
 
             # Exclude proposals already acknowledged by this team
             ack_result = await session.execute(
@@ -222,7 +222,7 @@ async def list_proposals(
             filtered_proposal_ids = {p[0] for p in proposals_result.all()}
 
         if not filtered_proposal_ids:
-            return {"results": [], "total": 0, "limit": limit, "offset": offset}
+            return {"results": [], "total": 0, "limit": params.limit, "offset": params.offset}
 
     # Build base query with filters
     base_query = select(ProposalDB)
@@ -254,13 +254,13 @@ async def list_proposals(
         query = query.where(ProposalDB.change_type == change_type)
     if proposed_by:
         query = query.where(ProposalDB.proposed_by == proposed_by)
-    query = query.order_by(ProposalDB.proposed_at.desc()).limit(limit).offset(offset)
+    query = query.order_by(ProposalDB.proposed_at.desc()).limit(params.limit).offset(params.offset)
 
     result = await session.execute(query)
     rows = result.all()
 
     if not rows:
-        return {"results": [], "total": total, "limit": limit, "offset": offset}
+        return {"results": [], "total": total, "limit": params.limit, "offset": params.offset}
 
     # Collect proposal IDs and asset IDs for batch queries
     proposal_ids = [p.id for p, _ in rows]
@@ -325,8 +325,8 @@ async def list_proposals(
     return {
         "results": proposal_list,
         "total": total,
-        "limit": limit,
-        "offset": offset,
+        "limit": params.limit,
+        "offset": params.offset,
     }
 
 

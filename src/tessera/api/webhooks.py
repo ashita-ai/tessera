@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.api.auth import Auth, RequireAdmin, RequireRead
+from tessera.api.pagination import PaginationParams, pagination_params
 from tessera.api.rate_limit import limit_admin
 from tessera.db.database import get_session
 from tessera.db.models import WebhookDeliveryDB
@@ -39,6 +40,8 @@ class WebhookDeliveriesListResponse(BaseModel):
 
     results: list[WebhookDeliveryResponse]
     total: int
+    limit: int
+    offset: int
 
 
 @router.get("/deliveries", response_model=WebhookDeliveriesListResponse)
@@ -48,8 +51,7 @@ async def list_deliveries(
     auth: Auth,
     status: WebhookDeliveryStatus | None = Query(None, description="Filter by status"),
     event_type: str | None = Query(None, description="Filter by event type"),
-    limit: int = Query(50, ge=1, le=100),
-    offset: int = Query(0, ge=0),
+    params: PaginationParams = Depends(pagination_params),
     _: None = RequireAdmin,
     __: None = RequireRead,
     session: AsyncSession = Depends(get_session),
@@ -76,7 +78,7 @@ async def list_deliveries(
 
     # Get paginated results
     query = query.order_by(WebhookDeliveryDB.created_at.desc())
-    query = query.limit(limit).offset(offset)
+    query = query.limit(params.limit).offset(params.offset)
     result = await session.execute(query)
     deliveries = result.scalars().all()
 
@@ -98,6 +100,8 @@ async def list_deliveries(
             for d in deliveries
         ],
         total=total,
+        limit=params.limit,
+        offset=params.offset,
     )
 
 

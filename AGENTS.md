@@ -130,7 +130,7 @@ git push -u origin feature/my-feature
 | File | Purpose |
 |------|---------|
 | `api/assets.py` | Contract publishing logic |
-| `api/sync.py` | dbt/OpenAPI/GraphQL sync |
+| `api/sync/` | dbt, OpenAPI, GraphQL sync endpoints |
 | `services/schema_diff.py` | Compatibility checking |
 | `db/models.py` | SQLAlchemy models |
 

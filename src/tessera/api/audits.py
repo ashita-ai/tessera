@@ -6,7 +6,6 @@ back to Tessera for tracking, visibility, and enforcement.
 
 import json
 from datetime import UTC, datetime, timedelta
-from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
@@ -49,11 +48,15 @@ class GuaranteeResult(BaseModel):
     error_message: str | None = Field(None, max_length=2000, description="Error message if failed")
     rows_checked: int | None = Field(None, ge=0, description="Number of rows checked")
     rows_failed: int | None = Field(None, ge=0, description="Number of rows that failed")
-    metadata: dict[str, Any] = Field(default_factory=dict, description="Additional context")
+    metadata: dict[str, str | int | float | bool | None] = Field(
+        default_factory=dict, description="Additional context"
+    )
 
     @field_validator("metadata")
     @classmethod
-    def validate_metadata_size(cls, v: dict[str, Any]) -> dict[str, Any]:
+    def validate_metadata_size(
+        cls, v: dict[str, str | int | float | bool | None]
+    ) -> dict[str, str | int | float | bool | None]:
         """Limit metadata size to prevent abuse."""
         serialized = json.dumps(v)
         if len(serialized) > MAX_METADATA_SIZE:
@@ -85,7 +88,7 @@ class AuditResultCreate(BaseModel):
         default_factory=list,
         description="Per-guarantee/test results for granular tracking",
     )
-    details: dict[str, Any] = Field(
+    details: dict[str, object] = Field(
         default_factory=dict,
         description="Additional details: failed tests, error messages, etc.",
     )
@@ -106,9 +109,9 @@ class AuditResultCreate(BaseModel):
 
     @field_validator("details")
     @classmethod
-    def validate_details_size(cls, v: dict[str, Any]) -> dict[str, Any]:
+    def validate_details_size(cls, v: dict[str, object]) -> dict[str, object]:
         """Limit details size to prevent abuse."""
-        serialized = json.dumps(v)
+        serialized = json.dumps(v, default=str)
         if len(serialized) > MAX_DETAILS_SIZE:
             raise ValueError(
                 f"details exceeds maximum size of {MAX_DETAILS_SIZE} bytes "
@@ -159,6 +162,23 @@ class AuditHistoryResponse(BaseModel):
     runs: list[AuditRunListItem]
 
 
+class GuaranteeFailureCount(BaseModel):
+    """Count of failures for a specific guarantee."""
+
+    guarantee_id: str
+    failure_count: int
+
+
+class LastRunSummary(BaseModel):
+    """Summary of the most recent audit run."""
+
+    id: str
+    status: str
+    run_at: str
+    triggered_by: str
+    guarantees_failed: int
+
+
 class AuditTrendPeriod(BaseModel):
     """Audit statistics for a time period."""
 
@@ -167,7 +187,7 @@ class AuditTrendPeriod(BaseModel):
     failed: int
     partial: int
     failure_rate: float  # 0.0 - 1.0
-    most_failed_guarantees: list[dict[str, Any]]  # [{guarantee_id, failure_count}]
+    most_failed_guarantees: list[GuaranteeFailureCount]
 
 
 class AuditTrendsResponse(BaseModel):
@@ -175,7 +195,7 @@ class AuditTrendsResponse(BaseModel):
 
     asset_id: UUID
     asset_fqn: str
-    last_run: dict[str, Any] | None  # Most recent run summary
+    last_run: LastRunSummary | None  # Most recent run summary
     last_24h: AuditTrendPeriod
     last_7d: AuditTrendPeriod
     last_30d: AuditTrendPeriod
@@ -384,7 +404,9 @@ def _compute_trend_period(runs: list[AuditRunDB]) -> AuditTrendPeriod:
 
     # Sort by failure count, take top 10
     sorted_failures = sorted(guarantee_failures.items(), key=lambda x: x[1], reverse=True)[:10]
-    most_failed = [{"guarantee_id": k, "failure_count": v} for k, v in sorted_failures]
+    most_failed = [
+        GuaranteeFailureCount(guarantee_id=k, failure_count=v) for k, v in sorted_failures
+    ]
 
     return AuditTrendPeriod(
         total_runs=total,
@@ -452,16 +474,16 @@ async def get_audit_trends(
     trend_30d = _compute_trend_period(runs_30d)
 
     # Get last run summary
-    last_run: dict[str, Any] | None = None
+    last_run: LastRunSummary | None = None
     if all_runs:
         latest = all_runs[0]
-        last_run = {
-            "id": str(latest.id),
-            "status": latest.status.value,
-            "run_at": latest.run_at.isoformat(),
-            "triggered_by": latest.triggered_by,
-            "guarantees_failed": latest.guarantees_failed,
-        }
+        last_run = LastRunSummary(
+            id=str(latest.id),
+            status=latest.status.value,
+            run_at=latest.run_at.isoformat(),
+            triggered_by=latest.triggered_by,
+            guarantees_failed=latest.guarantees_failed,
+        )
 
     # Generate alerts based on failure patterns
     alerts: list[str] = []
@@ -484,10 +506,10 @@ async def get_audit_trends(
     # Alert: Specific guarantee consistently failing
     if trend_7d.most_failed_guarantees:
         top_failure = trend_7d.most_failed_guarantees[0]
-        if top_failure["failure_count"] >= 5:
+        if top_failure.failure_count >= 5:
             alerts.append(
-                f"Guarantee '{top_failure['guarantee_id']}' failed "
-                f"{top_failure['failure_count']} times in last 7 days"
+                f"Guarantee '{top_failure.guarantee_id}' failed "
+                f"{top_failure.failure_count} times in last 7 days"
             )
 
     # Alert: Last run failed

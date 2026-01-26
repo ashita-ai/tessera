@@ -4,7 +4,7 @@ from collections import defaultdict
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -50,12 +50,9 @@ async def create_dependency(
         raise NotFoundError(ErrorCode.ASSET_NOT_FOUND, "Asset not found")
 
     if asset.owner_team_id != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": "INSUFFICIENT_PERMISSIONS",
-                "message": "You can only add dependencies to assets belonging to your team",
-            },
+        raise ForbiddenError(
+            "You can only add dependencies to assets belonging to your team",
+            code=ErrorCode.UNAUTHORIZED_TEAM,
         )
 
     result = await session.execute(
@@ -90,19 +87,23 @@ async def create_dependency(
 @limit_read
 async def list_dependencies(
     request: Request,
+    response: Response,
     auth: Auth,
     asset_id: UUID,
     params: PaginationParams = Depends(pagination_params),
     _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    """List all upstream dependencies for an asset."""
+    """List all upstream dependencies for an asset.
+
+    Returns X-Total-Count header with total count.
+    """
     asset_result = await session.execute(select(AssetDB).where(AssetDB.id == asset_id))
     if not asset_result.scalar_one_or_none():
         raise NotFoundError(ErrorCode.ASSET_NOT_FOUND, "Asset not found")
 
     query = select(AssetDependencyDB).where(AssetDependencyDB.dependent_asset_id == asset_id)
-    return await paginate(session, query, params, response_model=Dependency)
+    return await paginate(session, query, params, response_model=Dependency, response=response)
 
 
 @router.delete("/{asset_id}/dependencies/{dependency_id}", status_code=204)

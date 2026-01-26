@@ -14,6 +14,11 @@ from tessera.api.pagination import PaginationParams, pagination_params
 from tessera.api.rate_limit import limit_read, limit_write
 from tessera.db import AssetDB, ContractDB, RegistrationDB, TeamDB, get_session
 from tessera.models import Contract, Guarantees, Registration
+from tessera.models.bulk import (
+    BulkContractRequest,
+    BulkContractResponse,
+    BulkContractResultItem,
+)
 from tessera.models.enums import APIKeyScope, CompatibilityMode, ContractStatus
 from tessera.services import log_guarantees_updated
 from tessera.services.cache import (
@@ -21,6 +26,12 @@ from tessera.services.cache import (
     cache_schema_diff,
     get_cached_contract,
     get_cached_schema_diff,
+)
+from tessera.services.contract_publisher import (
+    ContractToPublish,
+)
+from tessera.services.contract_publisher import (
+    bulk_publish_contracts as bulk_publish_service,
 )
 from tessera.services.schema_diff import diff_schemas
 
@@ -381,3 +392,101 @@ async def list_contract_registrations(
         "limit": params.limit,
         "offset": params.offset,
     }
+
+
+@router.post("/bulk", response_model=BulkContractResponse)
+@limit_write
+async def bulk_publish_contracts(
+    request: Request,
+    bulk_req: BulkContractRequest,
+    auth: Auth,
+    dry_run: bool = Query(True, description="Preview mode - no changes made"),
+    create_proposals_for_breaking: bool = Query(
+        False, description="Auto-create proposals for breaking changes (only when dry_run=false)"
+    ),
+    _: None = RequireWrite,
+    session: AsyncSession = Depends(get_session),
+) -> BulkContractResponse:
+    """Bulk publish contracts for multiple assets.
+
+    This endpoint supports a two-phase workflow:
+
+    **Phase 1: Preview (dry_run=true, default)**
+    Returns what would happen without making changes. Use this to show users
+    the impact before they confirm.
+
+    **Phase 2: Execute (dry_run=false)**
+    Actually publishes contracts. Set create_proposals_for_breaking=true to
+    auto-create proposals for breaking changes instead of skipping them.
+
+    Requires write scope.
+    """
+    # Verify publisher team exists
+    team_result = await session.execute(select(TeamDB).where(TeamDB.id == bulk_req.published_by))
+    publisher_team = team_result.scalar_one_or_none()
+    if not publisher_team:
+        raise NotFoundError(ErrorCode.TEAM_NOT_FOUND, "Publisher team not found")
+
+    # Resource-level auth: published_by must match auth.team_id or be admin
+    if bulk_req.published_by != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):
+        raise ForbiddenError(
+            f"Cannot publish contracts on behalf of team '{publisher_team.name}'. "
+            "Use an admin API key to publish on behalf of other teams.",
+            code=ErrorCode.UNAUTHORIZED_TEAM,
+        )
+
+    # Convert request items to service format
+    contracts_to_publish = []
+    for item in bulk_req.contracts:
+        compat_mode = None
+        if item.compatibility_mode:
+            try:
+                compat_mode = CompatibilityMode(item.compatibility_mode.lower())
+            except ValueError:
+                pass  # Will default to BACKWARD in service
+
+        contracts_to_publish.append(
+            ContractToPublish(
+                asset_id=item.asset_id,
+                schema_def=item.schema_def,
+                compatibility_mode=compat_mode,
+                guarantees=item.guarantees,
+            )
+        )
+
+    # Delegate to service
+    result = await bulk_publish_service(
+        session=session,
+        contracts=contracts_to_publish,
+        published_by=bulk_req.published_by,
+        published_by_user_id=bulk_req.published_by_user_id,
+        dry_run=dry_run,
+        create_proposals_for_breaking=create_proposals_for_breaking,
+    )
+
+    # Convert service result to API response
+    api_results = [
+        BulkContractResultItem(
+            asset_id=r.asset_id,
+            asset_fqn=r.asset_fqn,
+            status=r.status,
+            contract_id=r.contract_id,
+            proposal_id=r.proposal_id,
+            suggested_version=r.suggested_version,
+            current_version=r.current_version,
+            reason=r.reason,
+            breaking_changes=r.breaking_changes,
+            error=r.error,
+        )
+        for r in result.results
+    ]
+
+    return BulkContractResponse(
+        preview=result.preview,
+        total=result.total,
+        published=result.published,
+        skipped=result.skipped,
+        proposals_created=result.proposals_created,
+        failed=result.failed,
+        results=api_results,
+    )

@@ -1,23 +1,41 @@
 """Users API endpoints."""
 
 from datetime import UTC, datetime
-from typing import Any
 from uuid import UUID
 
 from argon2 import PasswordHasher
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from typing_extensions import TypedDict
 
 from tessera.api.auth import Auth, RequireAdmin, RequireRead
-from tessera.api.errors import DuplicateError, ErrorCode
+from tessera.api.errors import DuplicateError, ErrorCode, NotFoundError
 from tessera.api.pagination import PaginationParams, pagination_params
 from tessera.api.rate_limit import limit_read, limit_write
-from tessera.db import AssetDB, TeamDB, UserDB, get_session
+from tessera.api.types import PaginatedResponse
+from tessera.db import TeamDB, UserDB, get_session
 from tessera.models import User, UserCreate, UserUpdate, UserWithTeam
 from tessera.services import audit
 from tessera.services.audit import AuditAction
+from tessera.services.batch import fetch_asset_counts_by_user, fetch_team_names
+
+
+class UserWithTeamAndAssets(TypedDict, total=False):
+    """User with team name and asset count for list responses."""
+
+    id: UUID
+    email: str
+    name: str
+    team_id: UUID | None
+    role: str
+    created_at: datetime
+    metadata: dict[str, object]
+    notification_preferences: dict[str, object]
+    team_name: str | None
+    asset_count: int
+
 
 _hasher = PasswordHasher()
 
@@ -43,7 +61,7 @@ async def create_user(
             select(TeamDB).where(TeamDB.id == user.team_id).where(TeamDB.deleted_at.is_(None))
         )
         if not team_result.scalar_one_or_none():
-            raise HTTPException(status_code=404, detail="Team not found")
+            raise NotFoundError(ErrorCode.TEAM_NOT_FOUND, "Team not found")
 
     normalized_email = user.email.lower().strip()
 
@@ -99,7 +117,7 @@ async def list_users(
     params: PaginationParams = Depends(pagination_params),
     _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
-) -> dict[str, Any]:
+) -> PaginatedResponse[UserWithTeamAndAssets]:
     """List all users with filtering and pagination.
 
     Requires read scope. Returns users with asset counts.
@@ -126,29 +144,16 @@ async def list_users(
     users = list(result.scalars().all())
 
     # Batch fetch team names
-    team_ids = [u.team_id for u in users if u.team_id]
-    team_names: dict[UUID, str] = {}
-    if team_ids:
-        teams_result = await session.execute(
-            select(TeamDB.id, TeamDB.name).where(TeamDB.id.in_(team_ids))
-        )
-        team_names = {team_id: name for team_id, name in teams_result.all()}
+    user_team_ids = [u.team_id for u in users if u.team_id]
+    team_names = await fetch_team_names(session, user_team_ids)
 
     # Batch fetch asset counts for all users
     user_ids = [u.id for u in users]
-    asset_counts: dict[UUID, int] = {}
-    if user_ids:
-        counts_result = await session.execute(
-            select(AssetDB.owner_user_id, func.count(AssetDB.id))
-            .where(AssetDB.owner_user_id.in_(user_ids))
-            .where(AssetDB.deleted_at.is_(None))
-            .group_by(AssetDB.owner_user_id)
-        )
-        asset_counts = {user_id: count for user_id, count in counts_result.all()}
+    asset_counts = await fetch_asset_counts_by_user(session, user_ids)
 
-    results = []
+    results: list[UserWithTeamAndAssets] = []
     for user in users:
-        user_dict = User.model_validate(user).model_dump()
+        user_dict: UserWithTeamAndAssets = User.model_validate(user).model_dump()  # type: ignore[assignment]
         user_dict["team_name"] = team_names.get(user.team_id) if user.team_id else None
         user_dict["asset_count"] = asset_counts.get(user.id, 0)
         results.append(user_dict)
@@ -169,7 +174,7 @@ async def get_user(
     auth: Auth,
     _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """Get a user by ID.
 
     Requires read scope.
@@ -179,9 +184,9 @@ async def get_user(
     )
     user = result.scalar_one_or_none()
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise NotFoundError(ErrorCode.USER_NOT_FOUND, "User not found")
 
-    user_dict = User.model_validate(user).model_dump()
+    user_dict: dict[str, object] = User.model_validate(user).model_dump()
 
     # Get team name if user has a team
     if user.team_id:
@@ -212,7 +217,7 @@ async def update_user(
     )
     user = result.scalar_one_or_none()
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise NotFoundError(ErrorCode.USER_NOT_FOUND, "User not found")
 
     # Verify team exists if being changed
     if update.team_id is not None:
@@ -220,7 +225,7 @@ async def update_user(
             select(TeamDB).where(TeamDB.id == update.team_id).where(TeamDB.deleted_at.is_(None))
         )
         if not team_result.scalar_one_or_none():
-            raise HTTPException(status_code=404, detail="Team not found")
+            raise NotFoundError(ErrorCode.TEAM_NOT_FOUND, "Team not found")
 
     normalized_update_email = None
     if update.email is not None:
@@ -284,7 +289,7 @@ async def deactivate_user(
     )
     user = result.scalar_one_or_none()
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise NotFoundError(ErrorCode.USER_NOT_FOUND, "User not found")
 
     user.deactivated_at = datetime.now(UTC)
     await session.flush()
@@ -315,7 +320,7 @@ async def reactivate_user(
     result = await session.execute(select(UserDB).where(UserDB.id == user_id))
     user = result.scalar_one_or_none()
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise NotFoundError(ErrorCode.USER_NOT_FOUND, "User not found")
 
     if user.deactivated_at is None:
         return user

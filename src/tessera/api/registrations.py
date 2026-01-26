@@ -3,7 +3,7 @@
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -77,6 +77,7 @@ async def create_registration(
 @limit_read
 async def list_registrations(
     request: Request,
+    response: Response,
     auth: Auth,
     consumer_team_id: UUID | None = Query(None, description="Filter by consumer team ID"),
     contract_id: UUID | None = Query(None, description="Filter by contract ID"),
@@ -87,7 +88,7 @@ async def list_registrations(
 ) -> dict[str, Any]:
     """List all registrations with filtering and pagination.
 
-    Requires read scope.
+    Requires read scope. Returns X-Total-Count header with total count.
     """
     query = select(RegistrationDB)
     if consumer_team_id:
@@ -98,7 +99,7 @@ async def list_registrations(
         query = query.where(RegistrationDB.status == status)
     query = query.order_by(RegistrationDB.registered_at.desc())
 
-    return await paginate(session, query, params, response_model=Registration)
+    return await paginate(session, query, params, response_model=Registration, response=response)
 
 
 @router.get("/{registration_id}", response_model=Registration)

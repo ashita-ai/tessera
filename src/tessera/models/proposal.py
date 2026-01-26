@@ -1,10 +1,9 @@
 """Proposal models."""
 
 from datetime import datetime
-from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from tessera.models.enums import ChangeType, ProposalStatus
 
@@ -14,7 +13,7 @@ class BreakingChange(BaseModel):
 
     type: str = Field(..., description="Type of change (e.g., 'dropped_column', 'type_change')")
     column: str | None = None
-    details: dict[str, Any] = Field(default_factory=dict)
+    details: dict[str, str | int | bool | None] = Field(default_factory=dict)
 
 
 class AffectedAsset(BaseModel):
@@ -61,11 +60,20 @@ class ObjectionCreate(BaseModel):
         description="Reason for objecting to this proposal",
     )
 
+    @field_validator("reason")
+    @classmethod
+    def validate_reason(cls, v: str) -> str:
+        """Strip whitespace and validate reason."""
+        v = v.strip()
+        if not v:
+            raise ValueError("Reason cannot be empty or whitespace only")
+        return v
+
 
 class ProposalBase(BaseModel):
     """Base proposal fields."""
 
-    proposed_schema: dict[str, Any] = Field(..., description="Proposed JSON Schema")
+    proposed_schema: dict[str, object] = Field(..., description="Proposed JSON Schema")
 
 
 class ProposalCreate(ProposalBase):
@@ -92,15 +100,15 @@ class Proposal(ProposalBase):
     auto_expire: bool = False
 
     # Affected parties discovered via lineage (not registered consumers)
-    affected_teams: list[dict[str, Any]] = Field(
+    affected_teams: list[AffectedTeam] = Field(
         default_factory=list,
         description="Teams owning downstream assets affected by this change",
     )
-    affected_assets: list[dict[str, Any]] = Field(
+    affected_assets: list[AffectedAsset] = Field(
         default_factory=list,
         description="Downstream assets that depend on this asset",
     )
-    objections: list[dict[str, Any]] = Field(
+    objections: list[Objection] = Field(
         default_factory=list,
         description="Objections filed by affected teams (non-blocking)",
     )
@@ -109,6 +117,6 @@ class Proposal(ProposalBase):
         description="True if any affected teams have objected",
     )
 
-    def model_post_init(self, __context: Any) -> None:
+    def model_post_init(self, __context: object) -> None:
         """Compute has_objections from objections list."""
         object.__setattr__(self, "has_objections", len(self.objections) > 0)

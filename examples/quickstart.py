@@ -9,6 +9,7 @@ Run with: uv run python examples/quickstart.py
 """
 
 import os
+
 import httpx
 
 BASE_URL = "http://localhost:8000/api/v1"
@@ -141,7 +142,7 @@ def example_1_register_as_consumer(asset: dict, consumer: dict):
     )
     registration = resp.json()
 
-    print(f"\n✓ Registered as consumer!")
+    print("\n✓ Registered as consumer!")
     print(f"  Registration ID: {registration['id']}")
     print(f"  Status: {registration['status']}")
 
@@ -175,12 +176,12 @@ def example_2_check_impact(asset: dict):
     print(f"Safe to publish: {impact['safe_to_publish']}")
 
     if impact["breaking_changes"]:
-        print(f"\n⚠ Breaking changes detected:")
+        print("\n⚠ Breaking changes detected:")
         for bc in impact["breaking_changes"]:
             print(f"  - {bc['message']}")
 
     if impact["impacted_consumers"]:
-        print(f"\n👥 Impacted consumers:")
+        print("\n👥 Impacted consumers:")
         for consumer in impact["impacted_consumers"]:
             print(f"  - {consumer['team_name']} (status: {consumer['status']})")
 
@@ -221,13 +222,13 @@ def example_3_breaking_change_creates_proposal(asset: dict, producer: dict):
 
     if result["action"] == "proposal_created":
         print(f"Change type: {result['change_type']}")
-        print(f"\n⚠ Breaking changes:")
+        print("\n⚠ Breaking changes:")
         for bc in result["breaking_changes"]:
             print(f"  - {bc['message']}")
-        print(f"\n📋 Proposal created:")
+        print("\n📋 Proposal created:")
         print(f"  ID: {result['proposal']['id']}")
         print(f"  Status: {result['proposal']['status']}")
-        print(f"\n✓ Consumers must acknowledge before this goes live!")
+        print("\n✓ Consumers must acknowledge before this goes live!")
         return result["proposal"]
 
     return None
@@ -247,14 +248,14 @@ def example_4_acknowledge_proposal(proposal: dict, consumer: dict):
         f"{BASE_URL}/proposals/{proposal['id']}/acknowledge",
         json={
             "consumer_team_id": consumer["id"],
-            "response": "acknowledged",
+            "response": "approved",
             "notes": "We've updated our ML pipeline. Ready for the change.",
         },
     ).json()
 
-    print(f"\n✓ Proposal acknowledged!")
+    print("\n✓ Proposal acknowledged!")
     print(f"  Status: {ack.get('status', 'acknowledged')}")
-    print(f"  The consumer confirmed they're ready for the change.")
+    print("  The consumer confirmed they're ready for the change.")
 
     return ack
 
@@ -309,9 +310,9 @@ def example_5_compatible_change_auto_publishes(asset: dict, producer: dict):
 
     if result["action"] == "published":
         print(f"Change type: {result.get('change_type', 'minor')}")
-        print(f"\n✓ Auto-published! No approval needed.")
+        print("\n✓ Auto-published! No approval needed.")
         print(f"  New version: {result['contract']['version']}")
-        print(f"  Added: loyalty_tier field")
+        print("  Added: loyalty_tier field")
 
     return result
 

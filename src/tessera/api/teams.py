@@ -1,28 +1,43 @@
 """Teams API endpoints."""
 
 from datetime import UTC, datetime
-from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from typing_extensions import TypedDict
 
 from tessera.api.auth import Auth, RequireAdmin, RequireRead
 from tessera.api.errors import (
+    BadRequestError,
+    ConflictError,
     DuplicateError,
     ErrorCode,
     NotFoundError,
 )
 from tessera.api.pagination import PaginationParams, pagination_params
 from tessera.api.rate_limit import limit_read, limit_write
+from tessera.api.types import PaginatedResponse, ReassignAssetsResponse, TeamSummary
 from tessera.db import AssetDB, TeamDB, UserDB, get_session
 from tessera.models import Team, TeamCreate, TeamUpdate, User
 from tessera.services import audit
 from tessera.services.audit import AuditAction
+from tessera.services.batch import fetch_asset_counts_by_team
 from tessera.services.cache import team_cache
+
+
+class TeamWithAssetCount(TypedDict, total=False):
+    """Team with asset count for list responses."""
+
+    id: UUID
+    name: str
+    metadata: dict[str, object]
+    created_at: datetime
+    asset_count: int
+
 
 router = APIRouter()
 
@@ -73,7 +88,7 @@ async def list_teams(
     params: PaginationParams = Depends(pagination_params),
     _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
-) -> dict[str, Any]:
+) -> PaginatedResponse[TeamWithAssetCount]:
     """List all teams with filtering and pagination.
 
     Requires read scope. Returns teams with asset counts.
@@ -95,19 +110,11 @@ async def list_teams(
 
     # Batch fetch asset counts for all teams
     team_ids = [t.id for t in teams]
-    asset_counts: dict[UUID, int] = {}
-    if team_ids:
-        counts_result = await session.execute(
-            select(AssetDB.owner_team_id, func.count(AssetDB.id))
-            .where(AssetDB.owner_team_id.in_(team_ids))
-            .where(AssetDB.deleted_at.is_(None))
-            .group_by(AssetDB.owner_team_id)
-        )
-        asset_counts = {team_id: count for team_id, count in counts_result.all()}
+    asset_counts = await fetch_asset_counts_by_team(session, team_ids)
 
-    results = []
+    results: list[TeamWithAssetCount] = []
     for team in teams:
-        team_dict = Team.model_validate(team).model_dump()
+        team_dict: TeamWithAssetCount = Team.model_validate(team).model_dump()  # type: ignore[assignment]
         team_dict["asset_count"] = asset_counts.get(team.id, 0)
         results.append(team_dict)
 
@@ -219,13 +226,10 @@ async def delete_team(
     asset_count = asset_count_result.scalar() or 0
 
     if asset_count > 0 and not force:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "TEAM_HAS_ASSETS",
-                "message": f"Team owns {asset_count} asset(s). Reassign or use force=true.",
-                "asset_count": asset_count,
-            },
+        raise ConflictError(
+            ErrorCode.TEAM_HAS_ASSETS,
+            f"Team owns {asset_count} asset(s). Reassign or use force=true.",
+            details={"asset_count": asset_count},
         )
 
     team.deleted_at = datetime.now(UTC)
@@ -284,7 +288,7 @@ async def list_team_members(
     params: PaginationParams = Depends(pagination_params),
     _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
-) -> dict[str, Any]:
+) -> PaginatedResponse[dict[str, object]]:
     """List all members of a team.
 
     Requires read scope.
@@ -295,7 +299,7 @@ async def list_team_members(
     )
     team = result.scalar_one_or_none()
     if not team:
-        raise HTTPException(status_code=404, detail="Team not found")
+        raise NotFoundError(ErrorCode.TEAM_NOT_FOUND, "Team not found")
 
     # Build query for team members
     base_query = (
@@ -312,7 +316,7 @@ async def list_team_members(
     result = await session.execute(query)
     users = list(result.scalars().all())
 
-    results = [User.model_validate(u).model_dump() for u in users]
+    results: list[dict[str, object]] = [User.model_validate(u).model_dump() for u in users]
 
     return {
         "results": results,
@@ -338,7 +342,7 @@ async def reassign_team_assets(
     auth: Auth,
     _: None = RequireAdmin,
     session: AsyncSession = Depends(get_session),
-) -> dict[str, Any]:
+) -> ReassignAssetsResponse:
     """Reassign assets from this team to another team.
 
     Requires admin scope. Can reassign all assets or specific ones by ID.
@@ -349,7 +353,7 @@ async def reassign_team_assets(
     )
     source_team = source_result.scalar_one_or_none()
     if not source_team:
-        raise HTTPException(status_code=404, detail="Source team not found")
+        raise NotFoundError(ErrorCode.TEAM_NOT_FOUND, "Source team not found")
 
     # Verify target team exists
     target_result = await session.execute(
@@ -359,10 +363,10 @@ async def reassign_team_assets(
     )
     target_team = target_result.scalar_one_or_none()
     if not target_team:
-        raise HTTPException(status_code=404, detail="Target team not found")
+        raise NotFoundError(ErrorCode.TEAM_NOT_FOUND, "Target team not found")
 
     if team_id == reassign.target_team_id:
-        raise HTTPException(status_code=400, detail="Source and target team cannot be the same")
+        raise BadRequestError("Source and target team cannot be the same", code=ErrorCode.SAME_TEAM)
 
     # Build query for assets to reassign
     query = (
@@ -376,11 +380,11 @@ async def reassign_team_assets(
     assets = list(assets_result.scalars().all())
 
     if not assets:
-        return {
-            "reassigned": 0,
-            "source_team": {"id": str(team_id), "name": source_team.name},
-            "target_team": {"id": str(reassign.target_team_id), "name": target_team.name},
-        }
+        return ReassignAssetsResponse(
+            reassigned=0,
+            source_team=TeamSummary(id=str(team_id), name=source_team.name),
+            target_team=TeamSummary(id=str(reassign.target_team_id), name=target_team.name),
+        )
 
     # Reassign assets
     for asset in assets:
@@ -388,9 +392,9 @@ async def reassign_team_assets(
 
     await session.flush()
 
-    return {
-        "reassigned": len(assets),
-        "source_team": {"id": str(team_id), "name": source_team.name},
-        "target_team": {"id": str(reassign.target_team_id), "name": target_team.name},
-        "asset_ids": [str(a.id) for a in assets],
-    }
+    return ReassignAssetsResponse(
+        reassigned=len(assets),
+        source_team=TeamSummary(id=str(team_id), name=source_team.name),
+        target_team=TeamSummary(id=str(reassign.target_team_id), name=target_team.name),
+        asset_ids=[str(a.id) for a in assets],
+    )

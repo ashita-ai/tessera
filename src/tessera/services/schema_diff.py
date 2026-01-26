@@ -4,6 +4,7 @@ Implements JSON Schema diffing with compatibility modes borrowed from
 Kafka Schema Registry (backward, forward, full, none).
 """
 
+import copy
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -117,6 +118,81 @@ class SchemaDiffResult:
         return len(self.breaking_for_mode(mode)) == 0
 
 
+def resolve_refs(schema: dict[str, Any], max_depth: int = 50) -> dict[str, Any]:
+    """Resolve all $ref pointers in a JSON Schema.
+
+    This function dereferences all $ref pointers within a schema to enable
+    accurate schema comparison. Without this, two semantically identical schemas
+    with different $ref usage patterns would appear different.
+
+    Only resolves internal references (within the same schema document).
+    External references (URLs, file paths) are left as-is.
+
+    Args:
+        schema: The JSON Schema to resolve.
+        max_depth: Maximum recursion depth to prevent infinite loops.
+
+    Returns:
+        A new schema with all internal $ref pointers resolved.
+    """
+    if not isinstance(schema, dict):
+        return schema
+
+    # Build a reference map from $defs / definitions
+    ref_map: dict[str, dict[str, Any]] = {}
+    for defs_key in ("$defs", "definitions"):
+        if defs_key in schema and isinstance(schema[defs_key], dict):
+            for name, definition in schema[defs_key].items():
+                ref_map[f"#/{defs_key}/{name}"] = definition
+
+    def _resolve(obj: Any, depth: int, seen_refs: set[str]) -> Any:
+        """Recursively resolve $ref pointers."""
+        if depth > max_depth:
+            return obj
+
+        if isinstance(obj, dict):
+            # Handle $ref
+            if "$ref" in obj:
+                ref = obj["$ref"]
+                # Only resolve internal refs (starting with #)
+                if ref.startswith("#"):
+                    # Prevent infinite recursion for circular refs
+                    if ref in seen_refs:
+                        return obj  # Keep the $ref as-is for circular references
+                    if ref in ref_map:
+                        new_seen = seen_refs | {ref}
+                        # Merge any additional properties with the resolved ref
+                        resolved = _resolve(ref_map[ref], depth + 1, new_seen)
+                        # If the $ref object has additional properties, merge them
+                        additional = {k: v for k, v in obj.items() if k != "$ref"}
+                        if additional:
+                            if isinstance(resolved, dict):
+                                merged = copy.deepcopy(resolved)
+                            else:
+                                merged = resolved
+                            if isinstance(merged, dict):
+                                merged.update(additional)
+                                return merged
+                        return resolved
+                # External refs or unresolved refs - keep as-is
+                return obj
+
+            # Recursively resolve all values
+            return {k: _resolve(v, depth + 1, seen_refs) for k, v in obj.items()}
+
+        if isinstance(obj, list):
+            return [_resolve(item, depth + 1, seen_refs) for item in obj]
+
+        return obj
+
+    result = _resolve(schema, 0, set())
+    # The result for a dict input should always be a dict
+    if isinstance(result, dict):
+        return result
+    # Fallback (should not happen for valid schema input)
+    return schema
+
+
 class SchemaDiff:
     """Compares two JSON schemas and identifies changes."""
 
@@ -136,6 +212,9 @@ class SchemaDiff:
         ("integer", "number"),  # int -> number is widening
     }
 
+    # Maximum recursion depth to prevent stack overflow from circular schemas
+    MAX_DEPTH = 50
+
     def __init__(self, old_schema: dict[str, Any], new_schema: dict[str, Any]):
         self.old = old_schema
         self.new = new_schema
@@ -144,7 +223,7 @@ class SchemaDiff:
     def diff(self) -> SchemaDiffResult:
         """Perform the diff and return results."""
         self.changes = []
-        self._diff_object(self.old, self.new, "")
+        self._diff_object(self.old, self.new, "", depth=0)
         return SchemaDiffResult(
             changes=self.changes,
             change_type=self._classify_changes(),
@@ -176,12 +255,27 @@ class SchemaDiff:
 
         return ChangeType.PATCH
 
-    def _diff_object(self, old: dict[str, Any], new: dict[str, Any], path: str) -> None:
-        """Diff two schema objects recursively."""
+    def _diff_object(
+        self, old: dict[str, Any], new: dict[str, Any], path: str, depth: int = 0
+    ) -> None:
+        """Diff two schema objects recursively.
+
+        Args:
+            old: The old schema object.
+            new: The new schema object.
+            path: The JSON path to the current location.
+            depth: Current recursion depth (for stack overflow protection).
+        """
+        # Protect against circular schemas that could cause stack overflow
+        if depth > self.MAX_DEPTH:
+            return
+
         # Compare properties
         old_props = old.get("properties", {})
         new_props = new.get("properties", {})
-        self._diff_properties(old_props, new_props, f"{path}.properties" if path else "properties")
+        self._diff_properties(
+            old_props, new_props, f"{path}.properties" if path else "properties", depth
+        )
 
         # Compare required fields
         old_required = set(old.get("required", []))
@@ -208,10 +302,12 @@ class SchemaDiff:
             old_items = old.get("items", {})
             new_items = new.get("items", {})
             if old_items or new_items:
-                self._diff_object(old_items, new_items, f"{path}.items" if path else "items")
+                self._diff_object(
+                    old_items, new_items, f"{path}.items" if path else "items", depth + 1
+                )
 
     def _diff_properties(
-        self, old_props: dict[str, Any], new_props: dict[str, Any], path: str
+        self, old_props: dict[str, Any], new_props: dict[str, Any], path: str, depth: int
     ) -> None:
         """Compare properties between schemas."""
         old_keys = set(old_props.keys())
@@ -243,7 +339,7 @@ class SchemaDiff:
 
         # Modified properties (recurse)
         for key in old_keys & new_keys:
-            self._diff_object(old_props[key], new_props[key], f"{path}.{key}")
+            self._diff_object(old_props[key], new_props[key], f"{path}.{key}", depth + 1)
 
     def _diff_required(self, old_req: set[str], new_req: set[str], path: str) -> None:
         """Compare required fields."""
@@ -510,8 +606,27 @@ class SchemaDiff:
             )
 
 
-def diff_schemas(old_schema: dict[str, Any], new_schema: dict[str, Any]) -> SchemaDiffResult:
-    """Convenience function to diff two schemas."""
+def diff_schemas(
+    old_schema: dict[str, Any],
+    new_schema: dict[str, Any],
+    resolve_references: bool = True,
+) -> SchemaDiffResult:
+    """Convenience function to diff two schemas.
+
+    Args:
+        old_schema: The original schema.
+        new_schema: The new schema to compare.
+        resolve_references: Whether to resolve $ref pointers before diffing.
+            Defaults to True. Set to False only if schemas are known to have
+            no $ref pointers or if you want to compare raw schemas.
+
+    Returns:
+        SchemaDiffResult containing detected changes.
+    """
+    if resolve_references:
+        old_schema = resolve_refs(old_schema)
+        new_schema = resolve_refs(new_schema)
+
     differ = SchemaDiff(old_schema, new_schema)
     return differ.diff()
 

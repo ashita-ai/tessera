@@ -15,6 +15,11 @@ from tessera.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Hash key length for cache key generation
+# Using first 16 characters of SHA256 hex digest provides sufficient uniqueness
+# while keeping keys compact (collision probability < 2^-64)
+HASH_KEY_LENGTH = 16
+
 # Global Redis connection pool
 _redis_pool: "redis.ConnectionPool[Any] | None" = None
 _redis_client: "redis.Redis[Any] | None" = None
@@ -112,11 +117,11 @@ def _hash_dict(data: dict[str, Any]) -> str:
             hashing to ensure determinism.
 
     Returns:
-        str: The first 16 characters of the SHA256 hex digest of the
+        str: The first HASH_KEY_LENGTH characters of the SHA256 hex digest of the
             serialized dictionary.
     """
     serialized = json.dumps(data, sort_keys=True, default=_type_aware_serializer)
-    return hashlib.sha256(serialized.encode()).hexdigest()[:16]
+    return hashlib.sha256(serialized.encode()).hexdigest()[:HASH_KEY_LENGTH]
 
 
 class CacheService:

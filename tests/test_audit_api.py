@@ -235,3 +235,99 @@ class TestAuditAPI:
         assert response.status_code == 200
         data = response.json()
         assert len(data["results"]) >= 1
+
+
+class TestAuditFiltering:
+    """Tests for complex filtering on audit API."""
+
+    async def test_filter_by_entity_type(self, session: AsyncSession, client: AsyncClient):
+        """Filter by entity type."""
+        e1 = AuditEventDB(
+            entity_type="target_type",
+            entity_id=uuid4(),
+            action="created",
+            payload={},
+        )
+        e2 = AuditEventDB(
+            entity_type="other_type",
+            entity_id=uuid4(),
+            action="created",
+            payload={},
+        )
+        session.add_all([e1, e2])
+        await session.flush()
+
+        # Match
+        resp = await client.get("/api/v1/audit/events?entity_type=target_type")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 1
+        assert resp.json()["results"][0]["entity_type"] == "target_type"
+
+    async def test_filter_by_action(self, session: AsyncSession, client: AsyncClient):
+        """Filter by action."""
+        e1 = AuditEventDB(
+            entity_type="asset",
+            entity_id=uuid4(),
+            action="target_action",
+            payload={},
+        )
+        e2 = AuditEventDB(
+            entity_type="asset",
+            entity_id=uuid4(),
+            action="other_action",
+            payload={},
+        )
+        session.add_all([e1, e2])
+        await session.flush()
+
+        # Match
+        resp = await client.get("/api/v1/audit/events?action=target_action")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 1
+        assert resp.json()["results"][0]["action"] == "target_action"
+
+    async def test_combined_filters(self, session: AsyncSession, client: AsyncClient):
+        """Filter by entity type AND action."""
+        e1 = AuditEventDB(
+            entity_type="type1",
+            entity_id=uuid4(),
+            action="action1",
+            payload={},
+        )
+        e2 = AuditEventDB(
+            entity_type="type1",
+            entity_id=uuid4(),
+            action="action2",
+            payload={},
+        )
+        e3 = AuditEventDB(
+            entity_type="type2",
+            entity_id=uuid4(),
+            action="action1",
+            payload={},
+        )
+        session.add_all([e1, e2, e3])
+        await session.flush()
+
+        resp = await client.get("/api/v1/audit/events?entity_type=type1&action=action1")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 1
+        result = resp.json()["results"][0]
+        assert result["entity_type"] == "type1"
+        assert result["action"] == "action1"
+
+    async def test_filter_returns_empty_for_no_matches(self, session: AsyncSession, client: AsyncClient):
+        """Filter returns empty list if no matches."""
+        e1 = AuditEventDB(
+            entity_type="asset",
+            entity_id=uuid4(),
+            action="created",
+            payload={},
+        )
+        session.add(e1)
+        await session.flush()
+
+        resp = await client.get("/api/v1/audit/events?entity_type=nonexistent")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 0
+        assert resp.json()["results"] == []

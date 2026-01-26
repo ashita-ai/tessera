@@ -529,3 +529,82 @@ class TestRequireScopeDependency:
 
         with pytest.raises(ForbiddenError):
             await check_write(ctx)
+
+
+class TestAuthRateLimiting:
+    """Tests for authentication rate limiting."""
+
+    async def test_auth_rate_limit_exceeded(self, auth_test_engine):
+        """Test that authentication attempts are rate limited."""
+        from collections.abc import AsyncGenerator
+
+        from tessera.config import settings
+        from tessera.db import database
+
+        # Store original values
+        original_auth_disabled = settings.auth_disabled
+        original_rate_limit_enabled = settings.rate_limit_enabled
+        original_rate_limit_auth = settings.rate_limit_auth
+
+        try:
+            # Enable auth and rate limiting with very low limit for testing
+            settings.auth_disabled = False
+            settings.rate_limit_enabled = True
+            settings.rate_limit_auth = "2/minute"
+
+            # Create schemas and tables
+            async with auth_test_engine.begin() as conn:
+                if not _USE_SQLITE:
+                    await conn.execute(text("CREATE SCHEMA IF NOT EXISTS core"))
+                    await conn.execute(text("CREATE SCHEMA IF NOT EXISTS workflow"))
+                    await conn.execute(text("CREATE SCHEMA IF NOT EXISTS audit"))
+                await conn.run_sync(create_tables)
+
+            async_session = async_sessionmaker(
+                auth_test_engine,
+                class_=AsyncSession,
+                expire_on_commit=False,
+            )
+
+            async def get_test_session() -> AsyncGenerator[AsyncSession, None]:
+                async with async_session() as session:
+                    try:
+                        yield session
+                        await session.commit()
+                    except Exception:
+                        await session.rollback()
+                        raise
+
+            app.dependency_overrides[database.get_session] = get_test_session
+
+            async with AsyncClient(
+                transport=ASGITransport(app=app),
+                base_url="http://test",
+            ) as client:
+                # Use the same invalid API key for all requests to hit the same rate limit bucket
+                invalid_key = "tess_live_invalid_key_12345"
+                headers = {"Authorization": f"Bearer {invalid_key}"}
+
+                # First request - should fail with 401 (invalid key)
+                response = await client.get("/api/v1/teams", headers=headers)
+                assert response.status_code == 401
+
+                # Second request - should still fail with 401 (invalid key)
+                response = await client.get("/api/v1/teams", headers=headers)
+                assert response.status_code == 401
+
+                # Third request - should fail with 429 (rate limited)
+                response = await client.get("/api/v1/teams", headers=headers)
+                assert response.status_code == 429
+
+            app.dependency_overrides.clear()
+
+            # Clean up
+            async with auth_test_engine.begin() as conn:
+                await conn.run_sync(drop_tables)
+
+        finally:
+            # Restore original values
+            settings.auth_disabled = original_auth_disabled
+            settings.rate_limit_enabled = original_rate_limit_enabled
+            settings.rate_limit_auth = original_rate_limit_auth

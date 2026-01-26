@@ -96,7 +96,7 @@ class TestCreateUser:
         assert "dupe@example.com" in error_text or "already exists" in error_text.lower()
         assert (
             resp_data["error"]["code"] == "DUPLICATE_USER"
-            ), f"Expected DUPLICATE_USER, got {resp_data['error'].get('code')}"
+        ), f"Expected DUPLICATE_USER, got {resp_data['error'].get('code')}"
 
     async def test_create_user_team_not_found(self, client: AsyncClient):
         """Cannot create user with non-existent team."""
@@ -266,6 +266,192 @@ class TestListUsers:
 
         resp = await client.get("/api/v1/users?limit=2&offset=2")
         assert len(resp.json()["results"]) == 2
+
+
+class TestUserFiltering:
+    """Tests for complex filtering on /api/v1/users."""
+
+    async def test_filter_by_team_id(self, client: AsyncClient):
+        """Users filtered by team_id only returns users from that team."""
+        # Setup teams
+        t1 = await client.post("/api/v1/teams", json={"name": "filter-t1"})
+        t1_id = t1.json()["id"]
+        t2 = await client.post("/api/v1/teams", json={"name": "filter-t2"})
+        t2_id = t2.json()["id"]
+
+        # Setup users
+        await client.post(
+            "/api/v1/users",
+            json={"email": "u1@t1.com", "name": "User One", "team_id": t1_id},
+        )
+        await client.post(
+            "/api/v1/users",
+            json={"email": "u2@t1.com", "name": "User Two", "team_id": t1_id},
+        )
+        await client.post(
+            "/api/v1/users",
+            json={"email": "others@t2.com", "name": "Other Team", "team_id": t2_id},
+        )
+
+        resp = await client.get(f"/api/v1/users?team_id={t1_id}")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 2
+        assert all(u["team_id"] == t1_id for u in data["results"])
+
+    async def test_filter_by_email_pattern(self, client: AsyncClient):
+        """Email filter is case-insensitive and partial match."""
+        await client.post(
+            "/api/v1/users",
+            json={"email": "FindMe@Example.com", "name": "Target"},
+        )
+        await client.post(
+            "/api/v1/users",
+            json={"email": "ignore@other.com", "name": "Ignore"},
+        )
+
+        # Partial match, different case
+        resp = await client.get("/api/v1/users?email=findme")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 1
+        assert resp.json()["results"][0]["email"] == "findme@example.com"
+
+    async def test_filter_by_name_pattern(self, client: AsyncClient):
+        """Name filter is case-insensitive and partial match."""
+        await client.post(
+            "/api/v1/users",
+            json={"email": "n1@test.com", "name": "Special Target User"},
+        )
+        await client.post(
+            "/api/v1/users",
+            json={"email": "n2@test.com", "name": "Regular Person"},
+        )
+
+        # Partial match "target"
+        resp = await client.get("/api/v1/users?name=target")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 1
+        assert resp.json()["results"][0]["name"] == "Special Target User"
+
+    async def test_combined_filters(self, client: AsyncClient):
+        """Multiple filters work together (AND logic)."""
+        t1 = await client.post("/api/v1/teams", json={"name": "combo-team"})
+        t1_id = t1.json()["id"]
+
+        # Match team AND name
+        await client.post(
+            "/api/v1/users",
+            json={"email": "combo1@test.com", "name": "Match Name", "team_id": t1_id},
+        )
+        # Match team but NOT name
+        await client.post(
+            "/api/v1/users",
+            json={"email": "combo2@test.com", "name": "Wrong Name", "team_id": t1_id},
+        )
+        # Match name but NOT team
+        await client.post(
+            "/api/v1/users",
+            json={"email": "combo3@test.com", "name": "Match Name"},
+        )
+
+        resp = await client.get(f"/api/v1/users?team_id={t1_id}&name=match")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 1
+        assert resp.json()["results"][0]["email"] == "combo1@test.com"
+
+    async def test_filter_returns_empty_for_no_matches(self, client: AsyncClient):
+        """Filters that match nothing return empty results, not error."""
+        await client.post(
+            "/api/v1/users",
+            json={"email": "exist@test.com", "name": "Existing User"},
+        )
+
+        resp = await client.get("/api/v1/users?name=nonexistentxyz")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 0
+        assert resp.json()["results"] == []
+
+    async def test_filter_email_case_insensitive_partial(self, client: AsyncClient):
+        """Email filter should be case-insensitive and match partial strings."""
+        await client.post(
+            "/api/v1/users",
+            json={"email": "TestUser@EXAMPLE.com", "name": "Test User"},
+        )
+        await client.post(
+            "/api/v1/users",
+            json={"email": "another@domain.org", "name": "Another User"},
+        )
+
+        # Test partial match with different case
+        resp = await client.get("/api/v1/users?email=TESTUSER")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 1
+        assert "testuser@example.com" in resp.json()["results"][0]["email"].lower()
+
+        # Test domain partial match
+        resp = await client.get("/api/v1/users?email=example")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 1
+
+    async def test_filter_name_case_insensitive_partial(self, client: AsyncClient):
+        """Name filter should be case-insensitive and match partial strings."""
+        await client.post(
+            "/api/v1/users",
+            json={"email": "n1@test.com", "name": "John Smith Engineer"},
+        )
+        await client.post(
+            "/api/v1/users",
+            json={"email": "n2@test.com", "name": "Jane Doe Manager"},
+        )
+
+        # Test partial match with different case
+        resp = await client.get("/api/v1/users?name=SMITH")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 1
+        assert "smith" in resp.json()["results"][0]["name"].lower()
+
+    async def test_combined_filters_team_and_email(self, client: AsyncClient):
+        """Test combining team_id and email filters."""
+        t1 = await client.post("/api/v1/teams", json={"name": "team-alpha"})
+        t1_id = t1.json()["id"]
+
+        await client.post(
+            "/api/v1/users",
+            json={"email": "alice@alpha.com", "name": "Alice", "team_id": t1_id},
+        )
+        await client.post(
+            "/api/v1/users",
+            json={"email": "bob@beta.com", "name": "Bob", "team_id": t1_id},
+        )
+        await client.post(
+            "/api/v1/users",
+            json={"email": "charlie@alpha.com", "name": "Charlie"},
+        )
+
+        # Should only match alice (team_id AND email pattern)
+        resp = await client.get(f"/api/v1/users?team_id={t1_id}&email=alpha")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 1
+        assert resp.json()["results"][0]["email"] == "alice@alpha.com"
+
+    async def test_filter_no_matches_returns_empty_not_error(self, client: AsyncClient):
+        """Filtering with no results returns empty list, not 404 or error."""
+        await client.post(
+            "/api/v1/users",
+            json={"email": "real@example.com", "name": "Real User"},
+        )
+
+        # No match on email
+        resp = await client.get("/api/v1/users?email=nonexistent")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 0
+        assert resp.json()["results"] == []
+
+        # No match on name
+        resp = await client.get("/api/v1/users?name=nonexistent")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 0
+        assert resp.json()["results"] == []
 
 
 class TestGetUser:

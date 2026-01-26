@@ -157,38 +157,6 @@ class TestMetricsService:
         normalized = _normalize_path(path)
         assert normalized == "/api/v1/teams/{id}/assets/{id}"
 
-    def test_record_contract_published(self):
-        """Test recording contract publication."""
-        from tessera.services.metrics import contracts_published_total, record_contract_published
-
-        # Get initial value
-        initial = contracts_published_total.labels(change_type="minor")._value.get()
-
-        record_contract_published("minor")
-
-        # Value should have incremented
-        new_value = contracts_published_total.labels(change_type="minor")._value.get()
-        assert new_value == initial + 1
-
-    def test_record_proposal_created(self):
-        """Test recording proposal creation."""
-        from tessera.services.metrics import proposals_created_total, record_proposal_created
-
-        initial = proposals_created_total._value.get()
-        record_proposal_created()
-        assert proposals_created_total._value.get() == initial + 1
-
-    def test_record_proposal_acknowledged(self):
-        """Test recording proposal acknowledgment."""
-        from tessera.services.metrics import (
-            proposals_acknowledged_total,
-            record_proposal_acknowledged,
-        )
-
-        initial = proposals_acknowledged_total.labels(response="accepted")._value.get()
-        record_proposal_acknowledged("accepted")
-        assert proposals_acknowledged_total.labels(response="accepted")._value.get() == initial + 1
-
     def test_get_metrics_returns_bytes(self):
         """Test that get_metrics returns bytes."""
         from tessera.services.metrics import get_metrics

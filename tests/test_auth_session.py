@@ -309,6 +309,7 @@ class TestGetAuthContext:
 
         with patch("tessera.api.auth.settings") as mock_settings:
             mock_settings.auth_disabled = False
+            mock_settings.rate_limit_enabled = False
 
             with pytest.raises(UnauthorizedError) as exc_info:
                 await get_auth_context(request, None, session)
@@ -323,6 +324,7 @@ class TestGetAuthContext:
 
         with patch("tessera.api.auth.settings") as mock_settings:
             mock_settings.auth_disabled = False
+            mock_settings.rate_limit_enabled = False
 
             with pytest.raises(UnauthorizedError) as exc_info:
                 await get_auth_context(request, "Basic abc123", session)
@@ -340,6 +342,7 @@ class TestGetAuthContext:
 
         with patch("tessera.api.auth.settings") as mock_settings:
             mock_settings.auth_disabled = False
+            mock_settings.rate_limit_enabled = False
             mock_settings.bootstrap_api_key = "bootstrap-key-123"
 
             # Should succeed with a mock team for bootstrap operations
@@ -361,6 +364,7 @@ class TestGetAuthContext:
 
         with patch("tessera.api.auth.settings") as mock_settings:
             mock_settings.auth_disabled = False
+            mock_settings.rate_limit_enabled = False
             mock_settings.bootstrap_api_key = "bootstrap-key-123"
 
             result = await get_auth_context(request, "Bearer bootstrap-key-123", session)
@@ -380,6 +384,7 @@ class TestGetAuthContext:
             patch("tessera.api.auth.validate_api_key") as mock_validate,
         ):
             mock_settings.auth_disabled = False
+            mock_settings.rate_limit_enabled = False
             mock_settings.bootstrap_api_key = None
             mock_validate.return_value = None
 
@@ -408,6 +413,7 @@ class TestGetAuthContext:
             patch("tessera.api.auth.validate_api_key") as mock_validate,
         ):
             mock_settings.auth_disabled = False
+            mock_settings.rate_limit_enabled = False
             mock_settings.bootstrap_api_key = None
             mock_validate.return_value = (api_key, team)
 
@@ -428,6 +434,7 @@ class TestGetOptionalAuthContext:
 
         with patch("tessera.api.auth.settings") as mock_settings:
             mock_settings.auth_disabled = False
+            mock_settings.rate_limit_enabled = False
 
             result = await get_optional_auth_context(request, None, session)
             assert result is None
@@ -469,6 +476,7 @@ class TestGetOptionalAuthContext:
             patch("tessera.api.auth.validate_api_key") as mock_validate,
         ):
             mock_settings.auth_disabled = False
+            mock_settings.rate_limit_enabled = False
             mock_settings.bootstrap_api_key = None
             mock_validate.return_value = (api_key, team)
 

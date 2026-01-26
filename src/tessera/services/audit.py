@@ -104,6 +104,7 @@ async def log_contract_published(
     version: str,
     change_type: str | None = None,
     force: bool = False,
+    prerelease: bool = False,
 ) -> AuditEventDB:
     """Log a contract publication event."""
     action = AuditAction.CONTRACT_FORCE_PUBLISHED if force else AuditAction.CONTRACT_PUBLISHED
@@ -117,6 +118,7 @@ async def log_contract_published(
             "version": version,
             "change_type": change_type,
             "force": force,
+            "prerelease": prerelease,
         },
     )
 

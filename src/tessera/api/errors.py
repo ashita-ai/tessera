@@ -23,6 +23,7 @@ class ErrorCode(StrEnum):
     REGISTRATION_NOT_FOUND = "REGISTRATION_NOT_FOUND"
     DEPENDENCY_NOT_FOUND = "DEPENDENCY_NOT_FOUND"
     API_KEY_NOT_FOUND = "API_KEY_NOT_FOUND"
+    USER_NOT_FOUND = "USER_NOT_FOUND"
     SYNC_PATH_NOT_FOUND = "SYNC_PATH_NOT_FOUND"
     MANIFEST_NOT_FOUND = "MANIFEST_NOT_FOUND"
 
@@ -53,6 +54,15 @@ class ErrorCode(StrEnum):
     CONTRACT_NOT_ACTIVE = "CONTRACT_NOT_ACTIVE"
     UNAUTHORIZED_TEAM = "UNAUTHORIZED_TEAM"
     INVALID_INPUT = "INVALID_INPUT"
+    TEAM_HAS_ASSETS = "TEAM_HAS_ASSETS"
+    SAME_TEAM = "SAME_TEAM"
+    INSUFFICIENT_PERMISSIONS = "INSUFFICIENT_PERMISSIONS"
+    USER_TEAM_MISMATCH = "USER_TEAM_MISMATCH"
+    AUDIT_REQUIRED = "AUDIT_REQUIRED"
+    AUDIT_FAILED = "AUDIT_FAILED"
+    VERSION_EXISTS = "VERSION_EXISTS"
+    CONFLICT_MODE_INVALID = "CONFLICT_MODE_INVALID"
+    SYNC_CONFLICT = "SYNC_CONFLICT"
 
     # Auth errors
     UNAUTHORIZED = "UNAUTHORIZED"
@@ -109,6 +119,18 @@ class DuplicateError(APIError):
         super().__init__(code, message, status_code=409, details=details)
 
 
+class ConflictError(APIError):
+    """Conflict error (409) for non-duplicate conflicts."""
+
+    def __init__(
+        self,
+        code: ErrorCode,
+        message: str,
+        details: dict[str, Any] | None = None,
+    ):
+        super().__init__(code, message, status_code=409, details=details)
+
+
 class BadRequestError(APIError):
     """Bad request error."""
 
@@ -150,6 +172,18 @@ class ForbiddenError(APIError):
             self.details.update(extra)
 
 
+class PreconditionFailedError(APIError):
+    """Precondition failed error (412)."""
+
+    def __init__(
+        self,
+        code: ErrorCode,
+        message: str,
+        details: dict[str, Any] | None = None,
+    ):
+        super().__init__(code, message, status_code=412, details=details)
+
+
 class RequestIDMiddleware(BaseHTTPMiddleware):
     """Middleware that adds a unique request ID to each request."""
 
@@ -158,6 +192,59 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
         request.state.request_id = request_id
         response = await call_next(request)
         response.headers["X-Request-ID"] = request_id
+        return response
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Middleware that adds security headers to all responses.
+
+    Headers added:
+    - X-Frame-Options: Prevents clickjacking by denying framing
+    - X-Content-Type-Options: Prevents MIME-type sniffing
+    - X-XSS-Protection: Legacy XSS filter (defense in depth)
+    - Referrer-Policy: Controls referrer information sent
+    - Strict-Transport-Security: HSTS (production only)
+    - Content-Security-Policy: Restricts resource loading
+    - Permissions-Policy: Restricts browser features
+    """
+
+    def __init__(self, app: Any, environment: str = "development") -> None:
+        super().__init__(app)
+        self.environment = environment
+
+    async def dispatch(self, request: Request, call_next: Any) -> Any:
+        response = await call_next(request)
+
+        # Always set these headers
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = (
+            "geolocation=(), microphone=(), camera=(), payment=()"
+        )
+
+        # HSTS only in production (requires HTTPS)
+        if self.environment == "production":
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+
+        # CSP: Allow self for API, more permissive for web UI static assets
+        # Web UI paths need 'unsafe-inline' for styles and scripts
+        if request.url.path.startswith("/web") or request.url.path.startswith("/static"):
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; "
+                "script-src 'self' 'unsafe-inline'; "
+                "style-src 'self' 'unsafe-inline'; "
+                "img-src 'self' data:; "
+                "font-src 'self'; "
+                "frame-ancestors 'none'"
+            )
+        else:
+            # Strict CSP for API endpoints
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'none'; frame-ancestors 'none'"
+            )
+
         return response
 
 

@@ -41,6 +41,7 @@ from tessera.api import (
 from tessera.api.errors import (
     APIError,
     RequestIDMiddleware,
+    SecurityHeadersMiddleware,
     api_error_handler,
     generic_exception_handler,
     http_exception_handler,
@@ -163,6 +164,9 @@ app.add_middleware(SessionMiddleware, secret_key=settings.session_secret_key)
 
 # Request ID middleware (must be added first to wrap all other middleware)
 app.add_middleware(RequestIDMiddleware)
+
+# Security headers middleware (OWASP A05:2021 - Security Misconfiguration)
+app.add_middleware(SecurityHeadersMiddleware, environment=settings.environment)
 
 # Prometheus metrics middleware
 app.add_middleware(MetricsMiddleware)

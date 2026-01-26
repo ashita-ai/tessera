@@ -307,6 +307,8 @@ class TestAssetSearch:
         resp_data = resp.json()
         error_detail = str(resp_data)
         assert "string should have at least 1 character" in error_detail.lower()
+
+
 class TestAssetDependencies:
     """Tests for asset dependencies endpoints."""
 
@@ -580,3 +582,218 @@ class TestAssetUpdate:
             json={"fqn": "new.name"},
         )
         assert resp.status_code == 404
+
+
+class TestVersionSuggestionPreview:
+    """Tests for POST /api/v1/assets/{asset_id}/version-suggestion endpoint."""
+
+    async def test_first_contract_suggests_1_0_0(self, client: AsyncClient):
+        """First contract for an asset should suggest version 1.0.0."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "version-first"})
+        team_id = team_resp.json()["id"]
+
+        asset_resp = await client.post(
+            "/api/v1/assets", json={"fqn": "version.first.table", "owner_team_id": team_id}
+        )
+        asset_id = asset_resp.json()["id"]
+
+        resp = await client.post(
+            f"/api/v1/assets/{asset_id}/version-suggestion",
+            json={"schema": {"type": "object", "properties": {"id": {"type": "integer"}}}},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["suggested_version"] == "1.0.0"
+        assert data["current_version"] is None
+        assert data["is_first_contract"] is True
+        assert data["breaking_changes"] == []
+
+    async def test_compatible_change_suggests_minor_bump(self, client: AsyncClient):
+        """Adding a new optional property should suggest minor version bump."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "version-minor"})
+        team_id = team_resp.json()["id"]
+
+        asset_resp = await client.post(
+            "/api/v1/assets", json={"fqn": "version.minor.table", "owner_team_id": team_id}
+        )
+        asset_id = asset_resp.json()["id"]
+
+        # Create initial contract
+        await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            json={
+                "version": "1.0.0",
+                "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
+                "compatibility_mode": "backward",
+            },
+        )
+
+        # Preview adding a new property
+        resp = await client.post(
+            f"/api/v1/assets/{asset_id}/version-suggestion",
+            json={
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "integer"},
+                        "name": {"type": "string"},
+                    },
+                }
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["suggested_version"] == "1.1.0"
+        assert data["current_version"] == "1.0.0"
+        assert data["change_type"] == "minor"
+        assert data["is_first_contract"] is False
+        assert data["breaking_changes"] == []
+
+    async def test_breaking_change_suggests_major_bump(self, client: AsyncClient):
+        """Removing a property should suggest major version bump with breaking changes."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "version-major"})
+        team_id = team_resp.json()["id"]
+
+        asset_resp = await client.post(
+            "/api/v1/assets", json={"fqn": "version.major.table", "owner_team_id": team_id}
+        )
+        asset_id = asset_resp.json()["id"]
+
+        # Create initial contract with two properties
+        await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            json={
+                "version": "1.0.0",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "integer"},
+                        "email": {"type": "string"},
+                    },
+                },
+                "compatibility_mode": "backward",
+            },
+        )
+
+        # Preview removing a property
+        resp = await client.post(
+            f"/api/v1/assets/{asset_id}/version-suggestion",
+            json={
+                "schema": {
+                    "type": "object",
+                    "properties": {"id": {"type": "integer"}},
+                }
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["suggested_version"] == "2.0.0"
+        assert data["current_version"] == "1.0.0"
+        assert data["change_type"] == "major"
+        assert data["is_first_contract"] is False
+        assert len(data["breaking_changes"]) > 0
+        # Verify the breaking change details
+        breaking = data["breaking_changes"][0]
+        assert "email" in breaking["path"]
+        assert breaking["type"] == "property_removed"
+
+    async def test_no_change_suggests_patch_bump(self, client: AsyncClient):
+        """Identical schema should suggest patch version bump."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "version-patch"})
+        team_id = team_resp.json()["id"]
+
+        asset_resp = await client.post(
+            "/api/v1/assets", json={"fqn": "version.patch.table", "owner_team_id": team_id}
+        )
+        asset_id = asset_resp.json()["id"]
+
+        schema = {"type": "object", "properties": {"id": {"type": "integer"}}}
+
+        # Create initial contract
+        await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            json={
+                "version": "1.0.0",
+                "schema": schema,
+                "compatibility_mode": "backward",
+            },
+        )
+
+        # Preview identical schema
+        resp = await client.post(
+            f"/api/v1/assets/{asset_id}/version-suggestion",
+            json={"schema": schema},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["suggested_version"] == "1.0.1"
+        assert data["change_type"] == "patch"
+        assert data["breaking_changes"] == []
+
+    async def test_asset_not_found(self, client: AsyncClient):
+        """Version suggestion on nonexistent asset should 404."""
+        resp = await client.post(
+            "/api/v1/assets/00000000-0000-0000-0000-000000000000/version-suggestion",
+            json={"schema": {"type": "object"}},
+        )
+        assert resp.status_code == 404
+
+    async def test_invalid_schema(self, client: AsyncClient):
+        """Version suggestion with invalid JSON Schema should fail."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "version-invalid"})
+        team_id = team_resp.json()["id"]
+
+        asset_resp = await client.post(
+            "/api/v1/assets", json={"fqn": "version.invalid.table", "owner_team_id": team_id}
+        )
+        asset_id = asset_resp.json()["id"]
+
+        resp = await client.post(
+            f"/api/v1/assets/{asset_id}/version-suggestion",
+            json={"schema": {"type": "invalid_type"}},
+        )
+        assert resp.status_code == 400
+
+    async def test_adding_required_field_is_breaking(self, client: AsyncClient):
+        """Adding a required field should be detected as breaking change."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "version-required"})
+        team_id = team_resp.json()["id"]
+
+        asset_resp = await client.post(
+            "/api/v1/assets", json={"fqn": "version.required.table", "owner_team_id": team_id}
+        )
+        asset_id = asset_resp.json()["id"]
+
+        # Create initial contract
+        await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            json={
+                "version": "1.0.0",
+                "schema": {
+                    "type": "object",
+                    "properties": {"id": {"type": "integer"}},
+                    "required": ["id"],
+                },
+                "compatibility_mode": "backward",
+            },
+        )
+
+        # Preview adding a new required field
+        resp = await client.post(
+            f"/api/v1/assets/{asset_id}/version-suggestion",
+            json={
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "integer"},
+                        "name": {"type": "string"},
+                    },
+                    "required": ["id", "name"],
+                }
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["suggested_version"] == "2.0.0"
+        assert data["change_type"] == "major"
+        assert len(data["breaking_changes"]) > 0
