@@ -581,6 +581,18 @@ async def acknowledge_proposal(
         notes=ack.notes,
     )
 
+    # Lock the proposal row to prevent race conditions when two consumers
+    # acknowledge concurrently. Without this, both could read all_acknowledged=True
+    # and both attempt auto-approval, or both read False and neither triggers it.
+    locked_result = await session.execute(
+        select(ProposalDB).where(ProposalDB.id == proposal_id).with_for_update()
+    )
+    proposal = locked_result.scalar_one()
+
+    # Re-check status under lock in case another concurrent ack already resolved it
+    if proposal.status != ProposalStatus.PENDING:
+        return db_ack
+
     # Check current acknowledgment counts before status change
     all_acknowledged, ack_count = await check_proposal_completion(proposal, session)
 

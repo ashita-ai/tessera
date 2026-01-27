@@ -248,10 +248,30 @@ async def health(
         db_status = "unhealthy"
         logger.error("Health check database failed: %s", e)
 
-    checks["database"] = {
+    db_check: dict[str, Any] = {
         "status": db_status,
         "latency_ms": db_latency_ms,
     }
+
+    # Connection pool metrics (PostgreSQL only — SQLite uses StaticPool)
+    try:
+        from sqlalchemy.pool import QueuePool
+
+        from tessera.db.database import get_engine
+
+        engine = get_engine()
+        pool = engine.pool
+        if isinstance(pool, QueuePool):
+            db_check["pool"] = {
+                "size": pool.size(),
+                "checked_in": pool.checkedin(),
+                "checked_out": pool.checkedout(),
+                "overflow": pool.overflow(),
+            }
+    except Exception:
+        pass  # Don't fail health check if pool introspection fails
+
+    checks["database"] = db_check
 
     # Overall status
     overall_status = (

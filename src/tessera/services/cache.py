@@ -289,17 +289,19 @@ async def get_cached_asset(asset_id: str) -> dict[str, Any] | None:
 
 
 async def invalidate_asset(asset_id: str) -> bool:
-    """Invalidate cached asset and its contracts."""
-    # Invalidate asset
+    """Invalidate cached asset and its contracts.
+
+    Invalidates the specific asset entry and its contracts list. Does NOT
+    invalidate search caches — those have short TTLs (default 5 minutes)
+    and will expire naturally. This avoids an O(N) SCAN over all keys on
+    every asset change, which was causing unnecessary cache churn.
+    """
+    # Invalidate the specific asset entry
     asset_deleted = await asset_cache.delete(asset_id)
-    # Invalidate asset contracts list (stored in asset_cache with key "contracts:{asset_id}")
+    # Invalidate the asset's contracts list
     contracts_list_deleted = await asset_cache.delete(f"contracts:{asset_id}")
-    # Invalidate individual contract caches
+    # Invalidate individual contract caches for this asset
     contracts_deleted = await invalidate_asset_contracts(asset_id)
-    # Invalidate all search caches (search results may include this asset)
-    # Asset-specific searches are in asset_cache, global searches are in search_cache
-    await asset_cache.invalidate_pattern("search:*")
-    await search_cache.invalidate_pattern("global:*")
     return asset_deleted or contracts_list_deleted or contracts_deleted > 0
 
 

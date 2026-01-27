@@ -25,29 +25,40 @@ from tessera.services import diff_schemas, validate_json_schema
 router = APIRouter()
 
 
+# Maximum number of downstream assets to return from lineage traversal.
+# Prevents unbounded memory usage on wide graphs. If the cap is reached,
+# the response includes a `truncated` flag so callers know the result is partial.
+MAX_LINEAGE_RESULTS = 500
+
+
 async def get_downstream_assets_recursive(
     session: AsyncSession,
     root_asset_id: UUID,
     max_depth: int,
-) -> list[tuple[AssetDB, str, int]]:
-    """Fetch all downstream assets using recursive CTE for efficiency.
+    max_results: int = MAX_LINEAGE_RESULTS,
+) -> tuple[list[tuple[AssetDB, str, int]], bool]:
+    """Fetch all downstream assets using iterative batch fetching.
 
-    This replaces N individual queries with a single recursive query,
-    significantly improving performance for deep lineage graphs.
+    Uses breadth-first traversal with cycle detection. Returns early if the
+    result set exceeds max_results to prevent unbounded memory usage.
 
     Args:
         session: Database session.
         root_asset_id: Starting asset ID.
         max_depth: Maximum traversal depth.
+        max_results: Maximum results to return before truncating.
 
     Returns:
-        List of (asset, dependency_type, depth) tuples.
+        Tuple of (results, truncated) where results is a list of
+        (asset, dependency_type, depth) tuples and truncated indicates
+        whether the traversal was cut short.
     """
     # For SQLite compatibility (used in tests), we use iterative batch fetching
     # PostgreSQL could use a true recursive CTE, but this approach works everywhere
     visited: set[UUID] = {root_asset_id}
     results: list[tuple[AssetDB, str, int]] = []
     current_ids = [root_asset_id]
+    truncated = False
 
     for current_depth in range(1, max_depth + 1):
         if not current_ids:
@@ -70,9 +81,15 @@ async def get_downstream_assets_recursive(
                 results.append((asset, str(dep_type), current_depth))
                 next_ids.append(asset.id)
 
+                if len(results) >= max_results:
+                    truncated = True
+                    break
+
+        if truncated:
+            break
         current_ids = next_ids
 
-    return results
+    return results, truncated
 
 
 async def get_impacted_consumers_batch(
@@ -184,7 +201,9 @@ async def analyze_impact(
     breaking = diff_result.breaking_for_mode(current_contract.compatibility_mode)
 
     # Use optimized batch fetching instead of N individual queries
-    downstream_assets = await get_downstream_assets_recursive(session, asset_id, depth)
+    downstream_assets, lineage_truncated = await get_downstream_assets_recursive(
+        session, asset_id, depth
+    )
 
     # Build list of impacted assets
     impacted_assets: list[dict[str, Any]] = [
@@ -219,7 +238,7 @@ async def analyze_impact(
                     "depth": asset_depth,
                 }
 
-    return {
+    result: dict[str, Any] = {
         "change_type": str(diff_result.change_type),
         "breaking_changes": [bc.to_dict() for bc in breaking],
         "impacted_consumers": list(impacted_teams.values()),
@@ -227,3 +246,10 @@ async def analyze_impact(
         "safe_to_publish": len(breaking) == 0,
         "traversal_depth": depth,
     }
+    if lineage_truncated:
+        result["truncated"] = True
+        result["truncated_message"] = (
+            f"Lineage traversal returned the maximum {MAX_LINEAGE_RESULTS} assets. "
+            "The full downstream graph may be larger."
+        )
+    return result

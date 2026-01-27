@@ -39,6 +39,112 @@ RETRY_DELAYS = [1, 5, 30]  # seconds between retries
 MAX_CONCURRENT_WEBHOOKS = 10
 _webhook_semaphore: asyncio.Semaphore | None = None
 
+# Circuit breaker: stop hammering endpoints that are consistently down.
+# After CIRCUIT_BREAKER_THRESHOLD consecutive failures, the circuit opens
+# and all deliveries fail fast for CIRCUIT_BREAKER_COOLDOWN seconds.
+CIRCUIT_BREAKER_THRESHOLD = 5
+CIRCUIT_BREAKER_COOLDOWN = 60  # seconds
+
+
+# Maximum events to retain in the dead letter queue. Once full, oldest events
+# are dropped to bound memory usage. 100 events × ~2KB each ≈ 200KB worst case.
+DEAD_LETTER_MAX_SIZE = 100
+
+
+class _CircuitBreaker:
+    """Circuit breaker with dead letter queue for webhook delivery.
+
+    Tracks consecutive failures per URL. When failures exceed the threshold,
+    the circuit opens and deliveries fail fast until the cooldown expires.
+    After cooldown, a single probe request is allowed through (half-open state).
+    If it succeeds, the circuit closes and the dead letter queue is drained.
+
+    Events that arrive while the circuit is open are stored in a bounded
+    dead letter queue. When the circuit closes (via a successful probe), the
+    queued events are replayed in order.
+    """
+
+    def __init__(
+        self,
+        threshold: int,
+        cooldown: float,
+        dead_letter_max: int = DEAD_LETTER_MAX_SIZE,
+    ) -> None:
+        self._threshold = threshold
+        self._cooldown = cooldown
+        self._consecutive_failures: int = 0
+        self._opened_at: float | None = None
+        self._dead_letter_max = dead_letter_max
+        self._dead_letters: list[WebhookEvent] = []
+
+    def record_success(self) -> None:
+        """Record a successful delivery. Resets the failure counter."""
+        self._consecutive_failures = 0
+        self._opened_at = None
+
+    def record_failure(self) -> None:
+        """Record a failed delivery. Opens the circuit if threshold is reached."""
+        self._consecutive_failures += 1
+        if self._consecutive_failures >= self._threshold and self._opened_at is None:
+            self._opened_at = asyncio.get_event_loop().time()
+            logger.warning(
+                "Webhook circuit breaker opened after %d consecutive failures. "
+                "Deliveries will fail fast for %ds.",
+                self._consecutive_failures,
+                self._cooldown,
+            )
+
+    def is_open(self) -> bool:
+        """Check if the circuit is open (should fail fast).
+
+        Returns False if the circuit is closed or if the cooldown has elapsed
+        (half-open state allows a single probe through).
+        """
+        if self._opened_at is None:
+            return False
+        elapsed = asyncio.get_event_loop().time() - self._opened_at
+        if elapsed >= self._cooldown:
+            # Cooldown elapsed: allow a probe request (half-open)
+            return False
+        return True
+
+    def enqueue_dead_letter(self, event: WebhookEvent) -> bool:
+        """Add a failed event to the dead letter queue.
+
+        Returns True if the event was added, False if the queue is full
+        (oldest events have been dropped).
+        """
+        if len(self._dead_letters) >= self._dead_letter_max:
+            # Drop the oldest event to make room
+            dropped = self._dead_letters.pop(0)
+            logger.warning(
+                "Dead letter queue full (%d), dropped oldest event: %s",
+                self._dead_letter_max,
+                dropped.event.value,
+            )
+        self._dead_letters.append(event)
+        return True
+
+    def drain_dead_letters(self) -> list[WebhookEvent]:
+        """Remove and return all dead letter events for replay.
+
+        Called after the circuit closes to replay queued events.
+        """
+        events = self._dead_letters
+        self._dead_letters = []
+        if events:
+            logger.info("Draining %d events from dead letter queue for replay", len(events))
+        return events
+
+    @property
+    def dead_letter_count(self) -> int:
+        """Number of events waiting in the dead letter queue."""
+        return len(self._dead_letters)
+
+
+# Global circuit breaker instance (one per process, keyed to the configured URL)
+_circuit_breaker = _CircuitBreaker(CIRCUIT_BREAKER_THRESHOLD, CIRCUIT_BREAKER_COOLDOWN)
+
 
 def _get_webhook_semaphore() -> asyncio.Semaphore:
     """Get or create the webhook semaphore for the current event loop.
@@ -225,6 +331,26 @@ async def _deliver_webhook(event: WebhookEvent, delivery_id: UUID | None = None)
         logger.debug("No webhook URL configured, skipping delivery")
         return True
 
+    # Circuit breaker: fail fast if the endpoint has been consistently failing.
+    # Events are queued in the dead letter queue for replay when the endpoint recovers.
+    if _circuit_breaker.is_open():
+        logger.warning(
+            "Webhook circuit breaker is open, queueing event for later: %s",
+            event.event.value,
+        )
+        _circuit_breaker.enqueue_dead_letter(event)
+        if delivery_id:
+            await _update_delivery_status(
+                delivery_id,
+                status=WebhookDeliveryStatus.FAILED,
+                attempts=0,
+                last_error=(
+                    "Circuit breaker open: endpoint has been consistently failing. "
+                    "Event queued for replay."
+                ),
+            )
+        return False
+
     # SSRF protection: validate the webhook URL
     is_valid, error_msg = await validate_webhook_url(settings.webhook_url)
     if not is_valid:
@@ -267,6 +393,11 @@ async def _deliver_webhook(event: WebhookEvent, delivery_id: UUID | None = None)
                             event.event.value,
                             settings.webhook_url,
                         )
+                        _circuit_breaker.record_success()
+                        # Replay dead letter queue if the circuit just closed
+                        dead_letters = _circuit_breaker.drain_dead_letters()
+                        for dl_event in dead_letters:
+                            _fire_and_forget(dl_event)
                         # Update delivery record on success
                         if delivery_id:
                             await _update_delivery_status(
@@ -294,6 +425,7 @@ async def _deliver_webhook(event: WebhookEvent, delivery_id: UUID | None = None)
                 if attempt < MAX_RETRIES - 1:
                     await asyncio.sleep(delay)
 
+    _circuit_breaker.record_failure()
     logger.error(
         "Webhook delivery failed after %d attempts: %s",
         MAX_RETRIES,
@@ -336,8 +468,10 @@ async def _update_delivery_status(
                 if status == WebhookDeliveryStatus.DELIVERED:
                     delivery.delivered_at = datetime.now(UTC)
                 await session.commit()
-    except Exception as e:
-        logger.error("Failed to update webhook delivery status: %s", e)
+    except OSError:
+        logger.error("Network error updating webhook delivery %s status", delivery_id)
+    except Exception:
+        logger.exception("Failed to update webhook delivery %s status", delivery_id)
 
 
 async def _create_delivery_record(event: WebhookEvent) -> UUID | None:
@@ -357,8 +491,11 @@ async def _create_delivery_record(event: WebhookEvent) -> UUID | None:
             await session.commit()
             await session.refresh(delivery)
             return delivery.id
-    except Exception as e:
-        logger.error("Failed to create webhook delivery record: %s", e)
+    except OSError:
+        logger.error("Network error creating webhook delivery record")
+        return None
+    except Exception:
+        logger.exception("Failed to create webhook delivery record")
         return None
 
 
