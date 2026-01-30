@@ -5,9 +5,10 @@ Kafka Schema Registry (backward, forward, full, none).
 """
 
 import copy
-from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from tessera.models.enums import (
     ChangeType,
@@ -68,18 +69,25 @@ FORWARD_BREAKING = {
 FULL_BREAKING = BACKWARD_BREAKING | FORWARD_BREAKING
 
 
-@dataclass
-class BreakingChange:
+class BreakingChange(BaseModel):
     """A single breaking change detected in a schema diff."""
 
+    model_config = ConfigDict(frozen=True)
+
     kind: ChangeKind
-    path: str  # JSON path to the affected element (e.g., "properties.email")
+    path: str = Field(
+        ..., description="JSON path to the affected element (e.g., 'properties.email')"
+    )
     message: str
-    old_value: Any = None
-    new_value: Any = None
+    old_value: bool | int | float | str | list[Any] | dict[str, Any] | None = None
+    new_value: bool | int | float | str | list[Any] | dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary for JSON serialization."""
+        """Convert to dictionary for JSON serialization.
+
+        Note: Prefer using model_dump() directly. This method exists for backward
+        compatibility.
+        """
         return {
             "type": str(self.kind),
             "path": self.path,
@@ -89,11 +97,12 @@ class BreakingChange:
         }
 
 
-@dataclass
-class SchemaDiffResult:
+class SchemaDiffResult(BaseModel):
     """Result of comparing two schemas."""
 
-    changes: list[BreakingChange] = field(default_factory=list)
+    model_config = ConfigDict(frozen=True)
+
+    changes: list[BreakingChange] = Field(default_factory=list)
     change_type: ChangeType = ChangeType.PATCH
 
     @property
@@ -726,19 +735,24 @@ GUARANTEE_SEVERITY: dict[GuaranteeChangeKind, GuaranteeChangeSeverity] = {
 }
 
 
-@dataclass
-class GuaranteeChange:
+class GuaranteeChange(BaseModel):
     """A single guarantee change detected in a diff."""
 
+    model_config = ConfigDict(frozen=True)
+
     kind: GuaranteeChangeKind
-    path: str  # e.g., "nullability.user_id" or "accepted_values.status"
+    path: str = Field(..., description="e.g., 'nullability.user_id' or 'accepted_values.status'")
     message: str
     severity: GuaranteeChangeSeverity
-    old_value: Any = None
-    new_value: Any = None
+    old_value: bool | int | float | str | list[Any] | dict[str, Any] | None = None
+    new_value: bool | int | float | str | list[Any] | dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary for JSON serialization."""
+        """Convert to dictionary for JSON serialization.
+
+        Note: Prefer using model_dump() directly. This method exists for backward
+        compatibility.
+        """
         return {
             "type": str(self.kind),
             "path": self.path,
@@ -749,11 +763,12 @@ class GuaranteeChange:
         }
 
 
-@dataclass
-class GuaranteeDiffResult:
+class GuaranteeDiffResult(BaseModel):
     """Result of comparing two guarantee sets."""
 
-    changes: list[GuaranteeChange] = field(default_factory=list)
+    model_config = ConfigDict(frozen=True)
+
+    changes: list[GuaranteeChange] = Field(default_factory=list)
 
     @property
     def has_changes(self) -> bool:
@@ -1131,9 +1146,10 @@ def check_guarantee_compatibility(
     return len(breaking) == 0, breaking
 
 
-@dataclass
-class ContractDiffResult:
+class ContractDiffResult(BaseModel):
     """Combined result of schema and guarantee diffs."""
+
+    model_config = ConfigDict(frozen=True)
 
     schema_diff: SchemaDiffResult
     guarantee_diff: GuaranteeDiffResult
@@ -1153,7 +1169,11 @@ class ContractDiffResult:
         return schema_ok and guarantee_ok
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary for JSON serialization."""
+        """Convert to dictionary for JSON serialization.
+
+        Note: Prefer using model_dump() directly. This method exists for backward
+        compatibility.
+        """
         return {
             "schema_changes": [c.to_dict() for c in self.schema_diff.changes],
             "schema_change_type": str(self.schema_diff.change_type),
