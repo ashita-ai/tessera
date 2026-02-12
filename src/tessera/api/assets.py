@@ -1,7 +1,7 @@
 """Assets API endpoints."""
 
 from datetime import UTC, datetime
-from typing import Any, Final
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -96,11 +96,13 @@ from tessera.services.cache import (
     invalidate_asset,
 )
 from tessera.services.slack import notify_proposal_created
+from tessera.services.versioning import (
+    INITIAL_VERSION,
+    is_graduation,
+    is_prerelease,
+    parse_semver,
+)
 from tessera.services.webhooks import send_proposal_created
-
-# Named constants for version handling
-INITIAL_VERSION: Final[str] = "1.0.0"
-"""Version assigned to the first contract published for an asset."""
 
 router = APIRouter()
 
@@ -118,92 +120,6 @@ def _apply_asset_search_filters(
     if environment:
         filtered = filtered.where(AssetDB.environment == environment)
     return filtered
-
-
-def parse_semver(version: str) -> tuple[int, int, int]:
-    """Parse a semantic version string into (major, minor, patch).
-
-    Raises ValueError if the version string is not valid semver format.
-    """
-    try:
-        # Strip any prerelease/build metadata
-        base = version.split("-")[0].split("+")[0]
-        parts = base.split(".")
-        if len(parts) != 3:
-            raise ValueError(f"Invalid semver format: expected 3 parts, got {len(parts)}")
-        major, minor, patch = int(parts[0]), int(parts[1]), int(parts[2])
-        if major < 0 or minor < 0 or patch < 0:
-            raise ValueError("Version numbers cannot be negative")
-        return (major, minor, patch)
-    except (ValueError, IndexError) as e:
-        raise ValueError(f"Cannot parse version '{version}': {e}") from e
-
-
-def is_prerelease(version: str) -> bool:
-    """Check if a version is a pre-release (contains hyphen before any build metadata).
-
-    Examples:
-        1.0.0 -> False
-        1.0.0-alpha -> True
-        1.0.0-beta.1 -> True
-        1.0.0-rc.1 -> True
-        1.0.0+build.123 -> False (build metadata only, not prerelease)
-        1.0.0-alpha+build.123 -> True
-    """
-    # Remove build metadata first (everything after +)
-    version_without_build = version.split("+")[0]
-    # Check if there's a hyphen indicating prerelease
-    return "-" in version_without_build
-
-
-def get_base_version(version: str) -> str:
-    """Get the base version (X.Y.Z) without prerelease or build metadata.
-
-    Examples:
-        1.0.0 -> 1.0.0
-        1.0.0-alpha -> 1.0.0
-        1.0.0-beta.1 -> 1.0.0
-        1.0.0+build.123 -> 1.0.0
-        1.0.0-rc.1+build.456 -> 1.0.0
-    """
-    # Remove build metadata first, then prerelease
-    without_build = version.split("+")[0]
-    without_prerelease = without_build.split("-")[0]
-    return without_prerelease
-
-
-def is_graduation(current_version: str, new_version: str) -> bool:
-    """Check if publishing new_version is graduating from a prerelease.
-
-    A graduation occurs when:
-    - Current version is a prerelease (e.g., 1.0.0-alpha, 1.0.0-rc.1)
-    - New version is NOT a prerelease
-    - Base versions match (1.0.0-alpha -> 1.0.0)
-
-    Examples:
-        1.0.0-alpha -> 1.0.0: True (graduation)
-        1.0.0-rc.1 -> 1.0.0: True (graduation)
-        1.0.0-alpha -> 1.0.1: False (different base)
-        1.0.0-alpha -> 1.0.0-beta: False (still prerelease)
-        1.0.0 -> 1.1.0: False (not from prerelease)
-    """
-    if not is_prerelease(current_version):
-        return False
-    if is_prerelease(new_version):
-        return False
-    return get_base_version(current_version) == get_base_version(new_version)
-
-
-def bump_version(current: str, bump_type: str) -> str:
-    """Bump a semantic version based on change type.
-
-    bump_type: 'major' or 'minor'
-    """
-    major, minor, patch = parse_semver(current)
-    if bump_type == "major":
-        return f"{major + 1}.0.0"
-    else:  # minor
-        return f"{major}.{minor + 1}.0"
 
 
 def compute_version_suggestion(

@@ -3,7 +3,7 @@
 Endpoints for synchronizing schemas from GraphQL introspection.
 """
 
-from typing import Any, Final
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request
@@ -22,10 +22,7 @@ from tessera.services.graphql import GraphQLOperation, parse_graphql_introspecti
 from tessera.services.graphql import operations_to_assets as graphql_operations_to_assets
 from tessera.services.openapi import _merge_guarantees
 from tessera.services.schema_diff import check_compatibility, diff_schemas
-
-# Named constants for version handling
-INITIAL_VERSION: Final[str] = "1.0.0"
-"""Version assigned to the first contract published for an asset."""
+from tessera.services.versioning import INITIAL_VERSION
 
 router = APIRouter()
 
