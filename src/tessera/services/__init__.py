@@ -54,6 +54,15 @@ from tessera.services.schema_validator import (
     validate_json_schema,
     validate_schema_or_raise,
 )
+from tessera.services.versioning import (
+    INITIAL_VERSION,
+    bump_version,
+    get_base_version,
+    is_graduation,
+    is_prerelease,
+    parse_semver,
+    parse_semver_lenient,
+)
 
 __all__ = [
     # Affected parties
@@ -102,4 +111,12 @@ __all__ = [
     "PublishAction",
     "SinglePublishResult",
     "get_last_audit_status",
+    # Versioning
+    "INITIAL_VERSION",
+    "bump_version",
+    "get_base_version",
+    "is_graduation",
+    "is_prerelease",
+    "parse_semver",
+    "parse_semver_lenient",
 ]

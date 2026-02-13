@@ -7,7 +7,7 @@ Provides core logic for publishing contracts:
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, Final
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
@@ -32,11 +32,13 @@ from tessera.services.cache import cache_contract, invalidate_asset
 from tessera.services.schema_diff import check_compatibility, diff_schemas
 from tessera.services.schema_validator import validate_json_schema
 from tessera.services.slack import notify_proposal_created
+from tessera.services.versioning import (
+    INITIAL_VERSION,
+    is_graduation,
+    is_prerelease,
+    parse_semver_lenient,
+)
 from tessera.services.webhooks import send_proposal_created
-
-# Named constants for version handling
-INITIAL_VERSION: Final[str] = "1.0.0"
-"""Version assigned to the first contract published for an asset."""
 
 
 @dataclass
@@ -78,19 +80,6 @@ class BulkPublishResult:
     results: list[PublishResult] = field(default_factory=list)
 
 
-def parse_semver(version: str) -> tuple[int, int, int]:
-    """Parse a semantic version string into (major, minor, patch).
-
-    Returns (1, 0, 0) as a fallback if the version string is malformed.
-    """
-    base = version.split("-")[0].split("+")[0]
-    parts = base.split(".")
-    if len(parts) != 3:
-        # Fallback to initial version components for malformed input
-        return (1, 0, 0)
-    return (int(parts[0]), int(parts[1]), int(parts[2]))
-
-
 def compute_next_version(
     current_version: str | None,
     is_compatible: bool,
@@ -100,7 +89,7 @@ def compute_next_version(
     if current_version is None:
         return INITIAL_VERSION
 
-    major, minor, patch = parse_semver(current_version)
+    major, minor, patch = parse_semver_lenient(current_version)
 
     if not is_compatible:
         return f"{major + 1}.0.0"
@@ -778,7 +767,7 @@ class ContractPublishingWorkflow:
             )
 
         # Pre-release versions skip proposal workflow
-        if _is_prerelease(self.version):
+        if is_prerelease(self.version):
             contract = await self._publish_contract()
             await log_contract_published(
                 session=self.session,
@@ -800,7 +789,7 @@ class ContractPublishingWorkflow:
             )
 
         # Graduation: prerelease -> release skips proposal
-        if _is_graduation(self.current_contract.version, self.version):
+        if is_graduation(self.current_contract.version, self.version):
             contract = await self._publish_contract()
             await log_contract_published(
                 session=self.session,
@@ -899,44 +888,6 @@ class ContractPublishingWorkflow:
         )
 
 
-# =============================================================================
-# Helper Functions for Version Handling
-# =============================================================================
-
-
-def _is_prerelease(version: str) -> bool:
-    """Check if a version is a pre-release (contains hyphen before any build metadata)."""
-    version_without_build = version.split("+")[0]
-    return "-" in version_without_build
-
-
-def _get_base_version(version: str) -> str:
-    """Get the base version (X.Y.Z) without prerelease or build metadata."""
-    without_build = version.split("+")[0]
-    without_prerelease = without_build.split("-")[0]
-    return without_prerelease
-
-
-def _is_graduation(current_version: str, new_version: str) -> bool:
-    """Check if publishing new_version is graduating from a prerelease."""
-    if not _is_prerelease(current_version):
-        return False
-    if _is_prerelease(new_version):
-        return False
-    return _get_base_version(current_version) == _get_base_version(new_version)
-
-
-def _bump_version(current: str, bump_type: str) -> str:
-    """Bump version by type (major, minor, patch)."""
-    major, minor, patch = parse_semver(current)
-    if bump_type == "major":
-        return f"{major + 1}.0.0"
-    elif bump_type == "minor":
-        return f"{major}.{minor + 1}.0"
-    else:
-        return f"{major}.{minor}.{patch + 1}"
-
-
 def _compute_version_suggestion(
     current_version: str | None,
     change_type: ChangeType,
@@ -956,7 +907,7 @@ def _compute_version_suggestion(
             breaking_changes=[],
         )
 
-    major, minor, patch = parse_semver(current_version)
+    major, minor, patch = parse_semver_lenient(current_version)
 
     if not is_compatible:
         # Breaking change = major bump
