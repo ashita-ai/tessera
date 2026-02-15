@@ -104,8 +104,20 @@ class AuthContext:
         return self.team.id
 
     def has_scope(self, scope: APIKeyScope) -> bool:
-        """Check if the authenticated key has a specific scope."""
-        # Admin has all permissions
+        """
+        Check whether the authenticated API key grants the given scope.
+
+        This method uses a short-circuit permission model: if the API key
+        includes the ADMIN scope, it is treated as having all permissions
+        and this method returns True regardless of the requested scope.
+
+        Args:
+            scope (APIKeyScope): The permission scope to check.
+
+        Returns:
+            bool: True if the scope is explicitly present in the key's scopes
+            or implicitly granted via the ADMIN scope; otherwise False.
+        """
         if APIKeyScope.ADMIN in self.scopes:
             return True
         return scope in self.scopes
