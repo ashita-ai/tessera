@@ -29,7 +29,6 @@ import logging
 from collections.abc import AsyncGenerator
 
 from sqlalchemy import text
-from sqlalchemy.exc import DBAPIError, IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -146,6 +145,6 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
         try:
             yield session
             await session.commit()
-        except (DBAPIError, IntegrityError, OperationalError):
+        except Exception:
             await session.rollback()
             raise

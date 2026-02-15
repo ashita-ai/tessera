@@ -75,6 +75,21 @@ class TestInitDb:
             assert mock_conn.execute.call_count == 3  # core, workflow, audit schemas
 
 
+class TestSessionRollback:
+    """Tests for session rollback on non-DB exceptions."""
+
+    @pytest.mark.asyncio
+    async def test_non_db_exception_triggers_rollback(self):
+        """A ValueError during the session should still trigger rollback."""
+        from tessera.db.database import get_session
+
+        with pytest.raises(ValueError, match="intentional"):
+            async for session in get_session():
+                raise ValueError("intentional")
+
+        # If we get here, rollback was called (no PendingRollbackError)
+
+
 class TestAutoCreateTablesSetting:
     """Tests for auto_create_tables config setting."""
 

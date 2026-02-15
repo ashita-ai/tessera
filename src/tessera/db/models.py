@@ -220,6 +220,12 @@ class RegistrationDB(Base):
         DateTime(timezone=True), nullable=True, index=True
     )
 
+    __table_args__ = (
+        UniqueConstraint(
+            "contract_id", "consumer_team_id", name="uq_registration_contract_consumer"
+        ),
+    )
+
     # Relationships
     contract: Mapped["ContractDB"] = relationship(back_populates="registrations")
 
@@ -295,6 +301,12 @@ class AcknowledgmentDB(Base):
     responded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    __table_args__ = (
+        UniqueConstraint(
+            "proposal_id", "consumer_team_id", name="uq_acknowledgment_proposal_consumer"
+        ),
+    )
+
     # Relationships
     proposal: Mapped["ProposalDB"] = relationship(back_populates="acknowledgments")
     acknowledged_by_user: Mapped["UserDB | None"] = relationship()
@@ -316,6 +328,15 @@ class AssetDependencyDB(Base):
         Enum(DependencyType), default=DependencyType.CONSUMES
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "dependent_asset_id",
+            "dependency_asset_id",
+            "dependency_type",
+            name="uq_dependency_edge",
+        ),
+    )
 
 
 class AuditEventDB(Base):

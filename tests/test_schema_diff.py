@@ -541,11 +541,143 @@ class TestGuaranteeDiff:
         assert result.has_changes
 
     def test_volume_changed(self):
-        """Changing volume guarantee should be detected."""
+        """Changing volume guarantee should be detected with per-field kinds."""
         old = {"volume": {"min_rows": 100, "max_rows": 10000}}
         new = {"volume": {"min_rows": 50, "max_rows": 5000}}
         result = diff_guarantees(old, new)
         assert result.has_changes
+        kinds = {c.kind for c in result.changes}
+        # min_rows decreased = RELAXED, max_rows decreased = TIGHTENED
+        assert GuaranteeChangeKind.VOLUME_RELAXED in kinds
+        assert GuaranteeChangeKind.VOLUME_TIGHTENED in kinds
+
+    # --- Bug 1: Freshness direction tests ---
+
+    def test_freshness_tightened(self):
+        """Tightening freshness (48h -> 12h) should emit TIGHTENED (INFO)."""
+        old = {"freshness": {"warn_after": {"hours": 48}}}
+        new = {"freshness": {"warn_after": {"hours": 12}}}
+        result = diff_guarantees(old, new)
+        assert result.has_changes
+        tightened = [c for c in result.changes if c.kind == GuaranteeChangeKind.FRESHNESS_TIGHTENED]
+        assert len(tightened) == 1
+        assert tightened[0].severity == GuaranteeChangeSeverity.INFO
+
+    def test_freshness_relaxed_correctly(self):
+        """Relaxing freshness (12h -> 48h) should emit RELAXED (WARNING)."""
+        old = {"freshness": {"warn_after": {"hours": 12}}}
+        new = {"freshness": {"warn_after": {"hours": 48}}}
+        result = diff_guarantees(old, new)
+        assert result.has_changes
+        relaxed = [c for c in result.changes if c.kind == GuaranteeChangeKind.FRESHNESS_RELAXED]
+        assert len(relaxed) == 1
+        assert relaxed[0].severity == GuaranteeChangeSeverity.WARNING
+
+    def test_freshness_max_staleness_tightened(self):
+        """Tightening max_staleness_minutes (120 -> 30) should emit TIGHTENED."""
+        old = {"freshness": {"max_staleness_minutes": 120}}
+        new = {"freshness": {"max_staleness_minutes": 30}}
+        result = diff_guarantees(old, new)
+        assert result.has_changes
+        tightened = [c for c in result.changes if c.kind == GuaranteeChangeKind.FRESHNESS_TIGHTENED]
+        assert len(tightened) == 1
+
+    def test_freshness_max_staleness_relaxed(self):
+        """Relaxing max_staleness_minutes (30 -> 120) should emit RELAXED."""
+        old = {"freshness": {"max_staleness_minutes": 30}}
+        new = {"freshness": {"max_staleness_minutes": 120}}
+        result = diff_guarantees(old, new)
+        assert result.has_changes
+        relaxed = [c for c in result.changes if c.kind == GuaranteeChangeKind.FRESHNESS_RELAXED]
+        assert len(relaxed) == 1
+
+    def test_freshness_unrecognizable_defaults_to_relaxed(self):
+        """Unrecognisable freshness format should default to RELAXED (WARNING)."""
+        old = {"freshness": {"custom_field": "fast"}}
+        new = {"freshness": {"custom_field": "slow"}}
+        result = diff_guarantees(old, new)
+        assert result.has_changes
+        relaxed = [c for c in result.changes if c.kind == GuaranteeChangeKind.FRESHNESS_RELAXED]
+        assert len(relaxed) == 1
+        assert relaxed[0].severity == GuaranteeChangeSeverity.WARNING
+
+    # --- Bug 2: Volume direction tests ---
+
+    def test_volume_min_rows_tightened(self):
+        """Increasing min_rows (50 -> 100) = TIGHTENED (INFO)."""
+        old = {"volume": {"min_rows": 50}}
+        new = {"volume": {"min_rows": 100}}
+        result = diff_guarantees(old, new)
+        assert result.has_changes
+        tightened = [c for c in result.changes if c.kind == GuaranteeChangeKind.VOLUME_TIGHTENED]
+        assert len(tightened) == 1
+        assert tightened[0].severity == GuaranteeChangeSeverity.INFO
+
+    def test_volume_min_rows_relaxed(self):
+        """Decreasing min_rows (100 -> 50) = RELAXED (WARNING)."""
+        old = {"volume": {"min_rows": 100}}
+        new = {"volume": {"min_rows": 50}}
+        result = diff_guarantees(old, new)
+        assert result.has_changes
+        relaxed = [c for c in result.changes if c.kind == GuaranteeChangeKind.VOLUME_RELAXED]
+        assert len(relaxed) == 1
+        assert relaxed[0].severity == GuaranteeChangeSeverity.WARNING
+
+    def test_volume_max_rows_tightened(self):
+        """Decreasing max_rows (10000 -> 5000) = TIGHTENED (INFO)."""
+        old = {"volume": {"max_rows": 10000}}
+        new = {"volume": {"max_rows": 5000}}
+        result = diff_guarantees(old, new)
+        assert result.has_changes
+        tightened = [c for c in result.changes if c.kind == GuaranteeChangeKind.VOLUME_TIGHTENED]
+        assert len(tightened) == 1
+        assert tightened[0].severity == GuaranteeChangeSeverity.INFO
+
+    def test_volume_max_rows_relaxed(self):
+        """Increasing max_rows (5000 -> 10000) = RELAXED (WARNING)."""
+        old = {"volume": {"max_rows": 5000}}
+        new = {"volume": {"max_rows": 10000}}
+        result = diff_guarantees(old, new)
+        assert result.has_changes
+        relaxed = [c for c in result.changes if c.kind == GuaranteeChangeKind.VOLUME_RELAXED]
+        assert len(relaxed) == 1
+        assert relaxed[0].severity == GuaranteeChangeSeverity.WARNING
+
+    def test_volume_mixed_signals(self):
+        """Mixed volume changes should emit separate changes per field."""
+        old = {"volume": {"min_rows": 100, "max_rows": 10000}}
+        new = {"volume": {"min_rows": 50, "max_rows": 5000}}
+        result = diff_guarantees(old, new)
+        assert result.has_changes
+        # min_rows decreased = RELAXED, max_rows decreased = TIGHTENED
+        volume_changes = [c for c in result.changes if c.path.startswith("volume.")]
+        assert len(volume_changes) == 2
+        kinds = {c.kind for c in volume_changes}
+        assert GuaranteeChangeKind.VOLUME_RELAXED in kinds
+        assert GuaranteeChangeKind.VOLUME_TIGHTENED in kinds
+
+    # --- Bug 3: Accepted values mixed change tests ---
+
+    def test_accepted_values_mixed_emits_both(self):
+        """Mixed adds + removes should emit both CONTRACTED and EXPANDED."""
+        old = {"accepted_values": {"status": ["active", "pending"]}}
+        new = {"accepted_values": {"status": ["active", "archived"]}}
+        result = diff_guarantees(old, new)
+        assert result.has_changes
+        kinds = [c.kind for c in result.changes]
+        assert GuaranteeChangeKind.ACCEPTED_VALUES_CONTRACTED in kinds
+        assert GuaranteeChangeKind.ACCEPTED_VALUES_EXPANDED in kinds
+        assert len(result.changes) == 2
+
+    def test_accepted_values_mixed_is_breaking_strict(self):
+        """Mixed accepted_values changes should be breaking in STRICT mode.
+
+        EXPANDED carries WARNING severity, which triggers is_breaking(STRICT).
+        """
+        old = {"accepted_values": {"status": ["active", "pending"]}}
+        new = {"accepted_values": {"status": ["active", "archived"]}}
+        result = diff_guarantees(old, new)
+        assert result.is_breaking(GuaranteeMode.STRICT)
 
 
 class TestGuaranteeDiffResult:
