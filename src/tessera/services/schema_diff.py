@@ -1028,6 +1028,53 @@ class GuaranteeDiff:
                     new_value=new_exprs[key],
                 )
 
+    @staticmethod
+    def _extract_minutes(value: Any) -> float | None:
+        """Try to extract a comparable minutes value from a freshness guarantee.
+
+        Supports common formats:
+        - ``{"warn_after": {"hours": 24}}``
+        - ``{"warn_after": {"minutes": 30}}``
+        - ``{"warn_after": {"count": 2, "period": "hour"}}``
+        - Plain numeric (interpreted as minutes)
+        """
+        if isinstance(value, int | float):
+            return float(value)
+
+        if not isinstance(value, dict):
+            return None
+
+        interval = value.get("warn_after", value)
+        if not isinstance(interval, dict):
+            return None
+
+        # Direct time-unit keys: {"hours": 24} or {"minutes": 30, "hours": 1}
+        time_multipliers = {"days": 1440, "hours": 60, "minutes": 1, "seconds": 1 / 60}
+        total = 0.0
+        found_unit = False
+        for unit, multiplier in time_multipliers.items():
+            if unit in interval:
+                try:
+                    total += float(interval[unit]) * multiplier
+                    found_unit = True
+                except (TypeError, ValueError):
+                    return None
+        if found_unit:
+            return total
+
+        # dbt-style: {"count": N, "period": "hour"}
+        if "count" in interval and "period" in interval:
+            try:
+                count = float(interval["count"])
+            except (TypeError, ValueError):
+                return None
+            period = str(interval["period"]).lower().rstrip("s")  # "hours" -> "hour"
+            period_minutes = {"day": 1440, "hour": 60, "minute": 1, "second": 1 / 60}
+            if period in period_minutes:
+                return count * period_minutes[period]
+
+        return None
+
     def _diff_freshness(self) -> None:
         """Compare freshness guarantees."""
         old_fresh = self.old.get("freshness")
@@ -1048,15 +1095,69 @@ class GuaranteeDiff:
                 old_value=old_fresh,
             )
         elif old_fresh is not None and new_fresh is not None and old_fresh != new_fresh:
-            # Compare as intervals (assume format like "1 hour", "30 minutes")
-            # For simplicity, treat any change as relaxed (conservative)
+            old_mins = self._extract_minutes(old_fresh)
+            new_mins = self._extract_minutes(new_fresh)
+
+            if old_mins is not None and new_mins is not None:
+                # Larger interval = more time before stale = weaker promise = RELAXED
+                kind = (
+                    GuaranteeChangeKind.FRESHNESS_RELAXED
+                    if new_mins > old_mins
+                    else GuaranteeChangeKind.FRESHNESS_TIGHTENED
+                )
+            else:
+                # Can't determine direction — default to RELAXED (conservative)
+                kind = GuaranteeChangeKind.FRESHNESS_RELAXED
+
             self._add_change(
-                GuaranteeChangeKind.FRESHNESS_RELAXED,
+                kind,
                 "freshness",
                 f"freshness guarantee changed from {old_fresh} to {new_fresh}",
                 old_value=old_fresh,
                 new_value=new_fresh,
             )
+
+    @staticmethod
+    def _classify_volume_direction(old_vol: Any, new_vol: Any) -> GuaranteeChangeKind:
+        """Determine whether a volume change is tightened or relaxed.
+
+        Supports dict format ``{"min_rows": N, "max_rows": N}`` and plain
+        numeric values (interpreted as min_rows).
+
+        Returns VOLUME_RELAXED when the guarantee becomes weaker (lower min
+        or higher max) and VOLUME_TIGHTENED when it becomes stricter.
+        Mixed or unparseable changes default to VOLUME_RELAXED (conservative).
+        """
+
+        def _extract(v: Any) -> tuple[float | None, float | None]:
+            if isinstance(v, int | float):
+                return (float(v), None)
+            if isinstance(v, dict):
+                lo = v.get("min_rows")
+                hi = v.get("max_rows")
+                try:
+                    lo = float(lo) if lo is not None else None
+                    hi = float(hi) if hi is not None else None
+                except (TypeError, ValueError):
+                    return (None, None)
+                return (lo, hi)
+            return (None, None)
+
+        old_min, old_max = _extract(old_vol)
+        new_min, new_max = _extract(new_vol)
+
+        signals: list[bool] = []  # True = tightened, False = relaxed
+        if old_min is not None and new_min is not None and old_min != new_min:
+            # Higher min_rows = stricter (tightened)
+            signals.append(new_min > old_min)
+        if old_max is not None and new_max is not None and old_max != new_max:
+            # Lower max_rows = stricter (tightened)
+            signals.append(new_max < old_max)
+
+        if signals and all(signals):
+            return GuaranteeChangeKind.VOLUME_TIGHTENED
+        # Mixed directions or unparseable: conservative = RELAXED
+        return GuaranteeChangeKind.VOLUME_RELAXED
 
     def _diff_volume(self) -> None:
         """Compare volume guarantees."""
@@ -1078,8 +1179,9 @@ class GuaranteeDiff:
                 old_value=old_vol,
             )
         elif old_vol is not None and new_vol is not None and old_vol != new_vol:
+            kind = self._classify_volume_direction(old_vol, new_vol)
             self._add_change(
-                GuaranteeChangeKind.VOLUME_RELAXED,
+                kind,
                 "volume",
                 f"volume guarantee changed from {old_vol} to {new_vol}",
                 old_value=old_vol,

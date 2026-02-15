@@ -3,6 +3,7 @@
 from tessera.services.affected_parties import get_affected_parties
 from tessera.services.audit import (
     AuditAction,
+    log_contract_deprecated,
     log_contract_published,
     log_event,
     log_guarantees_updated,
@@ -57,6 +58,7 @@ from tessera.services.schema_validator import (
 from tessera.services.versioning import (
     INITIAL_VERSION,
     bump_version,
+    compute_version_suggestion,
     get_base_version,
     is_graduation,
     is_prerelease,
@@ -85,6 +87,7 @@ __all__ = [
     # Audit logging
     "AuditAction",
     "log_event",
+    "log_contract_deprecated",
     "log_contract_published",
     "log_guarantees_updated",
     "log_proposal_created",
@@ -114,6 +117,7 @@ __all__ = [
     # Versioning
     "INITIAL_VERSION",
     "bump_version",
+    "compute_version_suggestion",
     "get_base_version",
     "is_graduation",
     "is_prerelease",

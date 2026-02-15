@@ -123,6 +123,32 @@ async def log_contract_published(
     )
 
 
+async def log_contract_deprecated(
+    session: AsyncSession,
+    contract_id: UUID,
+    actor_id: UUID,
+    version: str,
+    superseded_by: UUID,
+    superseded_by_version: str,
+) -> AuditEventDB:
+    """Log a contract deprecation event.
+
+    Called when a new contract version supersedes an existing active contract.
+    """
+    return await log_event(
+        session=session,
+        entity_type="contract",
+        entity_id=contract_id,
+        action=AuditAction.CONTRACT_DEPRECATED,
+        actor_id=actor_id,
+        payload={
+            "version": version,
+            "superseded_by": str(superseded_by),
+            "superseded_by_version": superseded_by_version,
+        },
+    )
+
+
 async def log_proposal_created(
     session: AsyncSession,
     proposal_id: UUID,

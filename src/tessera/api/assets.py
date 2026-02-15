@@ -97,7 +97,7 @@ from tessera.services.cache import (
 )
 from tessera.services.slack import notify_proposal_created
 from tessera.services.versioning import (
-    INITIAL_VERSION,
+    compute_version_suggestion,
     is_graduation,
     is_prerelease,
     parse_semver,
@@ -120,67 +120,6 @@ def _apply_asset_search_filters(
     if environment:
         filtered = filtered.where(AssetDB.environment == environment)
     return filtered
-
-
-def compute_version_suggestion(
-    current_version: str | None,
-    change_type: ChangeType,
-    is_compatible: bool,
-    breaking_changes: list[dict[str, Any]] | None = None,
-) -> VersionSuggestion:
-    """Compute the suggested version based on schema diff analysis.
-
-    Args:
-        current_version: The current contract version (None if first contract)
-        change_type: The detected change type from schema diff
-        is_compatible: Whether the change is backward compatible
-        breaking_changes: List of breaking change details from schema diff
-
-    Returns:
-        A VersionSuggestion with the suggested version and explanation
-    """
-    breaks = breaking_changes or []
-
-    if current_version is None:
-        return VersionSuggestion(
-            suggested_version=INITIAL_VERSION,
-            current_version=None,
-            change_type=ChangeType.PATCH,
-            reason="First contract for this asset",
-            is_first_contract=True,
-            breaking_changes=[],
-        )
-
-    major, minor, patch = parse_semver(current_version)
-
-    if not is_compatible:
-        # Breaking change = major bump
-        suggested = f"{major + 1}.0.0"
-        reason = "Breaking change detected - major version bump required"
-        actual_change_type = ChangeType.MAJOR
-    elif change_type == ChangeType.MAJOR:
-        # Schema diff says major, but compatibility check says OK - treat as minor
-        suggested = f"{major}.{minor + 1}.0"
-        reason = "Backward-compatible schema additions - minor version bump"
-        actual_change_type = ChangeType.MINOR
-    elif change_type == ChangeType.MINOR:
-        suggested = f"{major}.{minor + 1}.0"
-        reason = "Backward-compatible schema additions - minor version bump"
-        actual_change_type = ChangeType.MINOR
-    else:
-        # PATCH - no schema changes or only compatible refinements
-        suggested = f"{major}.{minor}.{patch + 1}"
-        reason = "No breaking schema changes - patch version bump"
-        actual_change_type = ChangeType.PATCH
-
-    return VersionSuggestion(
-        suggested_version=suggested,
-        current_version=current_version,
-        change_type=actual_change_type,
-        reason=reason,
-        is_first_contract=False,
-        breaking_changes=breaks,
-    )
 
 
 def validate_version_for_change_type(

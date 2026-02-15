@@ -26,7 +26,12 @@ from tessera.models.enums import (
     SemverMode,
 )
 from tessera.services.affected_parties import get_affected_parties
-from tessera.services.audit import log_contract_published, log_proposal_created
+from tessera.services.audit import (
+    log_contract_deprecated,
+    log_contract_published,
+    log_guarantees_updated,
+    log_proposal_created,
+)
 from tessera.services.avro import AvroConversionError, avro_to_json_schema, validate_avro_schema
 from tessera.services.cache import cache_contract, invalidate_asset
 from tessera.services.schema_diff import check_compatibility, diff_schemas
@@ -34,6 +39,7 @@ from tessera.services.schema_validator import validate_json_schema
 from tessera.services.slack import notify_proposal_created
 from tessera.services.versioning import (
     INITIAL_VERSION,
+    compute_version_suggestion,
     is_graduation,
     is_prerelease,
     parse_semver_lenient,
@@ -200,228 +206,265 @@ async def bulk_publish_contracts(
             failed_count += 1
             continue
 
-        current_contract = active_contracts.get(item.asset_id)
-        current_version = current_contract.version if current_contract else None
+        try:
+            async with session.begin_nested():
+                current_contract = active_contracts.get(item.asset_id)
+                current_version = current_contract.version if current_contract else None
 
-        # Determine compatibility mode
-        if item.compatibility_mode:
-            compat_mode = item.compatibility_mode
-        elif current_contract:
-            compat_mode = current_contract.compatibility_mode
-        else:
-            compat_mode = CompatibilityMode.BACKWARD
+                # Determine compatibility mode
+                if item.compatibility_mode:
+                    compat_mode = item.compatibility_mode
+                elif current_contract:
+                    compat_mode = current_contract.compatibility_mode
+                else:
+                    compat_mode = CompatibilityMode.BACKWARD
 
-        # First contract - always publishable
-        if not current_contract:
-            suggested_version = INITIAL_VERSION
-            if dry_run:
-                results.append(
-                    PublishResult(
-                        asset_id=item.asset_id,
-                        asset_fqn=asset.fqn,
-                        status="will_publish",
-                        suggested_version=suggested_version,
-                        reason="First contract for this asset",
+                # First contract - always publishable
+                if not current_contract:
+                    suggested_version = INITIAL_VERSION
+                    if dry_run:
+                        results.append(
+                            PublishResult(
+                                asset_id=item.asset_id,
+                                asset_fqn=asset.fqn,
+                                status="will_publish",
+                                suggested_version=suggested_version,
+                                reason="First contract for this asset",
+                            )
+                        )
+                        published_count += 1
+                    else:
+                        new_contract = ContractDB(
+                            asset_id=item.asset_id,
+                            version=suggested_version,
+                            schema_def=item.schema_def,
+                            compatibility_mode=compat_mode,
+                            guarantees=item.guarantees,
+                            status=ContractStatus.ACTIVE,
+                            published_by=published_by,
+                            published_by_user_id=published_by_user_id,
+                        )
+                        session.add(new_contract)
+                        await session.flush()
+                        await session.refresh(new_contract)
+
+                        await log_contract_published(
+                            session=session,
+                            contract_id=new_contract.id,
+                            publisher_id=published_by,
+                            version=suggested_version,
+                        )
+                        await invalidate_asset(str(item.asset_id))
+
+                        results.append(
+                            PublishResult(
+                                asset_id=item.asset_id,
+                                asset_fqn=asset.fqn,
+                                status="published",
+                                contract_id=new_contract.id,
+                                suggested_version=suggested_version,
+                                reason="First contract for this asset",
+                            )
+                        )
+                        published_count += 1
+                    continue
+
+                # Existing contract - diff schemas
+                diff_result = diff_schemas(current_contract.schema_def, item.schema_def)
+                is_compatible, breaking_changes = check_compatibility(
+                    current_contract.schema_def,
+                    item.schema_def,
+                    compat_mode,
+                )
+
+                # No changes - skip
+                if not diff_result.has_changes:
+                    results.append(
+                        PublishResult(
+                            asset_id=item.asset_id,
+                            asset_fqn=asset.fqn,
+                            status="will_skip" if dry_run else "skipped",
+                            current_version=current_version,
+                            reason="No schema changes detected",
+                        )
                     )
-                )
-                published_count += 1
-            else:
-                new_contract = ContractDB(
-                    asset_id=item.asset_id,
-                    version=suggested_version,
-                    schema_def=item.schema_def,
-                    compatibility_mode=compat_mode,
-                    guarantees=item.guarantees,
-                    status=ContractStatus.ACTIVE,
-                    published_by=published_by,
-                    published_by_user_id=published_by_user_id,
-                )
-                session.add(new_contract)
-                await session.flush()
-                await session.refresh(new_contract)
+                    skipped_count += 1
+                    continue
 
-                await log_contract_published(
-                    session=session,
-                    contract_id=new_contract.id,
-                    publisher_id=published_by,
-                    version=suggested_version,
+                suggested_version = compute_next_version(
+                    current_version, is_compatible, diff_result.change_type
                 )
-                await invalidate_asset(str(item.asset_id))
 
-                results.append(
-                    PublishResult(
-                        asset_id=item.asset_id,
-                        asset_fqn=asset.fqn,
-                        status="published",
-                        contract_id=new_contract.id,
-                        suggested_version=suggested_version,
-                        reason="First contract for this asset",
+                # Compatible change - can publish
+                if is_compatible:
+                    if dry_run:
+                        results.append(
+                            PublishResult(
+                                asset_id=item.asset_id,
+                                asset_fqn=asset.fqn,
+                                status="will_publish",
+                                suggested_version=suggested_version,
+                                current_version=current_version,
+                                reason=f"Compatible {diff_result.change_type.value} change",
+                            )
+                        )
+                        published_count += 1
+                    else:
+                        # Deprecate old contract
+                        current_contract.status = ContractStatus.DEPRECATED
+
+                        # Publish new contract
+                        new_contract = ContractDB(
+                            asset_id=item.asset_id,
+                            version=suggested_version,
+                            schema_def=item.schema_def,
+                            compatibility_mode=compat_mode,
+                            guarantees=item.guarantees,
+                            status=ContractStatus.ACTIVE,
+                            published_by=published_by,
+                            published_by_user_id=published_by_user_id,
+                        )
+                        session.add(new_contract)
+                        await session.flush()
+                        await session.refresh(new_contract)
+
+                        await log_contract_deprecated(
+                            session=session,
+                            contract_id=current_contract.id,
+                            actor_id=published_by,
+                            version=current_contract.version,
+                            superseded_by=new_contract.id,
+                            superseded_by_version=suggested_version,
+                        )
+                        await log_contract_published(
+                            session=session,
+                            contract_id=new_contract.id,
+                            publisher_id=published_by,
+                            version=suggested_version,
+                            change_type=str(diff_result.change_type.value),
+                        )
+
+                        # Log guarantee changes if guarantees differ
+                        old_g = current_contract.guarantees
+                        new_g = item.guarantees
+                        if old_g != new_g and (old_g or new_g):
+                            await log_guarantees_updated(
+                                session=session,
+                                contract_id=new_contract.id,
+                                actor_id=published_by,
+                                old_guarantees=old_g,
+                                new_guarantees=new_g or {},
+                            )
+
+                        await invalidate_asset(str(item.asset_id))
+
+                        results.append(
+                            PublishResult(
+                                asset_id=item.asset_id,
+                                asset_fqn=asset.fqn,
+                                status="published",
+                                contract_id=new_contract.id,
+                                suggested_version=suggested_version,
+                                current_version=current_version,
+                                reason=f"Compatible {diff_result.change_type.value} change",
+                            )
+                        )
+                        published_count += 1
+                    continue
+
+                # Breaking change
+                breaking_changes_list = [bc.to_dict() for bc in breaking_changes]
+
+                if dry_run:
+                    results.append(
+                        PublishResult(
+                            asset_id=item.asset_id,
+                            asset_fqn=asset.fqn,
+                            status="breaking",
+                            suggested_version=suggested_version,
+                            current_version=current_version,
+                            breaking_changes=breaking_changes_list,
+                            reason=(
+                                f"Breaking change: {len(breaking_changes)}"
+                                f" incompatible modification(s)"
+                            ),
+                        )
                     )
-                )
-                published_count += 1
-            continue
+                    if create_proposals_for_breaking:
+                        proposals_count += 1
+                    else:
+                        failed_count += 1
+                elif create_proposals_for_breaking:
+                    # Create proposal for breaking change
+                    affected_teams, affected_assets = await get_affected_parties(
+                        session, item.asset_id, exclude_team_id=asset.owner_team_id
+                    )
 
-        # Existing contract - diff schemas
-        diff_result = diff_schemas(current_contract.schema_def, item.schema_def)
-        is_compatible, breaking_changes = check_compatibility(
-            current_contract.schema_def,
-            item.schema_def,
-            compat_mode,
-        )
+                    proposal = ProposalDB(
+                        asset_id=item.asset_id,
+                        proposed_schema=item.schema_def,
+                        proposed_guarantees=item.guarantees,
+                        change_type=diff_result.change_type,
+                        breaking_changes=breaking_changes_list,
+                        proposed_by=published_by,
+                        proposed_by_user_id=published_by_user_id,
+                        affected_teams=affected_teams,
+                        affected_assets=affected_assets,
+                        objections=[],
+                    )
+                    session.add(proposal)
+                    await session.flush()
+                    await session.refresh(proposal)
 
-        # No changes - skip
-        if not diff_result.has_changes:
+                    await log_proposal_created(
+                        session=session,
+                        proposal_id=proposal.id,
+                        asset_id=item.asset_id,
+                        proposer_id=published_by,
+                        change_type=str(diff_result.change_type.value),
+                        breaking_changes=breaking_changes_list,
+                    )
+
+                    results.append(
+                        PublishResult(
+                            asset_id=item.asset_id,
+                            asset_fqn=asset.fqn,
+                            status="proposal_created",
+                            proposal_id=proposal.id,
+                            suggested_version=suggested_version,
+                            current_version=current_version,
+                            breaking_changes=breaking_changes_list,
+                            reason=(
+                                f"Breaking change: proposal created for "
+                                f"{len(breaking_changes)} incompatible modification(s)"
+                            ),
+                        )
+                    )
+                    proposals_count += 1
+                else:
+                    # Skip breaking change
+                    results.append(
+                        PublishResult(
+                            asset_id=item.asset_id,
+                            asset_fqn=asset.fqn,
+                            status="failed",
+                            suggested_version=suggested_version,
+                            current_version=current_version,
+                            breaking_changes=breaking_changes_list,
+                            error=(
+                                "Breaking change requires proposal. "
+                                "Use create_proposals_for_breaking=true or resolve manually."
+                            ),
+                        )
+                    )
+                    failed_count += 1
+        except Exception:
             results.append(
                 PublishResult(
                     asset_id=item.asset_id,
-                    asset_fqn=asset.fqn,
-                    status="will_skip" if dry_run else "skipped",
-                    current_version=current_version,
-                    reason="No schema changes detected",
-                )
-            )
-            skipped_count += 1
-            continue
-
-        suggested_version = compute_next_version(
-            current_version, is_compatible, diff_result.change_type
-        )
-
-        # Compatible change - can publish
-        if is_compatible:
-            if dry_run:
-                results.append(
-                    PublishResult(
-                        asset_id=item.asset_id,
-                        asset_fqn=asset.fqn,
-                        status="will_publish",
-                        suggested_version=suggested_version,
-                        current_version=current_version,
-                        reason=f"Compatible {diff_result.change_type.value} change",
-                    )
-                )
-                published_count += 1
-            else:
-                # Deprecate old contract
-                current_contract.status = ContractStatus.DEPRECATED
-
-                # Publish new contract
-                new_contract = ContractDB(
-                    asset_id=item.asset_id,
-                    version=suggested_version,
-                    schema_def=item.schema_def,
-                    compatibility_mode=compat_mode,
-                    guarantees=item.guarantees,
-                    status=ContractStatus.ACTIVE,
-                    published_by=published_by,
-                    published_by_user_id=published_by_user_id,
-                )
-                session.add(new_contract)
-                await session.flush()
-                await session.refresh(new_contract)
-
-                await log_contract_published(
-                    session=session,
-                    contract_id=new_contract.id,
-                    publisher_id=published_by,
-                    version=suggested_version,
-                    change_type=str(diff_result.change_type.value),
-                )
-                await invalidate_asset(str(item.asset_id))
-
-                results.append(
-                    PublishResult(
-                        asset_id=item.asset_id,
-                        asset_fqn=asset.fqn,
-                        status="published",
-                        contract_id=new_contract.id,
-                        suggested_version=suggested_version,
-                        current_version=current_version,
-                        reason=f"Compatible {diff_result.change_type.value} change",
-                    )
-                )
-                published_count += 1
-            continue
-
-        # Breaking change
-        breaking_changes_list = [bc.to_dict() for bc in breaking_changes]
-
-        if dry_run:
-            results.append(
-                PublishResult(
-                    asset_id=item.asset_id,
-                    asset_fqn=asset.fqn,
-                    status="breaking",
-                    suggested_version=suggested_version,
-                    current_version=current_version,
-                    breaking_changes=breaking_changes_list,
-                    reason=f"Breaking change: {len(breaking_changes)} incompatible modification(s)",
-                )
-            )
-            if create_proposals_for_breaking:
-                proposals_count += 1
-            else:
-                failed_count += 1
-        elif create_proposals_for_breaking:
-            # Create proposal for breaking change
-            affected_teams, affected_assets = await get_affected_parties(
-                session, item.asset_id, exclude_team_id=asset.owner_team_id
-            )
-
-            proposal = ProposalDB(
-                asset_id=item.asset_id,
-                proposed_schema=item.schema_def,
-                change_type=diff_result.change_type,
-                breaking_changes=breaking_changes_list,
-                proposed_by=published_by,
-                proposed_by_user_id=published_by_user_id,
-                affected_teams=affected_teams,
-                affected_assets=affected_assets,
-                objections=[],
-            )
-            session.add(proposal)
-            await session.flush()
-            await session.refresh(proposal)
-
-            await log_proposal_created(
-                session=session,
-                proposal_id=proposal.id,
-                asset_id=item.asset_id,
-                proposer_id=published_by,
-                change_type=str(diff_result.change_type.value),
-                breaking_changes=breaking_changes_list,
-            )
-
-            results.append(
-                PublishResult(
-                    asset_id=item.asset_id,
-                    asset_fqn=asset.fqn,
-                    status="proposal_created",
-                    proposal_id=proposal.id,
-                    suggested_version=suggested_version,
-                    current_version=current_version,
-                    breaking_changes=breaking_changes_list,
-                    reason=(
-                        f"Breaking change: proposal created for "
-                        f"{len(breaking_changes)} incompatible modification(s)"
-                    ),
-                )
-            )
-            proposals_count += 1
-        else:
-            # Skip breaking change
-            results.append(
-                PublishResult(
-                    asset_id=item.asset_id,
-                    asset_fqn=asset.fqn,
+                    asset_fqn=asset.fqn if asset else None,
                     status="failed",
-                    suggested_version=suggested_version,
-                    current_version=current_version,
-                    breaking_changes=breaking_changes_list,
-                    error=(
-                        "Breaking change requires proposal. "
-                        "Use create_proposals_for_breaking=true or resolve manually."
-                    ),
+                    error=f"Internal error publishing contract for asset {item.asset_id}",
                 )
             )
             failed_count += 1
@@ -569,13 +612,18 @@ class ContractPublishingWorkflow:
         return result.scalar_one_or_none()
 
     async def _get_current_contract(self) -> ContractDB | None:
-        """Get the current active contract for the asset."""
+        """Get the current active contract for the asset.
+
+        Uses ``FOR UPDATE`` to prevent concurrent publishes from reading the
+        same active contract and both attempting to deprecate it.
+        """
         result = await self.session.execute(
             select(ContractDB)
             .where(ContractDB.asset_id == self.asset.id)
             .where(ContractDB.status == ContractStatus.ACTIVE)
             .order_by(ContractDB.published_at.desc())
             .limit(1)
+            .with_for_update()
         )
         return result.scalar_one_or_none()
 
@@ -589,7 +637,11 @@ class ContractPublishingWorkflow:
         return result.scalar_one_or_none()
 
     async def _publish_contract(self) -> ContractDB:
-        """Create and save the new contract."""
+        """Create and save the new contract.
+
+        Handles deprecation of the previous contract within the same savepoint
+        and logs both deprecation and guarantee changes to the audit trail.
+        """
         async with self.session.begin_nested():
             db_contract = ContractDB(
                 asset_id=self.asset.id,
@@ -609,6 +661,30 @@ class ContractPublishingWorkflow:
 
             await self.session.flush()
             await self.session.refresh(db_contract)
+
+            # Audit: log deprecation of the old contract
+            if self.current_contract:
+                await log_contract_deprecated(
+                    session=self.session,
+                    contract_id=self.current_contract.id,
+                    actor_id=self.published_by,
+                    version=self.current_contract.version,
+                    superseded_by=db_contract.id,
+                    superseded_by_version=self.version,
+                )
+
+                # Audit: log guarantee changes if guarantees differ
+                old_g = self.current_contract.guarantees
+                new_g = self.guarantees
+                if old_g != new_g and (old_g or new_g):
+                    await log_guarantees_updated(
+                        session=self.session,
+                        contract_id=db_contract.id,
+                        actor_id=self.published_by,
+                        old_guarantees=old_g,
+                        new_guarantees=new_g or {},
+                    )
+
         return db_contract
 
     async def _get_impacted_consumers(self) -> list[ImpactedConsumer]:
@@ -680,14 +756,14 @@ class ContractPublishingWorkflow:
                 self.schema_to_store,
                 self.current_contract.compatibility_mode,
             )
-            self.version_suggestion = _compute_version_suggestion(
+            self.version_suggestion = compute_version_suggestion(
                 self.current_contract.version,
                 diff.change_type,
                 is_compat,
                 [bc.to_dict() for bc in breaks],
             )
         else:
-            self.version_suggestion = _compute_version_suggestion(None, ChangeType.PATCH, True)
+            self.version_suggestion = compute_version_suggestion(None, ChangeType.PATCH, True)
 
         # Handle version
         semver_mode = self.asset.semver_mode
@@ -827,6 +903,7 @@ class ContractPublishingWorkflow:
         proposal = ProposalDB(
             asset_id=self.asset.id,
             proposed_schema=self.schema_to_store,
+            proposed_guarantees=self.guarantees,
             change_type=diff_result.change_type,
             breaking_changes=breaking_changes_list,
             proposed_by=self.published_by,
@@ -886,53 +963,6 @@ class ContractPublishingWorkflow:
             message="Breaking change detected. Proposal created for consumer acknowledgment.",
             impacted_consumers=impacted_consumers,
         )
-
-
-def _compute_version_suggestion(
-    current_version: str | None,
-    change_type: ChangeType,
-    is_compatible: bool,
-    breaking_changes: list[dict[str, Any]] | None = None,
-) -> VersionSuggestion:
-    """Compute a version suggestion based on the change type and compatibility."""
-    breaks = breaking_changes or []
-
-    if current_version is None:
-        return VersionSuggestion(
-            suggested_version=INITIAL_VERSION,
-            current_version=None,
-            change_type=ChangeType.PATCH,
-            reason="First contract for this asset",
-            is_first_contract=True,
-            breaking_changes=[],
-        )
-
-    major, minor, patch = parse_semver_lenient(current_version)
-
-    if not is_compatible:
-        # Breaking change = major bump
-        suggested = f"{major + 1}.0.0"
-        reason = "Breaking change detected - major version bump required"
-        actual_change_type = ChangeType.MAJOR
-    elif change_type in (ChangeType.MAJOR, ChangeType.MINOR):
-        # Schema diff says major/minor, but compatibility check says OK - treat as minor
-        suggested = f"{major}.{minor + 1}.0"
-        reason = "Backward-compatible schema additions - minor version bump"
-        actual_change_type = ChangeType.MINOR
-    else:
-        # PATCH - no schema changes or only compatible refinements
-        suggested = f"{major}.{minor}.{patch + 1}"
-        reason = "No breaking schema changes - patch version bump"
-        actual_change_type = ChangeType.PATCH
-
-    return VersionSuggestion(
-        suggested_version=suggested,
-        current_version=current_version,
-        change_type=actual_change_type,
-        reason=reason,
-        is_first_contract=False,
-        breaking_changes=breaks,
-    )
 
 
 async def get_last_audit_status(

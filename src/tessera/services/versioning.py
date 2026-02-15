@@ -4,7 +4,13 @@ All version parsing, comparison, and bumping logic lives here.
 Other modules import from this module rather than defining their own.
 """
 
-from typing import Final
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, Final
+
+if TYPE_CHECKING:
+    from tessera.models import VersionSuggestion
+    from tessera.models.enums import ChangeType
 
 INITIAL_VERSION: Final[str] = "1.0.0"
 """Version assigned to the first contract published for an asset."""
@@ -108,3 +114,63 @@ def bump_version(current: str, bump_type: str) -> str:
         return f"{major}.{minor + 1}.0"
     else:
         return f"{major}.{minor}.{patch + 1}"
+
+
+def compute_version_suggestion(
+    current_version: str | None,
+    change_type: ChangeType,
+    is_compatible: bool,
+    breaking_changes: list[dict[str, Any]] | None = None,
+) -> VersionSuggestion:
+    """Compute a suggested next version based on schema diff analysis.
+
+    Uses lenient parsing so that malformed stored versions don't crash
+    the suggestion flow.
+
+    Args:
+        current_version: The current contract version (``None`` for first contract).
+        change_type: The detected change type from schema diff.
+        is_compatible: Whether the change is backward compatible.
+        breaking_changes: List of breaking change details from schema diff.
+
+    Returns:
+        A :class:`VersionSuggestion` with the suggested version and explanation.
+    """
+    from tessera.models import VersionSuggestion
+    from tessera.models.enums import ChangeType as ChangeTypeEnum
+
+    breaks = breaking_changes or []
+
+    if current_version is None:
+        return VersionSuggestion(
+            suggested_version=INITIAL_VERSION,
+            current_version=None,
+            change_type=ChangeTypeEnum.PATCH,
+            reason="First contract for this asset",
+            is_first_contract=True,
+            breaking_changes=[],
+        )
+
+    major, minor, patch = parse_semver_lenient(current_version)
+
+    if not is_compatible:
+        suggested = f"{major + 1}.0.0"
+        reason = "Breaking change detected - major version bump required"
+        actual_change_type = ChangeTypeEnum.MAJOR
+    elif change_type in (ChangeTypeEnum.MAJOR, ChangeTypeEnum.MINOR):
+        suggested = f"{major}.{minor + 1}.0"
+        reason = "Backward-compatible schema additions - minor version bump"
+        actual_change_type = ChangeTypeEnum.MINOR
+    else:
+        suggested = f"{major}.{minor}.{patch + 1}"
+        reason = "No breaking schema changes - patch version bump"
+        actual_change_type = ChangeTypeEnum.PATCH
+
+    return VersionSuggestion(
+        suggested_version=suggested,
+        current_version=current_version,
+        change_type=actual_change_type,
+        reason=reason,
+        is_first_contract=False,
+        breaking_changes=breaks,
+    )
