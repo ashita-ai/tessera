@@ -1040,8 +1040,9 @@ class GuaranteeDiff:
     def _extract_freshness_duration_seconds(value: Any) -> float | None:
         """Extract a freshness duration as total seconds from known formats.
 
-        Supports two formats:
+        Supports these formats:
         - ``{"warn_after": {"days": N, "hours": N, "minutes": N, "seconds": N}}``
+        - ``{"warn_after": {"count": N, "period": "hour"}}`` (dbt-style)
         - ``{"max_staleness_minutes": N}``
 
         Returns ``None`` if the format is unrecognised so callers can fall back
@@ -1053,12 +1054,24 @@ class GuaranteeDiff:
         # Format 1: warn_after with day/hour/minute/second components
         warn_after = value.get("warn_after")
         if isinstance(warn_after, dict):
-            total = 0.0
-            total += float(warn_after.get("days", 0)) * 86400
-            total += float(warn_after.get("hours", 0)) * 3600
-            total += float(warn_after.get("minutes", 0)) * 60
-            total += float(warn_after.get("seconds", 0))
-            return total
+            # Check for direct time-unit keys first
+            time_units = {"days": 86400, "hours": 3600, "minutes": 60, "seconds": 1}
+            if any(u in warn_after for u in time_units):
+                total = 0.0
+                for unit, multiplier in time_units.items():
+                    total += float(warn_after.get(unit, 0)) * multiplier
+                return total
+
+            # dbt-style: {"count": N, "period": "hour"}
+            if "count" in warn_after and "period" in warn_after:
+                try:
+                    count = float(warn_after["count"])
+                except (TypeError, ValueError):
+                    return None
+                period = str(warn_after["period"]).lower().rstrip("s")
+                period_seconds = {"day": 86400, "hour": 3600, "minute": 60, "second": 1}
+                if period in period_seconds:
+                    return count * period_seconds[period]
 
         # Format 2: max_staleness_minutes
         max_staleness = value.get("max_staleness_minutes")

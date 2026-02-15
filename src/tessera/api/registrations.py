@@ -1,5 +1,6 @@
 """Registrations API endpoints."""
 
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -90,7 +91,7 @@ async def list_registrations(
 
     Requires read scope. Returns X-Total-Count header with total count.
     """
-    query = select(RegistrationDB)
+    query = select(RegistrationDB).where(RegistrationDB.deleted_at.is_(None))
     if consumer_team_id:
         query = query.where(RegistrationDB.consumer_team_id == consumer_team_id)
     if contract_id:
@@ -116,7 +117,9 @@ async def get_registration(
     Requires read scope.
     """
     result = await session.execute(
-        select(RegistrationDB).where(RegistrationDB.id == registration_id)
+        select(RegistrationDB)
+        .where(RegistrationDB.id == registration_id)
+        .where(RegistrationDB.deleted_at.is_(None))
     )
     registration = result.scalar_one_or_none()
     if not registration:
@@ -139,7 +142,9 @@ async def update_registration(
     Requires write scope.
     """
     result = await session.execute(
-        select(RegistrationDB).where(RegistrationDB.id == registration_id)
+        select(RegistrationDB)
+        .where(RegistrationDB.id == registration_id)
+        .where(RegistrationDB.deleted_at.is_(None))
     )
     registration = result.scalar_one_or_none()
     if not registration:
@@ -190,7 +195,9 @@ async def delete_registration(
     Requires write scope.
     """
     result = await session.execute(
-        select(RegistrationDB).where(RegistrationDB.id == registration_id)
+        select(RegistrationDB)
+        .where(RegistrationDB.id == registration_id)
+        .where(RegistrationDB.deleted_at.is_(None))
     )
     registration = result.scalar_one_or_none()
     if not registration:
@@ -213,4 +220,4 @@ async def delete_registration(
         payload={"contract_id": str(registration.contract_id)},
     )
 
-    await session.delete(registration)
+    registration.deleted_at = datetime.now(UTC)

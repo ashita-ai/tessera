@@ -1,4 +1,21 @@
-"""SQLAlchemy database models."""
+"""SQLAlchemy database models.
+
+Cascade Policy
+--------------
+No cascade deletes are configured on any relationship. This is intentional:
+
+- **Audit immutability**: Audit events, contracts, proposals, and acknowledgments
+  must survive parent deletion to preserve the full paper trail.
+- **Soft delete strategy**: Teams, assets, and users use soft delete
+  (``deleted_at`` / ``deactivated_at``). Queries filter these out rather than
+  destroying rows.
+- **FK integrity**: PostgreSQL FK constraints prevent accidental hard deletes
+  of referenced rows. Any hard delete of a parent would raise
+  ``IntegrityError``, which is the desired behavior.
+
+If a cleanup job is ever needed for truly orphaned records, it should be
+implemented as a separate maintenance task with explicit audit logging.
+"""
 
 from datetime import UTC, datetime
 from typing import Any
@@ -199,6 +216,9 @@ class RegistrationDB(Base):
         DateTime(timezone=True), default=_utcnow, index=True
     )
     acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
 
     __table_args__ = (
         UniqueConstraint(
