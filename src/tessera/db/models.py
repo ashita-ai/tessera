@@ -186,7 +186,10 @@ class ContractDB(Base):
     )  # Individual who published
 
     # Composite index for finding active contracts by asset (common query pattern)
-    __table_args__ = (Index("idx_contract_asset_status", "asset_id", "status"),)
+    __table_args__ = (
+        Index("idx_contract_asset_status", "asset_id", "status"),
+        UniqueConstraint("asset_id", "version", name="uq_contracts_asset_version"),
+    )
 
     # Relationships
     # Use selectin for asset since contract details often need asset info

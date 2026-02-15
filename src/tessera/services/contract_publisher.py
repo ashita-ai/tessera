@@ -5,6 +5,7 @@ Provides core logic for publishing contracts:
 - Single publishing: ContractPublishingWorkflow for the API endpoint
 """
 
+import logging
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -45,6 +46,8 @@ from tessera.services.versioning import (
     parse_semver_lenient,
 )
 from tessera.services.webhooks import send_proposal_created
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -136,11 +139,14 @@ async def bulk_publish_contracts(
     )
     assets_map: dict[UUID, AssetDB] = {a.id: a for a in assets_result.scalars().all()}
 
-    # Fetch all active contracts for these assets in one query
+    # Fetch all active contracts for these assets in one query.
+    # Use FOR UPDATE to prevent concurrent bulk publishes from both reading the
+    # same active contract and both attempting to deprecate it.
     contracts_result = await session.execute(
         select(ContractDB)
         .where(ContractDB.asset_id.in_(asset_ids))
         .where(ContractDB.status == ContractStatus.ACTIVE)
+        .with_for_update()
     )
     active_contracts: dict[UUID, ContractDB] = {}
     for contract in contracts_result.scalars().all():
@@ -458,13 +464,17 @@ async def bulk_publish_contracts(
                         )
                     )
                     failed_count += 1
-        except Exception:
+        except Exception as exc:
+            logger.exception("Failed to publish contract for asset %s: %s", item.asset_id, exc)
             results.append(
                 PublishResult(
                     asset_id=item.asset_id,
                     asset_fqn=asset.fqn if asset else None,
                     status="failed",
-                    error=f"Internal error publishing contract for asset {item.asset_id}",
+                    error=(
+                        f"Internal error publishing contract for asset {item.asset_id}"
+                        f": {type(exc).__name__}: {exc}"
+                    ),
                 )
             )
             failed_count += 1
@@ -628,11 +638,16 @@ class ContractPublishingWorkflow:
         return result.scalar_one_or_none()
 
     async def _check_pending_proposal(self) -> ProposalDB | None:
-        """Check if there's already a pending proposal for this asset."""
+        """Check if there's already a pending proposal for this asset.
+
+        Uses ``FOR UPDATE`` to prevent two concurrent breaking-change publishes
+        from both seeing "no pending proposal" and both creating one.
+        """
         result = await self.session.execute(
             select(ProposalDB)
             .where(ProposalDB.asset_id == self.asset.id)
             .where(ProposalDB.status == ProposalStatus.PENDING)
+            .with_for_update()
         )
         return result.scalar_one_or_none()
 

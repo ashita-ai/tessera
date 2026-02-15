@@ -115,11 +115,12 @@ async def check_proposal_completion(
     if not current_contract:
         return True, 0
 
-    # Get all active registrations for this contract
+    # Get all active, non-deleted registrations for this contract
     reg_result = await session.execute(
         select(RegistrationDB)
         .where(RegistrationDB.contract_id == current_contract.id)
         .where(RegistrationDB.status == RegistrationStatus.ACTIVE)
+        .where(RegistrationDB.deleted_at.is_(None))
     )
     registrations = reg_result.scalars().all()
 
@@ -561,6 +562,43 @@ async def acknowledge_proposal(
             ErrorCode.DUPLICATE_ACKNOWLEDGMENT, "Already acknowledged by this team"
         )
 
+    # Lock the proposal row BEFORE creating the ack to prevent race conditions.
+    # Without this, two concurrent acks could both create rows before either
+    # acquires the lock, leading to duplicate auto-approval attempts.
+    locked_result = await session.execute(
+        select(ProposalDB).where(ProposalDB.id == proposal_id).with_for_update()
+    )
+    proposal = locked_result.scalar_one()
+
+    # Re-check status under lock in case another concurrent ack already resolved it
+    if proposal.status != ProposalStatus.PENDING:
+        raise BadRequestError("Proposal is not pending", code=ErrorCode.PROPOSAL_NOT_PENDING)
+
+    # Verify the acknowledging team has an active registration for the current
+    # active contract. Only registered consumers can acknowledge proposals.
+    contract_result = await session.execute(
+        select(ContractDB)
+        .where(ContractDB.asset_id == proposal.asset_id)
+        .where(ContractDB.status == ContractStatus.ACTIVE)
+        .order_by(ContractDB.published_at.desc())
+        .limit(1)
+    )
+    current_contract = contract_result.scalar_one_or_none()
+
+    if current_contract:
+        reg_result = await session.execute(
+            select(RegistrationDB)
+            .where(RegistrationDB.contract_id == current_contract.id)
+            .where(RegistrationDB.consumer_team_id == ack.consumer_team_id)
+            .where(RegistrationDB.status == RegistrationStatus.ACTIVE)
+            .where(RegistrationDB.deleted_at.is_(None))
+        )
+        if not reg_result.scalar_one_or_none():
+            raise ForbiddenError(
+                "Only registered consumers can acknowledge proposals",
+                code=ErrorCode.UNAUTHORIZED_TEAM,
+            )
+
     db_ack = AcknowledgmentDB(
         proposal_id=proposal_id,
         consumer_team_id=ack.consumer_team_id,
@@ -580,18 +618,6 @@ async def acknowledge_proposal(
         response=str(ack.response),
         notes=ack.notes,
     )
-
-    # Lock the proposal row to prevent race conditions when two consumers
-    # acknowledge concurrently. Without this, both could read all_acknowledged=True
-    # and both attempt auto-approval, or both read False and neither triggers it.
-    locked_result = await session.execute(
-        select(ProposalDB).where(ProposalDB.id == proposal_id).with_for_update()
-    )
-    proposal = locked_result.scalar_one()
-
-    # Re-check status under lock in case another concurrent ack already resolved it
-    if proposal.status != ProposalStatus.PENDING:
-        return db_ack
 
     # Check current acknowledgment counts before status change
     all_acknowledged, ack_count = await check_proposal_completion(proposal, session)

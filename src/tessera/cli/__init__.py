@@ -1,6 +1,7 @@
 """Tessera CLI - Data contract coordination from the command line."""
 
 import json
+import logging
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -8,6 +9,8 @@ import httpx
 import typer
 from rich.console import Console
 from rich.table import Table
+
+logger = logging.getLogger(__name__)
 
 app = typer.Typer(
     name="tessera",
@@ -77,6 +80,7 @@ def handle_response(response: httpx.Response) -> Any:
         try:
             detail = response.json().get("detail", response.text)
         except Exception:
+            logger.debug("Failed to parse error response as JSON", exc_info=True)
             detail = response.text
         err_console.print(f"[red]Error ({response.status_code}):[/red] {detail}")
         raise typer.Exit(1)

@@ -588,12 +588,12 @@ class TestMultipleConsumerScenarios:
         prop_status = await client.get(f"/api/v1/proposals/{proposal_id}")
         assert prop_status.json()["status"] == "approved"
 
-    async def test_unregistered_team_can_acknowledge(self, client: AsyncClient):
-        """Unregistered teams can still acknowledge (they may want to voice opinion).
+    async def test_unregistered_team_cannot_acknowledge(self, client: AsyncClient):
+        """Unregistered teams are rejected when trying to acknowledge proposals.
 
-        Note: The current API allows unregistered teams to acknowledge.
-        This is arguably valid - a team may want to express support/concern
-        even if they're not a registered consumer.
+        Only teams with an active registration for the current active contract
+        can acknowledge proposals. This prevents unauthorized teams from
+        influencing the approval workflow.
         """
         producer_resp = await client.post("/api/v1/teams", json={"name": "unreg-ack-prod"})
         registered_resp = await client.post("/api/v1/teams", json={"name": "unreg-ack-reg"})
@@ -636,24 +636,23 @@ class TestMultipleConsumerScenarios:
         )
         proposal_id = prop_resp.json()["proposal"]["id"]
 
-        # Unregistered team can acknowledge
-        # Current behavior: This is allowed (they can express an opinion)
+        # Unregistered team is rejected
         ack_resp = await client.post(
             f"/api/v1/proposals/{proposal_id}/acknowledge",
             json={"consumer_team_id": unregistered_id, "response": "approved"},
         )
-        # The API currently allows this - document the actual behavior
-        assert ack_resp.status_code == 201
+        assert ack_resp.status_code == 403
 
-        # But the proposal won't auto-approve until the registered consumer acknowledges
+        # Proposal stays pending
         status_resp = await client.get(f"/api/v1/proposals/{proposal_id}/status")
         assert status_resp.json()["status"] == "pending"
 
-        # Now registered consumer acknowledges
-        await client.post(
+        # Registered consumer can still acknowledge
+        ack_resp = await client.post(
             f"/api/v1/proposals/{proposal_id}/acknowledge",
             json={"consumer_team_id": registered_id, "response": "approved"},
         )
+        assert ack_resp.status_code == 201
 
         # Now it should be approved
         status_resp = await client.get(f"/api/v1/proposals/{proposal_id}/status")

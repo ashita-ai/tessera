@@ -269,7 +269,7 @@ async def health(
                 "overflow": pool.overflow(),
             }
     except Exception:
-        pass  # Don't fail health check if pool introspection fails
+        logger.debug("Pool introspection failed during health check", exc_info=True)
 
     checks["database"] = db_check
 

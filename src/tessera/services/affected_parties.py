@@ -9,7 +9,7 @@ from collections import defaultdict
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import String, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.db import AssetDB, AssetDependencyDB, TeamDB, UserDB
@@ -87,20 +87,25 @@ async def get_affected_parties(
             )
             team_assets[team_id_str].append(asset_id_str)
 
-    # 2. Check metadata.depends_on for assets not in dependencies table
-    # Find all assets whose metadata.depends_on contains this asset's FQN
-    all_assets_result = await session.execute(
+    # 2. Check metadata.depends_on for assets not in dependencies table.
+    # Use a LIKE pre-filter on the JSON metadata column to avoid loading every
+    # asset into Python. The LIKE filter is not perfectly precise (it matches
+    # substrings) but eliminates the vast majority of rows before the Python
+    # check, turning O(N) into O(matches).
+    fqn_pattern = f'%"{asset.fqn}"%'
+    metadata_query = (
         select(AssetDB, TeamDB)
         .join(TeamDB, AssetDB.owner_team_id == TeamDB.id)
         .where(AssetDB.deleted_at.is_(None))
-        .where(AssetDB.id != asset_id)  # Exclude the asset being changed
+        .where(AssetDB.id != asset_id)
+        .where(AssetDB.metadata_.cast(String).like(fqn_pattern))
     )
+    if exclude_team_id:
+        metadata_query = metadata_query.where(AssetDB.owner_team_id != exclude_team_id)
 
-    for downstream_asset, downstream_team in all_assets_result.all():
-        # Skip if excluding this team
-        if exclude_team_id and downstream_asset.owner_team_id == exclude_team_id:
-            continue
+    metadata_result = await session.execute(metadata_query)
 
+    for downstream_asset, downstream_team in metadata_result.all():
         depends_on = downstream_asset.metadata_.get("depends_on", [])
         if asset.fqn in depends_on:
             asset_id_str = str(downstream_asset.id)
