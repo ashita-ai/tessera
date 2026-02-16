@@ -97,6 +97,7 @@ class Contract(ContractBase):
     published_at: datetime
     published_by: UUID
     published_by_user_id: UUID | None = None
+    updated_at: datetime | None = None
 
 
 class VersionSuggestionRequest(BaseModel):

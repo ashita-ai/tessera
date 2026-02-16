@@ -42,3 +42,4 @@ class Registration(RegistrationBase):
     status: RegistrationStatus = RegistrationStatus.ACTIVE
     registered_at: datetime
     acknowledged_at: datetime | None = None
+    updated_at: datetime | None = None
