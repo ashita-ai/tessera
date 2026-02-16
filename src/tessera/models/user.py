@@ -74,6 +74,7 @@ class User(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict, validation_alias="metadata_")
     notification_preferences: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
+    updated_at: datetime | None = None
     deactivated_at: datetime | None = None
 
 

@@ -87,6 +87,9 @@ class UserDB(Base):
         JSON, default=dict, nullable=False
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, onupdate=_utcnow
+    )
     deactivated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True
     )
@@ -105,6 +108,9 @@ class TeamDB(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, onupdate=_utcnow
+    )
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True
     )
@@ -139,6 +145,9 @@ class AssetDB(Base):
     semver_mode: Mapped[SemverMode] = mapped_column(Enum(SemverMode), default=SemverMode.AUTO)
     metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, onupdate=_utcnow
+    )
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True
     )
@@ -180,10 +189,15 @@ class ContractDB(Base):
     published_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, index=True
     )
-    published_by: Mapped[UUID] = mapped_column(Uuid, nullable=False)  # Team ID
+    published_by: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("teams.id"), nullable=False
+    )  # Team ID
     published_by_user_id: Mapped[UUID | None] = mapped_column(
         Uuid, ForeignKey("users.id"), nullable=True, index=True
     )  # Individual who published
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, onupdate=_utcnow
+    )
 
     # Composite index for finding active contracts by asset (common query pattern)
     __table_args__ = (
@@ -219,6 +233,9 @@ class RegistrationDB(Base):
         DateTime(timezone=True), default=_utcnow, index=True
     )
     acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, onupdate=_utcnow
+    )
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True
     )
@@ -250,7 +267,9 @@ class ProposalDB(Base):
     status: Mapped[ProposalStatus] = mapped_column(
         Enum(ProposalStatus), default=ProposalStatus.PENDING, index=True
     )
-    proposed_by: Mapped[UUID] = mapped_column(Uuid, nullable=False)  # Team ID
+    proposed_by: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("teams.id"), nullable=False
+    )  # Team ID
     proposed_by_user_id: Mapped[UUID | None] = mapped_column(
         Uuid, ForeignKey("users.id"), nullable=True, index=True
     )  # Individual who proposed
@@ -262,6 +281,9 @@ class ProposalDB(Base):
         DateTime(timezone=True), nullable=True, index=True
     )
     auto_expire: Mapped[bool] = mapped_column(default=False)
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, onupdate=_utcnow
+    )
 
     # Affected parties discovered via lineage (not registered consumers)
     # Teams owning downstream assets that will be affected by this change
@@ -354,9 +376,15 @@ class AuditEventDB(Base):
     entity_type: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     entity_id: Mapped[UUID] = mapped_column(Uuid, nullable=False, index=True)
     action: Mapped[str] = mapped_column(String(100), nullable=False)
-    actor_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
+    actor_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True, index=True)
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
-    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, index=True
+    )
+
+    __table_args__ = (
+        Index("ix_audit_events_entity_type_occurred_at", "entity_type", "occurred_at"),
+    )
 
 
 class APIKeyDB(Base):
@@ -375,6 +403,9 @@ class APIKeyDB(Base):
     team_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("teams.id"), nullable=False, index=True)
     scopes: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, onupdate=_utcnow
+    )
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

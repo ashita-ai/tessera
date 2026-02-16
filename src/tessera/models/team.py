@@ -56,3 +56,4 @@ class Team(BaseModel):
     name: str
     metadata: dict[str, Any] = Field(default_factory=dict, validation_alias="metadata_")
     created_at: datetime
+    updated_at: datetime | None = None

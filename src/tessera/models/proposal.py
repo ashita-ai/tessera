@@ -98,6 +98,7 @@ class Proposal(ProposalBase):
     resolved_at: datetime | None = None
     expires_at: datetime | None = None
     auto_expire: bool = False
+    updated_at: datetime | None = None
 
     # Affected parties discovered via lineage (not registered consumers)
     affected_teams: list[AffectedTeam] = Field(
