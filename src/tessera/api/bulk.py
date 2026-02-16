@@ -340,11 +340,12 @@ async def _check_proposal_completion(
     if not current_contract:
         return True, 0
 
-    # Get all active registrations for this contract
+    # Get all active, non-deleted registrations for this contract
     reg_result = await session.execute(
         select(RegistrationDB)
         .where(RegistrationDB.contract_id == current_contract.id)
         .where(RegistrationDB.status == RegistrationStatus.ACTIVE)
+        .where(RegistrationDB.deleted_at.is_(None))
     )
     registrations = reg_result.scalars().all()
 

@@ -422,15 +422,19 @@ async def get_proposal_status(
         if ack.acknowledged_by_user_id:
             user_ids_to_lookup.add(ack.acknowledged_by_user_id)
 
-    # Batch fetch all teams in single query
-    teams_result = await session.execute(select(TeamDB).where(TeamDB.id.in_(team_ids_to_lookup)))
+    # Batch fetch all active teams in single query
+    teams_result = await session.execute(
+        select(TeamDB).where(TeamDB.id.in_(team_ids_to_lookup)).where(TeamDB.deleted_at.is_(None))
+    )
     teams_map: dict[UUID, TeamDB] = {t.id: t for t in teams_result.scalars().all()}
 
-    # Batch fetch all users in single query
+    # Batch fetch all active users in single query
     users_map: dict[UUID, UserDB] = {}
     if user_ids_to_lookup:
         users_result = await session.execute(
-            select(UserDB).where(UserDB.id.in_(user_ids_to_lookup))
+            select(UserDB)
+            .where(UserDB.id.in_(user_ids_to_lookup))
+            .where(UserDB.deactivated_at.is_(None))
         )
         users_map = {u.id: u for u in users_result.scalars().all()}
 
@@ -555,8 +559,10 @@ async def acknowledge_proposal(
     if proposal.status != ProposalStatus.PENDING:
         raise BadRequestError("Proposal is not pending", code=ErrorCode.PROPOSAL_NOT_PENDING)
 
-    # Get consumer team info
-    team_result = await session.execute(select(TeamDB).where(TeamDB.id == ack.consumer_team_id))
+    # Get consumer team info (must be active)
+    team_result = await session.execute(
+        select(TeamDB).where(TeamDB.id == ack.consumer_team_id).where(TeamDB.deleted_at.is_(None))
+    )
     consumer_team = team_result.scalar_one_or_none()
     if not consumer_team:
         raise NotFoundError(ErrorCode.TEAM_NOT_FOUND, "Consumer team not found")
@@ -822,8 +828,10 @@ async def file_objection(
     if proposal.status != ProposalStatus.PENDING:
         raise BadRequestError("Proposal is not pending", code=ErrorCode.PROPOSAL_NOT_PENDING)
 
-    # Get team info
-    team_result = await session.execute(select(TeamDB).where(TeamDB.id == objector_team_id))
+    # Get team info (must be active)
+    team_result = await session.execute(
+        select(TeamDB).where(TeamDB.id == objector_team_id).where(TeamDB.deleted_at.is_(None))
+    )
     objector_team = team_result.scalar_one_or_none()
     if not objector_team:
         raise NotFoundError(ErrorCode.TEAM_NOT_FOUND, "Team not found")
@@ -934,8 +942,10 @@ async def force_proposal(
     if proposal.status != ProposalStatus.PENDING:
         raise BadRequestError("Proposal is not pending", code=ErrorCode.PROPOSAL_NOT_PENDING)
 
-    # Get actor team info
-    team_result = await session.execute(select(TeamDB).where(TeamDB.id == actor_id))
+    # Get actor team info (must be active)
+    team_result = await session.execute(
+        select(TeamDB).where(TeamDB.id == actor_id).where(TeamDB.deleted_at.is_(None))
+    )
     actor_team = team_result.scalar_one_or_none()
 
     proposal.status = ProposalStatus.APPROVED
@@ -1090,9 +1100,11 @@ async def publish_from_proposal(
         version=new_contract.version,
     )
 
-    # Get publisher team info for webhook
+    # Get publisher team info for webhook (must be active)
     publisher_result = await session.execute(
-        select(TeamDB).where(TeamDB.id == publish_request.published_by)
+        select(TeamDB)
+        .where(TeamDB.id == publish_request.published_by)
+        .where(TeamDB.deleted_at.is_(None))
     )
     publisher_team = publisher_result.scalar_one_or_none()
 
