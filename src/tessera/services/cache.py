@@ -41,12 +41,12 @@ async def get_redis_client() -> "redis.Redis[Any] | None":
             settings.redis_url,
             decode_responses=False,
             max_connections=10,
-            socket_connect_timeout=0.05,  # 50ms timeout for fast failure in tests
-            socket_timeout=0.05,  # 50ms timeout for operations
+            socket_connect_timeout=settings.redis_connect_timeout,
+            socket_timeout=settings.redis_socket_timeout,
         )
         _redis_client = redis.Redis(connection_pool=_redis_pool)
-        # Test connection with very short timeout
-        await asyncio.wait_for(_redis_client.ping(), timeout=0.05)
+        # Test connection with connect timeout
+        await asyncio.wait_for(_redis_client.ping(), timeout=settings.redis_connect_timeout)
         logger.info("Connected to Redis cache")
         return _redis_client
     except (TimeoutError, Exception) as e:

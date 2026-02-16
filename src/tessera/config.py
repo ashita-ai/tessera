@@ -72,6 +72,8 @@ class Settings(BaseSettings):  # type: ignore[misc]
 
     # Redis cache (optional)
     redis_url: str | None = None  # e.g., redis://localhost:6379/0
+    redis_connect_timeout: float = 0.05  # Connect timeout in seconds
+    redis_socket_timeout: float = 0.05  # Operation timeout in seconds
     cache_ttl: int = 300  # Default cache TTL in seconds (5 minutes)
     cache_ttl_contract: int = 600  # 10 minutes
     cache_ttl_asset: int = 300  # 5 minutes

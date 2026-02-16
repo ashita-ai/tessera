@@ -295,7 +295,8 @@ async def get_optional_auth_context(
 
     try:
         return await get_auth_context(request, authorization, session)
-    except HTTPException:
+    except HTTPException as e:
+        logger.debug("Optional auth failed (status=%s): %s", e.status_code, e.detail)
         return None
 
 
