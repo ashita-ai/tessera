@@ -39,7 +39,7 @@ class UserCreate(UserBase):
     """Fields for creating a user."""
 
     team_id: UUID | None = None
-    password: str | None = Field(None, min_length=4, max_length=128)
+    password: str | None = Field(None, min_length=8, max_length=128)
     role: UserRole = UserRole.USER
 
     @field_validator("email")
@@ -55,7 +55,7 @@ class UserUpdate(BaseModel):
     email: EmailStr | None = None
     name: str | None = Field(None, min_length=1, max_length=255)
     team_id: UUID | None = None
-    password: str | None = Field(None, min_length=4, max_length=128)
+    password: str | None = Field(None, min_length=8, max_length=128)
     role: UserRole | None = None
     notification_preferences: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = None

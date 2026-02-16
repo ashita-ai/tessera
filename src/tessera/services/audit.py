@@ -53,6 +53,10 @@ class AuditAction(StrEnum):
     PROPOSAL_REJECTED = "proposal.rejected"
     PROPOSAL_EXPIRED = "proposal.expired"
 
+    # Dependency actions
+    DEPENDENCY_CREATED = "dependency.created"
+    DEPENDENCY_DELETED = "dependency.deleted"
+
     # API Key actions
     API_KEY_CREATED = "api_key.created"
     API_KEY_REVOKED = "api_key.revoked"
@@ -257,5 +261,72 @@ async def log_guarantees_updated(
         payload={
             "old_guarantees": old_guarantees,
             "new_guarantees": new_guarantees,
+        },
+    )
+
+
+async def log_dependency_created(
+    session: AsyncSession,
+    dependency_id: UUID,
+    source_asset_id: UUID,
+    target_asset_id: UUID,
+    actor_id: UUID,
+    dependency_type: str,
+) -> AuditEventDB:
+    """Log a dependency creation event.
+
+    Args:
+        session: Database session.
+        dependency_id: ID of the newly created dependency.
+        source_asset_id: The dependent asset (downstream consumer).
+        target_asset_id: The dependency asset (upstream provider).
+        actor_id: Team ID that created the dependency.
+        dependency_type: Type of dependency (consumes, references, transforms).
+
+    Returns:
+        The created audit event.
+    """
+    return await log_event(
+        session=session,
+        entity_type="dependency",
+        entity_id=dependency_id,
+        action=AuditAction.DEPENDENCY_CREATED,
+        actor_id=actor_id,
+        payload={
+            "source_asset_id": str(source_asset_id),
+            "target_asset_id": str(target_asset_id),
+            "dependency_type": dependency_type,
+        },
+    )
+
+
+async def log_dependency_deleted(
+    session: AsyncSession,
+    dependency_id: UUID,
+    source_asset_id: UUID,
+    target_asset_id: UUID,
+    actor_id: UUID,
+) -> AuditEventDB:
+    """Log a dependency soft-delete event.
+
+    Args:
+        session: Database session.
+        dependency_id: ID of the deleted dependency.
+        source_asset_id: The dependent asset (downstream consumer).
+        target_asset_id: The dependency asset (upstream provider).
+        actor_id: Team ID that deleted the dependency.
+
+    Returns:
+        The created audit event.
+    """
+    return await log_event(
+        session=session,
+        entity_type="dependency",
+        entity_id=dependency_id,
+        action=AuditAction.DEPENDENCY_DELETED,
+        actor_id=actor_id,
+        payload={
+            "source_asset_id": str(source_asset_id),
+            "target_asset_id": str(target_asset_id),
         },
     )

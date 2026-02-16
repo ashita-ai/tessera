@@ -1,6 +1,7 @@
 """Asset dependency and lineage endpoints."""
 
 from collections import defaultdict
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -28,6 +29,7 @@ from tessera.db import (
 )
 from tessera.models import Dependency, DependencyCreate
 from tessera.models.enums import APIKeyScope
+from tessera.services.audit import log_dependency_created, log_dependency_deleted
 from tessera.services.cache import asset_cache
 
 router = APIRouter()
@@ -44,7 +46,9 @@ async def create_dependency(
     session: AsyncSession = Depends(get_session),
 ) -> AssetDependencyDB:
     """Register an upstream dependency for an asset."""
-    result = await session.execute(select(AssetDB).where(AssetDB.id == asset_id))
+    result = await session.execute(
+        select(AssetDB).where(AssetDB.id == asset_id).where(AssetDB.deleted_at.is_(None))
+    )
     asset = result.scalar_one_or_none()
     if not asset:
         raise NotFoundError(ErrorCode.ASSET_NOT_FOUND, "Asset not found")
@@ -56,7 +60,9 @@ async def create_dependency(
         )
 
     result = await session.execute(
-        select(AssetDB).where(AssetDB.id == dependency.depends_on_asset_id)
+        select(AssetDB)
+        .where(AssetDB.id == dependency.depends_on_asset_id)
+        .where(AssetDB.deleted_at.is_(None))
     )
     if not result.scalar_one_or_none():
         raise NotFoundError(ErrorCode.ASSET_NOT_FOUND, "Dependency asset not found")
@@ -68,6 +74,7 @@ async def create_dependency(
         select(AssetDependencyDB)
         .where(AssetDependencyDB.dependent_asset_id == asset_id)
         .where(AssetDependencyDB.dependency_asset_id == dependency.depends_on_asset_id)
+        .where(AssetDependencyDB.deleted_at.is_(None))
     )
     if result.scalar_one_or_none():
         raise DuplicateError(ErrorCode.DUPLICATE_DEPENDENCY, "Dependency already exists")
@@ -79,6 +86,16 @@ async def create_dependency(
     )
     session.add(db_dependency)
     await session.flush()
+
+    await log_dependency_created(
+        session=session,
+        dependency_id=db_dependency.id,
+        source_asset_id=asset_id,
+        target_asset_id=dependency.depends_on_asset_id,
+        actor_id=auth.team_id,
+        dependency_type=str(db_dependency.dependency_type),
+    )
+
     await session.refresh(db_dependency)
     return db_dependency
 
@@ -98,11 +115,17 @@ async def list_dependencies(
 
     Returns X-Total-Count header with total count.
     """
-    asset_result = await session.execute(select(AssetDB).where(AssetDB.id == asset_id))
+    asset_result = await session.execute(
+        select(AssetDB).where(AssetDB.id == asset_id).where(AssetDB.deleted_at.is_(None))
+    )
     if not asset_result.scalar_one_or_none():
         raise NotFoundError(ErrorCode.ASSET_NOT_FOUND, "Asset not found")
 
-    query = select(AssetDependencyDB).where(AssetDependencyDB.dependent_asset_id == asset_id)
+    query = (
+        select(AssetDependencyDB)
+        .where(AssetDependencyDB.dependent_asset_id == asset_id)
+        .where(AssetDependencyDB.deleted_at.is_(None))
+    )
     return await paginate(session, query, params, response_model=Dependency, response=response)
 
 
@@ -136,12 +159,22 @@ async def delete_dependency(
         select(AssetDependencyDB)
         .where(AssetDependencyDB.id == dependency_id)
         .where(AssetDependencyDB.dependent_asset_id == asset_id)
+        .where(AssetDependencyDB.deleted_at.is_(None))
     )
     dependency = result.scalar_one_or_none()
     if not dependency:
         raise NotFoundError(ErrorCode.DEPENDENCY_NOT_FOUND, "Dependency not found")
 
-    await session.delete(dependency)
+    dependency.deleted_at = datetime.now(UTC)
+
+    await log_dependency_deleted(
+        session=session,
+        dependency_id=dependency.id,
+        source_asset_id=dependency.dependent_asset_id,
+        target_asset_id=dependency.dependency_asset_id,
+        actor_id=auth.team_id,
+    )
+
     await session.flush()
 
 
@@ -183,6 +216,7 @@ async def get_lineage(
         .join(dep_asset, AssetDependencyDB.dependency_asset_id == dep_asset.c.id)
         .join(dep_team, dep_asset.c.owner_team_id == dep_team.c.id)
         .where(AssetDependencyDB.dependent_asset_id == asset_id)
+        .where(AssetDependencyDB.deleted_at.is_(None))
     )
     upstream = [
         {
@@ -260,6 +294,7 @@ async def get_lineage(
         .join(dep_asset, AssetDependencyDB.dependent_asset_id == dep_asset.c.id)
         .join(dep_team, dep_asset.c.owner_team_id == dep_team.c.id)
         .where(AssetDependencyDB.dependency_asset_id == asset_id)
+        .where(AssetDependencyDB.deleted_at.is_(None))
     )
     downstream_assets = [
         {

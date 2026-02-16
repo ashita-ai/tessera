@@ -1,8 +1,5 @@
 """Tests for /api/v1/sync endpoints (dbt, dbt/impact)."""
 
-import json
-from pathlib import Path
-
 import pytest
 from httpx import AsyncClient
 
@@ -12,18 +9,21 @@ pytestmark = pytest.mark.asyncio
 class TestSyncDbt:
     """Tests for /api/v1/sync/dbt endpoint."""
 
-    async def test_dbt_manifest_not_found(self, client: AsyncClient):
-        """Sync from nonexistent manifest should 404."""
+    async def test_dbt_empty_manifest(self, client: AsyncClient):
+        """Sync with empty manifest should succeed with zero assets created."""
         # Create a team first
         team_resp = await client.post("/api/v1/teams", json={"name": "dbt-team"})
         team_id = team_resp.json()["id"]
 
         resp = await client.post(
-            f"/api/v1/sync/dbt?manifest_path=/nonexistent/manifest.json&owner_team_id={team_id}"
+            "/api/v1/sync/dbt/upload",
+            json={"manifest": {}, "owner_team_id": team_id},
         )
-        assert resp.status_code == 404
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["assets"]["created"] == 0
 
-    async def test_dbt_sync_models(self, client: AsyncClient, tmp_path: Path):
+    async def test_dbt_sync_models(self, client: AsyncClient):
         """Sync should create assets from dbt models."""
         # Create team
         team_resp = await client.post("/api/v1/teams", json={"name": "dbt-models-team"})
@@ -56,11 +56,10 @@ class TestSyncDbt:
             },
             "sources": {},
         }
-        manifest_file = tmp_path / "manifest.json"
-        manifest_file.write_text(json.dumps(manifest))
 
         resp = await client.post(
-            f"/api/v1/sync/dbt?manifest_path={manifest_file}&owner_team_id={team_id}"
+            "/api/v1/sync/dbt/upload",
+            json={"manifest": manifest, "owner_team_id": team_id},
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -75,7 +74,7 @@ class TestSyncDbt:
         assert "analytics.public.users" in fqns
         assert "analytics.public.orders" in fqns
 
-    async def test_dbt_sync_sources(self, client: AsyncClient, tmp_path: Path):
+    async def test_dbt_sync_sources(self, client: AsyncClient):
         """Sync should create assets from dbt sources."""
         team_resp = await client.post("/api/v1/teams", json={"name": "dbt-sources-team"})
         team_id = team_resp.json()["id"]
@@ -94,17 +93,16 @@ class TestSyncDbt:
                 },
             },
         }
-        manifest_file = tmp_path / "manifest.json"
-        manifest_file.write_text(json.dumps(manifest))
 
         resp = await client.post(
-            f"/api/v1/sync/dbt?manifest_path={manifest_file}&owner_team_id={team_id}"
+            "/api/v1/sync/dbt/upload",
+            json={"manifest": manifest, "owner_team_id": team_id},
         )
         assert resp.status_code == 200
         data = resp.json()
         assert data["assets"]["created"] == 1
 
-    async def test_dbt_sync_updates_existing(self, client: AsyncClient, tmp_path: Path):
+    async def test_dbt_sync_updates_existing(self, client: AsyncClient):
         """Sync should update existing assets."""
         team_resp = await client.post("/api/v1/teams", json={"name": "dbt-update-team"})
         team_id = team_resp.json()["id"]
@@ -130,18 +128,21 @@ class TestSyncDbt:
             },
             "sources": {},
         }
-        manifest_file = tmp_path / "manifest.json"
-        manifest_file.write_text(json.dumps(manifest))
 
         resp = await client.post(
-            f"/api/v1/sync/dbt?manifest_path={manifest_file}&owner_team_id={team_id}"
+            "/api/v1/sync/dbt/upload",
+            json={
+                "manifest": manifest,
+                "owner_team_id": team_id,
+                "conflict_mode": "overwrite",
+            },
         )
         assert resp.status_code == 200
         data = resp.json()
         assert data["assets"]["created"] == 0
         assert data["assets"]["updated"] == 1
 
-    async def test_dbt_sync_ignores_tests(self, client: AsyncClient, tmp_path: Path):
+    async def test_dbt_sync_ignores_tests(self, client: AsyncClient):
         """Sync should skip test and other non-model resource types."""
         team_resp = await client.post("/api/v1/teams", json={"name": "dbt-tests-team"})
         team_id = team_resp.json()["id"]
@@ -166,18 +167,17 @@ class TestSyncDbt:
             },
             "sources": {},
         }
-        manifest_file = tmp_path / "manifest.json"
-        manifest_file.write_text(json.dumps(manifest))
 
         resp = await client.post(
-            f"/api/v1/sync/dbt?manifest_path={manifest_file}&owner_team_id={team_id}"
+            "/api/v1/sync/dbt/upload",
+            json={"manifest": manifest, "owner_team_id": team_id},
         )
         assert resp.status_code == 200
         data = resp.json()
         # Only the model should be created, not the test
         assert data["assets"]["created"] == 1
 
-    async def test_dbt_sync_seeds_and_snapshots(self, client: AsyncClient, tmp_path: Path):
+    async def test_dbt_sync_seeds_and_snapshots(self, client: AsyncClient):
         """Sync should include seeds and snapshots."""
         team_resp = await client.post("/api/v1/teams", json={"name": "dbt-seeds-team"})
         team_id = team_resp.json()["id"]
@@ -205,11 +205,10 @@ class TestSyncDbt:
             },
             "sources": {},
         }
-        manifest_file = tmp_path / "manifest.json"
-        manifest_file.write_text(json.dumps(manifest))
 
         resp = await client.post(
-            f"/api/v1/sync/dbt?manifest_path={manifest_file}&owner_team_id={team_id}"
+            "/api/v1/sync/dbt/upload",
+            json={"manifest": manifest, "owner_team_id": team_id},
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -466,7 +465,7 @@ class TestDbtImpact:
 class TestDbtGuaranteesExtraction:
     """Tests for extracting guarantees from dbt tests during sync."""
 
-    async def test_dbt_sync_extracts_not_null_tests(self, client: AsyncClient, tmp_path: Path):
+    async def test_dbt_sync_extracts_not_null_tests(self, client: AsyncClient):
         """Sync should extract not_null tests as nullability guarantees."""
         team_resp = await client.post("/api/v1/teams", json={"name": "guarantees-team-1"})
         team_id = team_resp.json()["id"]
@@ -505,11 +504,10 @@ class TestDbtGuaranteesExtraction:
             },
             "sources": {},
         }
-        manifest_file = tmp_path / "manifest.json"
-        manifest_file.write_text(json.dumps(manifest))
 
         resp = await client.post(
-            f"/api/v1/sync/dbt?manifest_path={manifest_file}&owner_team_id={team_id}"
+            "/api/v1/sync/dbt/upload",
+            json={"manifest": manifest, "owner_team_id": team_id},
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -527,9 +525,7 @@ class TestDbtGuaranteesExtraction:
         assert metadata["guarantees"]["nullability"]["id"] == "never"
         assert metadata["guarantees"]["nullability"]["customer_id"] == "never"
 
-    async def test_dbt_sync_extracts_accepted_values_tests(
-        self, client: AsyncClient, tmp_path: Path
-    ):
+    async def test_dbt_sync_extracts_accepted_values_tests(self, client: AsyncClient):
         """Sync should extract accepted_values tests as guarantees."""
         team_resp = await client.post("/api/v1/teams", json={"name": "guarantees-team-2"})
         team_id = team_resp.json()["id"]
@@ -562,11 +558,10 @@ class TestDbtGuaranteesExtraction:
             },
             "sources": {},
         }
-        manifest_file = tmp_path / "manifest.json"
-        manifest_file.write_text(json.dumps(manifest))
 
         resp = await client.post(
-            f"/api/v1/sync/dbt?manifest_path={manifest_file}&owner_team_id={team_id}"
+            "/api/v1/sync/dbt/upload",
+            json={"manifest": manifest, "owner_team_id": team_id},
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -587,7 +582,7 @@ class TestDbtGuaranteesExtraction:
             "pending",
         ]
 
-    async def test_dbt_sync_extracts_custom_tests(self, client: AsyncClient, tmp_path: Path):
+    async def test_dbt_sync_extracts_custom_tests(self, client: AsyncClient):
         """Sync should extract unique and relationship tests as custom guarantees."""
         team_resp = await client.post("/api/v1/teams", json={"name": "guarantees-team-3"})
         team_id = team_resp.json()["id"]
@@ -617,11 +612,10 @@ class TestDbtGuaranteesExtraction:
             },
             "sources": {},
         }
-        manifest_file = tmp_path / "manifest.json"
-        manifest_file.write_text(json.dumps(manifest))
 
         resp = await client.post(
-            f"/api/v1/sync/dbt?manifest_path={manifest_file}&owner_team_id={team_id}"
+            "/api/v1/sync/dbt/upload",
+            json={"manifest": manifest, "owner_team_id": team_id},
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -640,7 +634,7 @@ class TestDbtGuaranteesExtraction:
         assert metadata["guarantees"]["custom"][0]["type"] == "unique"
         assert metadata["guarantees"]["custom"][0]["column"] == "sku"
 
-    async def test_dbt_sync_no_tests_no_guarantees(self, client: AsyncClient, tmp_path: Path):
+    async def test_dbt_sync_no_tests_no_guarantees(self, client: AsyncClient):
         """Sync should not add guarantees if no tests are defined."""
         team_resp = await client.post("/api/v1/teams", json={"name": "guarantees-team-4"})
         team_id = team_resp.json()["id"]
@@ -659,11 +653,10 @@ class TestDbtGuaranteesExtraction:
             },
             "sources": {},
         }
-        manifest_file = tmp_path / "manifest.json"
-        manifest_file.write_text(json.dumps(manifest))
 
         resp = await client.post(
-            f"/api/v1/sync/dbt?manifest_path={manifest_file}&owner_team_id={team_id}"
+            "/api/v1/sync/dbt/upload",
+            json={"manifest": manifest, "owner_team_id": team_id},
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -678,7 +671,7 @@ class TestDbtGuaranteesExtraction:
 
         assert "guarantees" not in metadata
 
-    async def test_dbt_sync_extracts_singular_tests(self, client: AsyncClient, tmp_path: Path):
+    async def test_dbt_sync_extracts_singular_tests(self, client: AsyncClient):
         """Sync should extract singular tests (SQL files) as custom guarantees.
 
         Singular tests express custom business logic assertions like
@@ -717,11 +710,10 @@ class TestDbtGuaranteesExtraction:
             },
             "sources": {},
         }
-        manifest_file = tmp_path / "manifest.json"
-        manifest_file.write_text(json.dumps(manifest))
 
         resp = await client.post(
-            f"/api/v1/sync/dbt?manifest_path={manifest_file}&owner_team_id={team_id}"
+            "/api/v1/sync/dbt/upload",
+            json={"manifest": manifest, "owner_team_id": team_id},
         )
         assert resp.status_code == 200
         data = resp.json()

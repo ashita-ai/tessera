@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tessera.api.auth import Auth, RequireRead, RequireWrite
+from tessera.api.auth import Auth, RequireAdmin, RequireRead, RequireWrite
 from tessera.api.errors import (
     BadRequestError,
     DuplicateError,
@@ -18,7 +18,7 @@ from tessera.api.errors import (
     NotFoundError,
 )
 from tessera.api.pagination import PaginationParams, pagination_params
-from tessera.api.rate_limit import limit_read, limit_write
+from tessera.api.rate_limit import limit_admin, limit_read, limit_write
 from tessera.db import (
     AcknowledgmentDB,
     AssetDB,
@@ -176,11 +176,12 @@ async def list_proposals(
     filtered_proposal_ids: set[UUID] | None = None
     if consumer_team_id or pending_ack_for:
         team_filter = consumer_team_id or pending_ack_for
-        # Find all active registrations for this team
+        # Find all active, non-deleted registrations for this team
         reg_result = await session.execute(
             select(RegistrationDB.contract_id)
             .where(RegistrationDB.consumer_team_id == team_filter)
             .where(RegistrationDB.status == RegistrationStatus.ACTIVE)
+            .where(RegistrationDB.deleted_at.is_(None))
         )
         registered_contract_ids = [r[0] for r in reg_result.all()]
 
@@ -298,6 +299,7 @@ async def list_proposals(
             select(RegistrationDB.contract_id, func.count(RegistrationDB.id))
             .where(RegistrationDB.contract_id.in_(contract_ids))
             .where(RegistrationDB.status == RegistrationStatus.ACTIVE)
+            .where(RegistrationDB.deleted_at.is_(None))
             .group_by(RegistrationDB.contract_id)
         )
         consumer_counts = {cid: cnt for cid, cnt in consumer_counts_result.all()}
@@ -396,6 +398,7 @@ async def get_proposal_status(
             select(RegistrationDB)
             .where(RegistrationDB.contract_id == contract.id)
             .where(RegistrationDB.status == RegistrationStatus.ACTIVE)
+            .where(RegistrationDB.deleted_at.is_(None))
         )
         registrations = list(reg_result.scalars().all())
 
@@ -860,18 +863,19 @@ async def file_objection(
 
 
 @router.post("/{proposal_id}/force", response_model=Proposal)
-@limit_write
+@limit_admin
 async def force_proposal(
     request: Request,
     auth: Auth,
     proposal_id: UUID,
     actor_id: UUID = Query(..., description="Team ID of the actor forcing approval"),
-    _: None = RequireWrite,
+    _: None = RequireAdmin,
     session: AsyncSession = Depends(get_session),
 ) -> ProposalDB:
     """Force-approve a proposal (bypassing consumer acknowledgments).
 
-    Requires write scope.
+    Requires admin scope. Force-approval bypasses the entire consumer acknowledgment
+    workflow, so it is a privileged operation restricted to admin-scoped API keys.
     """
     # Resource-level auth: actor_id must match auth.team_id or be admin
     if actor_id != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):

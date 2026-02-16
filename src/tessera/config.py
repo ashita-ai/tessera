@@ -122,17 +122,21 @@ class Settings(BaseSettings):  # type: ignore[misc]
         Fails fast if production environment has dangerous settings that could
         compromise security or data integrity.
         """
+        # Session secret must be changed from default in any non-dev/test environment.
+        # This catches staging, production, and any other environment with real data.
+        if (
+            self.environment not in ("development", "test")
+            and self.session_secret_key == DEFAULT_SESSION_SECRET
+        ):
+            raise ValueError(
+                f"SESSION_SECRET_KEY must be set to a unique value in {self.environment}. "
+                'Generate one with: python -c "import secrets; print(secrets.token_hex(32))"'
+            )
+
         if self.environment != "production":
             return self
 
         errors: list[str] = []
-
-        # Session secret must be changed from default
-        if self.session_secret_key == DEFAULT_SESSION_SECRET:
-            errors.append(
-                "SESSION_SECRET_KEY must be set to a unique value in production. "
-                'Generate one with: python -c "import secrets; print(secrets.token_hex(32))"'
-            )
 
         # Auto-create tables should be disabled (use migrations instead)
         if self.auto_create_tables:

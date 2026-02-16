@@ -331,6 +331,9 @@ class AssetDependencyDB(Base):
         Enum(DependencyType), default=DependencyType.CONSUMES
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
 
     __table_args__ = (
         UniqueConstraint(

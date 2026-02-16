@@ -30,7 +30,6 @@ from tessera.api.types import (
     ContractHistoryResponse,
     ContractPublishResponse,
     ContractWithPublisherInfo,
-    ImpactedConsumer,
     PaginatedResponse,
     SchemaDiffResponse,
 )
@@ -39,8 +38,6 @@ from tessera.db import (
     AssetDB,
     AuditRunDB,
     ContractDB,
-    ProposalDB,
-    RegistrationDB,
     TeamDB,
     UserDB,
     get_session,
@@ -61,8 +58,6 @@ from tessera.models.enums import (
     AuditRunStatus,
     ChangeType,
     ContractStatus,
-    ProposalStatus,
-    RegistrationStatus,
     ResourceType,
     SchemaFormat,
     SemverMode,
@@ -71,9 +66,6 @@ from tessera.services import (
     audit,
     check_compatibility,
     diff_schemas,
-    get_affected_parties,
-    log_contract_published,
-    log_proposal_created,
     validate_json_schema,
 )
 from tessera.services.audit import AuditAction
@@ -87,7 +79,6 @@ from tessera.services.cache import (
     cache_asset,
     cache_asset_contracts_list,
     cache_asset_search,
-    cache_contract,
     cache_schema_diff,
     get_cached_asset,
     get_cached_asset_contracts_list,
@@ -95,14 +86,15 @@ from tessera.services.cache import (
     get_cached_schema_diff,
     invalidate_asset,
 )
-from tessera.services.slack import notify_proposal_created
+from tessera.services.contract_publisher import (
+    ContractPublishingWorkflow,
+    PublishAction,
+    SinglePublishResult,
+)
 from tessera.services.versioning import (
     compute_version_suggestion,
-    is_graduation,
-    is_prerelease,
     parse_semver,
 )
-from tessera.services.webhooks import send_proposal_created
 
 router = APIRouter()
 
@@ -708,6 +700,50 @@ async def _get_last_audit_status(
     return audit_run.status, audit_run.guarantees_failed, audit_run.run_at
 
 
+def _build_publish_response(
+    result: SinglePublishResult,
+    original_format: SchemaFormat,
+) -> ContractPublishResponse:
+    """Convert a SinglePublishResult from the workflow into the API response format.
+
+    Translates the workflow's dataclass result into the ContractPublishResponse
+    TypedDict that the API endpoint returns. Only includes fields that have
+    meaningful values to keep the response clean.
+    """
+    response: ContractPublishResponse = {"action": str(result.action)}
+
+    if result.contract:
+        response["contract"] = Contract.model_validate(result.contract).model_dump()
+
+    if result.proposal:
+        response["proposal"] = Proposal.model_validate(result.proposal).model_dump()
+
+    if result.change_type is not None:
+        response["change_type"] = str(result.change_type)
+
+    if result.breaking_changes:
+        response["breaking_changes"] = result.breaking_changes
+
+    if result.message:
+        response["message"] = result.message
+
+    if result.warning:
+        response["warning"] = result.warning
+
+    if result.version_auto_generated:
+        response["version_auto_generated"] = True
+
+    if result.schema_converted_from:
+        response["schema_converted_from"] = result.schema_converted_from
+    elif original_format == SchemaFormat.AVRO:
+        response["schema_converted_from"] = "avro"
+
+    if result.audit_warning:
+        response["audit_warning"] = result.audit_warning
+
+    return response
+
+
 @router.post("/{asset_id}/contracts", status_code=201, response_model=None)
 @limit_write
 async def create_contract(
@@ -726,7 +762,9 @@ async def create_contract(
 ) -> ContractPublishResponse | JSONResponse:
     """Publish a new contract for an asset.
 
-    Requires write scope.
+    Requires write scope. Delegates to ContractPublishingWorkflow for the actual
+    publishing logic, which uses FOR UPDATE locking to prevent concurrent publish
+    races.
 
     Behavior:
     - If no active contract exists: auto-publish (first contract)
@@ -742,8 +780,10 @@ async def create_contract(
 
     Returns either a Contract (if published) or a Proposal (if breaking).
     """
-    # Verify asset exists
-    asset_result = await session.execute(select(AssetDB).where(AssetDB.id == asset_id))
+    # Verify asset exists and is not soft-deleted
+    asset_result = await session.execute(
+        select(AssetDB).where(AssetDB.id == asset_id).where(AssetDB.deleted_at.is_(None))
+    )
     asset = asset_result.scalar_one_or_none()
     if not asset:
         raise NotFoundError(ErrorCode.ASSET_NOT_FOUND, "Asset not found")
@@ -804,13 +844,10 @@ async def create_contract(
         )
 
     # Validate and normalize schema based on format
-    # If Avro: validate, convert to JSON Schema, then store the converted schema
-    # If JSON Schema: validate directly
     schema_to_store = contract.schema_def
     original_format = contract.schema_format
 
     if contract.schema_format == SchemaFormat.AVRO:
-        # Validate Avro schema
         is_valid, avro_errors = validate_avro_schema(contract.schema_def)
         if not is_valid:
             raise BadRequestError(
@@ -818,7 +855,6 @@ async def create_contract(
                 code=ErrorCode.INVALID_SCHEMA,
                 details={"errors": avro_errors, "schema_format": "avro"},
             )
-        # Convert Avro to JSON Schema for storage
         try:
             schema_to_store = avro_to_json_schema(contract.schema_def)
         except AvroConversionError as e:
@@ -828,7 +864,6 @@ async def create_contract(
                 details={"path": e.path, "schema_format": "avro"},
             )
     else:
-        # Validate JSON Schema
         is_valid, errors = validate_json_schema(contract.schema_def)
         if not is_valid:
             raise BadRequestError(
@@ -837,27 +872,27 @@ async def create_contract(
                 details={"errors": errors},
             )
 
-    # Get current active contract first (needed for version auto-generation)
-    contract_result = await session.execute(
+    # --- Pre-workflow validation (without FOR UPDATE lock) ---
+    # Compute version suggestion for SUGGEST/ENFORCE mode validation.
+    # The workflow will re-compute under lock for the actual publish decision.
+    pre_contract_result = await session.execute(
         select(ContractDB)
         .where(ContractDB.asset_id == asset_id)
         .where(ContractDB.status == ContractStatus.ACTIVE)
         .order_by(ContractDB.published_at.desc())
         .limit(1)
     )
-    current_contract = contract_result.scalar_one_or_none()
+    pre_current_contract = pre_contract_result.scalar_one_or_none()
 
-    # Pre-compute schema diff for version suggestion (if there's a current contract)
-    version_suggestion: VersionSuggestion | None = None
-    if current_contract:
-        pre_diff = diff_schemas(current_contract.schema_def, schema_to_store)
+    if pre_current_contract:
+        pre_diff = diff_schemas(pre_current_contract.schema_def, schema_to_store)
         pre_is_compatible, pre_breaks = check_compatibility(
-            current_contract.schema_def,
+            pre_current_contract.schema_def,
             schema_to_store,
-            current_contract.compatibility_mode,
+            pre_current_contract.compatibility_mode,
         )
         version_suggestion = compute_version_suggestion(
-            current_contract.version,
+            pre_current_contract.version,
             pre_diff.change_type,
             pre_is_compatible,
             breaking_changes=[bc.to_dict() for bc in pre_breaks],
@@ -865,15 +900,16 @@ async def create_contract(
     else:
         version_suggestion = compute_version_suggestion(None, ChangeType.PATCH, True)
 
-    # Get asset's semver mode
-    semver_mode = asset.semver_mode
-
     # Handle version based on semver_mode
-    version_auto_generated = False
+    semver_mode = asset.semver_mode
+    version_for_workflow: str | None = None
+
     if contract.version is None:
         # No version provided by user
         if semver_mode == SemverMode.SUGGEST:
-            # Return suggestion instead of auto-generating (200 since nothing created)
+            # Return suggestion without publishing (200 since nothing created).
+            # This is handled before the workflow to avoid acquiring a FOR UPDATE
+            # lock for a read-only operation.
             msg = (
                 "Version not provided. Please review the suggested version "
                 "and re-submit with an explicit version."
@@ -886,308 +922,78 @@ async def create_contract(
                     "version_suggestion": version_suggestion.model_dump(),
                 },
             )
-        else:
-            # AUTO mode: auto-generate version
-            version_auto_generated = True
-            version = version_suggestion.suggested_version
+        # AUTO mode: pass None to workflow, which will auto-generate under lock
+        version_for_workflow = None
     else:
         # User provided a version
-        version = contract.version
+        version_for_workflow = contract.version
 
         # In ENFORCE mode, validate the user's version matches the change type
-        if semver_mode == SemverMode.ENFORCE and current_contract:
-            is_valid, error_msg = validate_version_for_change_type(
-                version,
-                current_contract.version,
+        if semver_mode == SemverMode.ENFORCE and pre_current_contract:
+            is_valid_version, error_msg = validate_version_for_change_type(
+                version_for_workflow,
+                pre_current_contract.version,
                 version_suggestion.change_type,
             )
-            if not is_valid:
+            if not is_valid_version:
                 raise BadRequestError(
                     error_msg or "Invalid version for change type",
                     code=ErrorCode.INVALID_VERSION,
                     details={
-                        "provided_version": version,
+                        "provided_version": version_for_workflow,
                         "version_suggestion": version_suggestion.model_dump(),
                     },
                 )
 
-    # Check if version already exists for this asset
-    existing_version_result = await session.execute(
-        select(ContractDB)
-        .where(ContractDB.asset_id == asset_id)
-        .where(ContractDB.version == version)
-    )
-    existing_version = existing_version_result.scalar_one_or_none()
-    if existing_version:
-        raise DuplicateError(
-            ErrorCode.VERSION_EXISTS,
-            f"Contract version {version} already exists for this asset",
-            details={"existing_contract_id": str(existing_version.id)},
+        # Check if version already exists (fast failure before acquiring lock)
+        existing_version_result = await session.execute(
+            select(ContractDB)
+            .where(ContractDB.asset_id == asset_id)
+            .where(ContractDB.version == version_for_workflow)
         )
-
-    # Helper to create and return the new contract
-    # Uses nested transaction (savepoint) to ensure atomicity of multi-step publish
-    async def publish_contract() -> ContractDB:
-        async with session.begin_nested():
-            db_contract = ContractDB(
-                asset_id=asset_id,
-                version=version,
-                schema_def=schema_to_store,
-                schema_format=original_format,
-                compatibility_mode=contract.compatibility_mode,
-                guarantees=contract.guarantees.model_dump() if contract.guarantees else None,
-                published_by=published_by,
-                published_by_user_id=published_by_user_id,
+        existing_version = existing_version_result.scalar_one_or_none()
+        if existing_version:
+            raise DuplicateError(
+                ErrorCode.VERSION_EXISTS,
+                f"Contract version {version_for_workflow} already exists for this asset",
+                details={"existing_contract_id": str(existing_version.id)},
             )
-            session.add(db_contract)
 
-            # Deprecate old contract if exists
-            if current_contract:
-                current_contract.status = ContractStatus.DEPRECATED
-
-            await session.flush()
-            await session.refresh(db_contract)
-        return db_contract
-
-    # No existing contract = first publish, auto-approve
-    if not current_contract:
-        new_contract = await publish_contract()
-        await log_contract_published(
-            session=session,
-            contract_id=new_contract.id,
-            publisher_id=published_by,
-            version=new_contract.version,
-        )
-        # Invalidate asset and contract caches, cache new contract
-        await invalidate_asset(str(asset_id))
-        contract_data = Contract.model_validate(new_contract).model_dump()
-        await cache_contract(str(new_contract.id), contract_data)
-        publish_response: ContractPublishResponse = {
-            "action": "published",
-            "contract": contract_data,
-        }
-        if version_auto_generated:
-            publish_response["version_auto_generated"] = True
-        if original_format == SchemaFormat.AVRO:
-            publish_response["schema_converted_from"] = "avro"
-        if audit_warning:
-            publish_response["audit_warning"] = audit_warning
-        return publish_response
-
-    # Diff schemas and check compatibility
-    is_compatible, breaking_changes = check_compatibility(
-        current_contract.schema_def,
-        schema_to_store,
-        current_contract.compatibility_mode,
+    # --- Delegate to ContractPublishingWorkflow ---
+    # The workflow handles: FOR UPDATE locking, version computation (for AUTO mode),
+    # schema diffing, compatibility checking, contract creation, deprecation of old
+    # contracts, guarantee change logging, proposal creation, and notifications.
+    workflow = ContractPublishingWorkflow(
+        session=session,
+        asset=asset,
+        publisher_team=publisher_team,
+        schema_def=schema_to_store,
+        schema_format=original_format,
+        compatibility_mode=contract.compatibility_mode,
+        version=version_for_workflow,
+        published_by=published_by,
+        published_by_user_id=published_by_user_id,
+        guarantees=contract.guarantees.model_dump() if contract.guarantees else None,
+        force=force,
+        audit_warning=audit_warning,
     )
-    diff_result = diff_schemas(current_contract.schema_def, schema_to_store)
+    result = await workflow.execute()
 
-    # Compatible change = auto-publish
-    if is_compatible:
-        new_contract = await publish_contract()
-        await log_contract_published(
-            session=session,
-            contract_id=new_contract.id,
-            publisher_id=published_by,
-            version=new_contract.version,
-            change_type=str(diff_result.change_type),
-        )
-        # Invalidate asset and contract caches, cache new contract
-        await invalidate_asset(str(asset_id))
-        contract_data = Contract.model_validate(new_contract).model_dump()
-        await cache_contract(str(new_contract.id), contract_data)
-        compat_response: ContractPublishResponse = {
-            "action": "published",
-            "change_type": str(diff_result.change_type),
-            "contract": contract_data,
-        }
-        if version_auto_generated:
-            compat_response["version_auto_generated"] = True
-        if original_format == SchemaFormat.AVRO:
-            compat_response["schema_converted_from"] = "avro"
-        if audit_warning:
-            compat_response["audit_warning"] = audit_warning
-        return compat_response
-
-    # Breaking change with force flag = publish anyway (logged)
-    if force:
-        new_contract = await publish_contract()
-        await log_contract_published(
-            session=session,
-            contract_id=new_contract.id,
-            publisher_id=published_by,
-            version=new_contract.version,
-            change_type=str(diff_result.change_type),
-            force=True,
-        )
-        # Invalidate asset and contract caches, cache new contract
-        await invalidate_asset(str(asset_id))
-        contract_data = Contract.model_validate(new_contract).model_dump()
-        await cache_contract(str(new_contract.id), contract_data)
-        force_response: ContractPublishResponse = {
-            "action": "force_published",
-            "change_type": str(diff_result.change_type),
-            "breaking_changes": [bc.to_dict() for bc in breaking_changes],
-            "contract": contract_data,
-            "warning": "Breaking change was force-published. Consumers may be affected.",
-        }
-        if version_auto_generated:
-            force_response["version_auto_generated"] = True
-        if original_format == SchemaFormat.AVRO:
-            force_response["schema_converted_from"] = "avro"
-        if audit_warning:
-            force_response["audit_warning"] = audit_warning
-        return force_response
-
-    # Pre-release versions skip proposal workflow (breaking changes allowed without ack)
-    if is_prerelease(version):
-        new_contract = await publish_contract()
-        await log_contract_published(
-            session=session,
-            contract_id=new_contract.id,
-            publisher_id=published_by,
-            version=new_contract.version,
-            change_type=str(diff_result.change_type),
-            prerelease=True,
-        )
-        await invalidate_asset(str(asset_id))
-        contract_data = Contract.model_validate(new_contract).model_dump()
-        await cache_contract(str(new_contract.id), contract_data)
-        prerelease_response: ContractPublishResponse = {
-            "action": "published",
-            "change_type": str(diff_result.change_type),
-            "breaking_changes": [bc.to_dict() for bc in breaking_changes],
-            "contract": contract_data,
-            "message": "Pre-release version published. Breaking changes allowed without ack.",
-        }
-        if version_auto_generated:
-            prerelease_response["version_auto_generated"] = True
-        if original_format == SchemaFormat.AVRO:
-            prerelease_response["schema_converted_from"] = "avro"
-        if audit_warning:
-            prerelease_response["audit_warning"] = audit_warning
-        return prerelease_response
-
-    # Graduation: prerelease -> release (e.g., 1.0.0-rc.1 -> 1.0.0) skips proposal
-    if is_graduation(current_contract.version, version):
-        new_contract = await publish_contract()
-        await log_contract_published(
-            session=session,
-            contract_id=new_contract.id,
-            publisher_id=published_by,
-            version=new_contract.version,
-            change_type=str(diff_result.change_type),
-        )
-        await invalidate_asset(str(asset_id))
-        contract_data = Contract.model_validate(new_contract).model_dump()
-        await cache_contract(str(new_contract.id), contract_data)
-        graduation_response: ContractPublishResponse = {
-            "action": "published",
-            "change_type": str(diff_result.change_type),
-            "contract": contract_data,
-            "message": f"Graduated from {current_contract.version} to stable release.",
-        }
-        if breaking_changes:
-            graduation_response["breaking_changes"] = [bc.to_dict() for bc in breaking_changes]
-        if version_auto_generated:
-            graduation_response["version_auto_generated"] = True
-        if original_format == SchemaFormat.AVRO:
-            graduation_response["schema_converted_from"] = "avro"
-        if audit_warning:
-            graduation_response["audit_warning"] = audit_warning
-        return graduation_response
-
-    # Breaking change without force = create proposal
-    # First check if there's already a pending proposal for this asset
-    existing_proposal_result = await session.execute(
-        select(ProposalDB)
-        .where(ProposalDB.asset_id == asset_id)
-        .where(ProposalDB.status == ProposalStatus.PENDING)
-    )
-    existing_proposal = existing_proposal_result.scalar_one_or_none()
-    if existing_proposal:
+    # Handle duplicate proposal: the workflow returns PROPOSAL_CREATED with the
+    # existing proposal when one already exists. Convert to the expected HTTP error.
+    if (
+        result.action == PublishAction.PROPOSAL_CREATED
+        and result.proposal is not None
+        and result.message
+        and "already has pending proposal" in result.message
+    ):
         raise DuplicateError(
             ErrorCode.DUPLICATE_PROPOSAL,
-            f"Asset already has a pending proposal (ID: {existing_proposal.id}). "
+            f"Asset already has a pending proposal (ID: {result.proposal.id}). "
             "Resolve the existing proposal before creating a new one.",
         )
 
-    # Compute affected parties from lineage (exclude the owner team)
-    affected_teams, affected_assets = await get_affected_parties(
-        session, asset_id, exclude_team_id=asset.owner_team_id
-    )
-
-    db_proposal = ProposalDB(
-        asset_id=asset_id,
-        proposed_schema=schema_to_store,
-        change_type=diff_result.change_type,
-        breaking_changes=[bc.to_dict() for bc in breaking_changes],
-        proposed_by=published_by,
-        proposed_by_user_id=published_by_user_id,
-        affected_teams=affected_teams,
-        affected_assets=affected_assets,
-        objections=[],  # Initially empty
-    )
-    session.add(db_proposal)
-    await session.flush()
-    await session.refresh(db_proposal)
-
-    await log_proposal_created(
-        session=session,
-        proposal_id=db_proposal.id,
-        asset_id=asset_id,
-        proposer_id=published_by,
-        change_type=str(diff_result.change_type),
-        breaking_changes=[bc.to_dict() for bc in breaking_changes],
-    )
-
-    # Get impacted consumers (active registrations for current contract)
-    impacted_consumers: list[ImpactedConsumer] = []
-    if current_contract:
-        reg_result = await session.execute(
-            select(RegistrationDB, TeamDB)
-            .join(TeamDB, RegistrationDB.consumer_team_id == TeamDB.id)
-            .where(RegistrationDB.contract_id == current_contract.id)
-            .where(RegistrationDB.status == RegistrationStatus.ACTIVE)
-        )
-        for reg, team in reg_result.all():
-            impacted_consumers.append(
-                ImpactedConsumer(
-                    team_id=team.id,
-                    team_name=team.name,
-                    pinned_version=reg.pinned_version,
-                )
-            )
-
-    # Notify consumers via webhook
-    await send_proposal_created(
-        proposal_id=db_proposal.id,
-        asset_id=asset_id,
-        asset_fqn=asset.fqn,
-        producer_team_id=publisher_team.id,
-        producer_team_name=publisher_team.name,
-        proposed_version=version,
-        breaking_changes=[bc.to_dict() for bc in breaking_changes],
-        impacted_consumers=impacted_consumers,  # type: ignore[arg-type]
-    )
-
-    # Send Slack notification
-    await notify_proposal_created(
-        asset_fqn=asset.fqn,
-        version=version,
-        producer_team=publisher_team.name,
-        affected_consumers=[c["team_name"] for c in impacted_consumers],
-        breaking_changes=[bc.to_dict() for bc in breaking_changes],
-    )
-
-    proposal_response: ContractPublishResponse = {
-        "action": "proposal_created",
-        "change_type": str(diff_result.change_type),
-        "breaking_changes": [bc.to_dict() for bc in breaking_changes],
-        "proposal": Proposal.model_validate(db_proposal).model_dump(),
-        "message": "Breaking change detected. Proposal created for consumer acknowledgment.",
-    }
-    return proposal_response
+    return _build_publish_response(result, original_format)
 
 
 @router.get("/{asset_id}/contracts")
@@ -1286,20 +1092,20 @@ async def get_contract_history(
 
     # Build history with change analysis
     history: list[ContractHistoryEntry] = []
-    for i, contract in enumerate(contracts):
+    for i, contract_item in enumerate(contracts):
         entry: ContractHistoryEntry = {
-            "id": str(contract.id),
-            "version": contract.version,
-            "status": str(contract.status.value),
-            "published_at": contract.published_at.isoformat(),
-            "published_by": str(contract.published_by),
-            "compatibility_mode": str(contract.compatibility_mode.value),
+            "id": str(contract_item.id),
+            "version": contract_item.version,
+            "status": str(contract_item.status.value),
+            "published_at": contract_item.published_at.isoformat(),
+            "published_by": str(contract_item.published_by),
+            "compatibility_mode": str(contract_item.compatibility_mode.value),
         }
 
         # Compare with next (older) contract if exists
         if i < len(contracts) - 1:
             older_contract = contracts[i + 1]
-            diff_result = diff_schemas(older_contract.schema_def, contract.schema_def)
+            diff_result = diff_schemas(older_contract.schema_def, contract_item.schema_def)
             breaking = diff_result.breaking_for_mode(older_contract.compatibility_mode)
             entry["change_type"] = str(diff_result.change_type.value)
             entry["breaking_changes_count"] = len(breaking)

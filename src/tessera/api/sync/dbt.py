@@ -5,17 +5,16 @@ for auto-registering assets and contracts.
 """
 
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.api.auth import Auth, RequireAdmin
-from tessera.api.errors import BadRequestError, ConflictError, ErrorCode, NotFoundError
+from tessera.api.errors import BadRequestError, ConflictError, ErrorCode
 from tessera.api.rate_limit import limit_admin
 from tessera.api.sync.helpers import resolve_team_by_name, resolve_user_by_email
 from tessera.db import AssetDB, ContractDB, ProposalDB, RegistrationDB, TeamDB, UserDB, get_session
@@ -367,191 +366,10 @@ class DbtDiffResponse(BaseModel):
     meta_errors: list[str] = Field(default_factory=list)  # Missing teams, etc.
 
 
-@router.post("/dbt")
-@limit_admin
-async def sync_from_dbt(
-    request: Request,
-    auth: Auth,
-    manifest_path: str = Query(..., description="Path to dbt manifest.json"),
-    owner_team_id: UUID = Query(..., description="Team ID to assign as owner"),
-    _: None = RequireAdmin,
-    session: AsyncSession = Depends(get_session),
-) -> dict[str, Any]:
-    """Import assets from a dbt manifest.json file.
-
-    Parses the dbt manifest and creates assets for each model/source.
-    This is the primary integration point for dbt projects.
-    """
-    manifest_file = Path(manifest_path)
-    if not manifest_file.exists():
-        raise NotFoundError(
-            ErrorCode.MANIFEST_NOT_FOUND,
-            f"Manifest not found: {manifest_path}",
-        )
-
-    import json
-
-    manifest = json.loads(manifest_file.read_text())
-
-    assets_created = 0
-    assets_updated = 0
-
-    # Track assets for per-asset audit logging
-    created_assets: list[AssetDB] = []
-    updated_assets: list[tuple[AssetDB, str]] = []  # (asset, fqn)
-
-    # Process nodes (models, seeds, snapshots)
-    nodes = manifest.get("nodes", {})
-    tests_extracted = 0
-    for node_id, node in nodes.items():
-        resource_type = node.get("resource_type")
-        if resource_type not in ("model", "seed", "snapshot"):
-            continue
-
-        # Build FQN from dbt metadata
-        database = node.get("database", "")
-        schema = node.get("schema", "")
-        name = node.get("name", "")
-        fqn = f"{database}.{schema}.{name}".lower()
-
-        # Check if asset exists
-        result = await session.execute(select(AssetDB).where(AssetDB.fqn == fqn))
-        existing = result.scalar_one_or_none()
-
-        # Extract guarantees from dbt tests
-        guarantees = extract_guarantees_from_tests(node_id, node, nodes)
-        if guarantees:
-            tests_extracted += 1
-
-        # Build metadata from dbt
-        metadata = {
-            "dbt_node_id": node_id,
-            "resource_type": resource_type,
-            "description": node.get("description", ""),
-            "tags": node.get("tags", []),
-            "columns": {
-                col_name: {
-                    "description": col_info.get("description", ""),
-                    "data_type": col_info.get("data_type"),
-                }
-                for col_name, col_info in node.get("columns", {}).items()
-            },
-        }
-        # Store extracted guarantees in metadata for use when publishing contracts
-        if guarantees:
-            metadata["guarantees"] = guarantees
-
-        if existing:
-            existing.metadata_ = metadata
-            existing.resource_type = _map_dbt_resource_type(resource_type)
-            updated_assets.append((existing, fqn))
-            assets_updated += 1
-        else:
-            new_asset = AssetDB(
-                fqn=fqn,
-                owner_team_id=owner_team_id,
-                resource_type=_map_dbt_resource_type(resource_type),
-                metadata_=metadata,
-            )
-            session.add(new_asset)
-            created_assets.append(new_asset)
-            assets_created += 1
-
-    # Process sources
-    sources = manifest.get("sources", {})
-    for source_id, source in sources.items():
-        database = source.get("database", "")
-        schema = source.get("schema", "")
-        name = source.get("name", "")
-        fqn = f"{database}.{schema}.{name}".lower()
-
-        result = await session.execute(select(AssetDB).where(AssetDB.fqn == fqn))
-        existing = result.scalar_one_or_none()
-
-        # Extract guarantees from tests for sources (they're in nodes too)
-        guarantees = extract_guarantees_from_tests(source_id, source, nodes)
-        if guarantees:
-            tests_extracted += 1
-
-        metadata = {
-            "dbt_source_id": source_id,
-            "resource_type": "source",
-            "description": source.get("description", ""),
-            "columns": {
-                col_name: {
-                    "description": col_info.get("description", ""),
-                    "data_type": col_info.get("data_type"),
-                }
-                for col_name, col_info in source.get("columns", {}).items()
-            },
-        }
-        # Store extracted guarantees in metadata for use when publishing contracts
-        if guarantees:
-            metadata["guarantees"] = guarantees
-
-        if existing:
-            existing.metadata_ = metadata
-            existing.resource_type = ResourceType.SOURCE
-            updated_assets.append((existing, fqn))
-            assets_updated += 1
-        else:
-            new_asset = AssetDB(
-                fqn=fqn,
-                owner_team_id=owner_team_id,
-                resource_type=ResourceType.SOURCE,
-                metadata_=metadata,
-            )
-            session.add(new_asset)
-            created_assets.append(new_asset)
-            assets_created += 1
-
-    # Flush to ensure all asset IDs are available for per-asset audit logging
-    await session.flush()
-
-    # Log per-asset audit events
-    for asset in created_assets:
-        await audit.log_event(
-            session=session,
-            entity_type="asset",
-            entity_id=asset.id,
-            action=AuditAction.ASSET_CREATED,
-            actor_id=owner_team_id,
-            payload={"fqn": asset.fqn, "triggered_by": "dbt_sync"},
-        )
-    for asset, fqn in updated_assets:
-        await audit.log_event(
-            session=session,
-            entity_type="asset",
-            entity_id=asset.id,
-            action=AuditAction.ASSET_UPDATED,
-            actor_id=owner_team_id,
-            payload={"fqn": fqn, "triggered_by": "dbt_sync"},
-        )
-
-    # Audit log dbt sync operation
-    await audit.log_event(
-        session=session,
-        entity_type="sync",
-        entity_id=owner_team_id,  # Use team ID as entity
-        action=AuditAction.DBT_SYNC,
-        actor_id=owner_team_id,
-        payload={
-            "manifest_path": str(manifest_path),
-            "assets_created": assets_created,
-            "assets_updated": assets_updated,
-            "guarantees_extracted": tests_extracted,
-        },
-    )
-
-    return {
-        "status": "success",
-        "manifest": str(manifest_path),
-        "assets": {
-            "created": assets_created,
-            "updated": assets_updated,
-        },
-        "guarantees_extracted": tests_extracted,
-    }
+# NOTE: sync_from_dbt endpoint removed (security hardening, Spec 04).
+# It accepted a server-side file path (manifest_path) enabling arbitrary file reads
+# via path traversal. Use upload_dbt_manifest (POST /dbt/upload) instead, which
+# accepts manifest JSON in the request body.
 
 
 async def _check_dbt_node_impact(
@@ -1366,8 +1184,15 @@ async def upload_dbt_manifest(
             name = source.get("name", "")
             manifest_fqns.add(f"{database}.{schema}.{name}".lower())
 
-        # Find dbt-managed assets not in manifest
-        existing_result = await session.execute(select(AssetDB).where(AssetDB.deleted_at.is_(None)))
+        # Find dbt-managed assets not in manifest, scoped to the requesting team.
+        # Without the owner_team_id filter, Team A's sync would delete Team B's
+        # dbt-sourced assets that aren't in Team A's manifest.
+        resolved_team_id = upload_req.owner_team_id or auth.team_id
+        existing_result = await session.execute(
+            select(AssetDB)
+            .where(AssetDB.deleted_at.is_(None))
+            .where(AssetDB.owner_team_id == resolved_team_id)
+        )
         for asset in existing_result.scalars().all():
             if asset.fqn in manifest_fqns:
                 continue

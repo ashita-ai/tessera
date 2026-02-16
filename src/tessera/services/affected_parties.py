@@ -36,8 +36,10 @@ async def get_affected_parties(
         - affected_teams: List of dicts with team_id, team_name, assets
         - affected_assets: List of dicts with asset details
     """
-    # Get the asset being changed
-    asset_result = await session.execute(select(AssetDB).where(AssetDB.id == asset_id))
+    # Get the asset being changed (exclude soft-deleted assets)
+    asset_result = await session.execute(
+        select(AssetDB).where(AssetDB.id == asset_id).where(AssetDB.deleted_at.is_(None))
+    )
     asset = asset_result.scalar_one_or_none()
     if not asset:
         return [], []
@@ -62,6 +64,7 @@ async def get_affected_parties(
         .join(dep_asset, AssetDependencyDB.dependent_asset_id == dep_asset.c.id)
         .join(dep_team, dep_asset.c.owner_team_id == dep_team.c.id)
         .where(AssetDependencyDB.dependency_asset_id == asset_id)
+        .where(AssetDependencyDB.deleted_at.is_(None))
         .where(dep_asset.c.deleted_at.is_(None))
     )
 

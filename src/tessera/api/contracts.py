@@ -360,17 +360,21 @@ async def list_contract_registrations(
             details={"contract_id": str(contract_id)},
         )
 
-    # Query with join to get team names
+    # Query with join to get team names (exclude soft-deleted registrations)
     query = (
         select(RegistrationDB, TeamDB.name.label("team_name"))
         .outerjoin(TeamDB, RegistrationDB.consumer_team_id == TeamDB.id)
         .where(RegistrationDB.contract_id == contract_id)
+        .where(RegistrationDB.deleted_at.is_(None))
         .order_by(RegistrationDB.registered_at.desc())
     )
 
-    # Get total count
+    # Get total count (exclude soft-deleted registrations)
     count_query = select(func.count()).select_from(
-        select(RegistrationDB).where(RegistrationDB.contract_id == contract_id).subquery()
+        select(RegistrationDB)
+        .where(RegistrationDB.contract_id == contract_id)
+        .where(RegistrationDB.deleted_at.is_(None))
+        .subquery()
     )
     total_result = await session.execute(count_query)
     total = total_result.scalar() or 0
