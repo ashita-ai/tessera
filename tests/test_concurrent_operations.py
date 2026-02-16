@@ -628,3 +628,449 @@ class TestRegistration:
         registrations = list_resp.json()["results"]
         registered_teams = {r["consumer_team_id"] for r in registrations}
         assert registered_teams == set(consumer_ids)
+
+
+class TestPublishFromProposal:
+    """Tests for publish_from_proposal concurrency safety."""
+
+    async def _setup_approved_proposal(
+        self, client: AsyncClient, suffix: str = ""
+    ) -> dict[str, Any]:
+        """Create an asset with a breaking change proposal that is approved.
+
+        Returns dict with asset_id, proposal_id, producer_id, consumer_id.
+        """
+        safe_suffix = suffix.replace("-", "_")
+
+        producer_resp = await client.post(
+            "/api/v1/teams", json={"name": f"pub-prop-producer{suffix}"}
+        )
+        assert producer_resp.status_code == 201
+        producer_id = producer_resp.json()["id"]
+
+        consumer_resp = await client.post(
+            "/api/v1/teams", json={"name": f"pub-prop-consumer{suffix}"}
+        )
+        assert consumer_resp.status_code == 201
+        consumer_id = consumer_resp.json()["id"]
+
+        asset_resp = await client.post(
+            "/api/v1/assets",
+            json={"fqn": f"pub.prop{safe_suffix}.table", "owner_team_id": producer_id},
+        )
+        assert asset_resp.status_code == 201
+        asset_id = asset_resp.json()["id"]
+
+        # Create initial contract
+        contract_resp = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            json={
+                "version": "1.0.0",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "integer"},
+                        "name": {"type": "string"},
+                    },
+                    "required": ["id", "name"],
+                },
+                "compatibility_mode": "backward",
+            },
+        )
+        assert contract_resp.status_code == 201
+        contract_id = contract_resp.json()["contract"]["id"]
+
+        # Register consumer
+        reg_resp = await client.post(
+            f"/api/v1/registrations?contract_id={contract_id}",
+            json={"consumer_team_id": consumer_id},
+        )
+        assert reg_resp.status_code == 201
+
+        # Create breaking change → proposal
+        proposal_resp = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            json={
+                "version": "2.0.0",
+                "schema": {
+                    "type": "object",
+                    "properties": {"id": {"type": "integer"}},
+                    "required": ["id"],
+                },
+                "compatibility_mode": "backward",
+            },
+        )
+        assert proposal_resp.status_code == 201
+        assert proposal_resp.json()["action"] == "proposal_created"
+        proposal_id = proposal_resp.json()["proposal"]["id"]
+
+        # Acknowledge to approve
+        ack_resp = await client.post(
+            f"/api/v1/proposals/{proposal_id}/acknowledge",
+            json={
+                "consumer_team_id": consumer_id,
+                "response": "approved",
+                "notes": "Acknowledged",
+            },
+        )
+        assert ack_resp.status_code == 201
+
+        # Verify proposal is approved
+        status_resp = await client.get(f"/api/v1/proposals/{proposal_id}/status")
+        assert status_resp.json()["status"] == "approved"
+
+        return {
+            "asset_id": asset_id,
+            "proposal_id": proposal_id,
+            "producer_id": producer_id,
+            "consumer_id": consumer_id,
+        }
+
+    async def test_double_publish_from_proposal_second_rejected(self, client: AsyncClient):
+        """Publishing the same approved proposal twice — second call fails.
+
+        The unique constraint on (asset_id, version) prevents the same
+        version from being published twice.  Under true concurrency with
+        PostgreSQL, the FOR UPDATE lock on the proposal row would
+        serialize the requests.  In SQLite the constraint fires as the
+        defense-in-depth.
+        """
+        setup = await self._setup_approved_proposal(client, suffix="-dbl")
+
+        # First publish should succeed
+        resp1 = await client.post(
+            f"/api/v1/proposals/{setup['proposal_id']}/publish",
+            json={
+                "version": "2.0.0",
+                "published_by": setup["producer_id"],
+            },
+        )
+        assert resp1.status_code == 200
+        assert resp1.json()["action"] == "published"
+
+        # Second publish on the same proposal with the same version should
+        # fail — the unique constraint (asset_id, version) rejects it.
+        resp2 = await client.post(
+            f"/api/v1/proposals/{setup['proposal_id']}/publish",
+            json={
+                "version": "2.0.0",
+                "published_by": setup["producer_id"],
+            },
+        )
+        assert resp2.status_code == 409
+
+
+class TestObjectionConcurrency:
+    """Tests for objection filing concurrency safety."""
+
+    async def _setup_proposal_with_affected_teams(
+        self, client: AsyncClient, suffix: str = ""
+    ) -> dict[str, Any]:
+        """Create a proposal with affected_teams populated for objection testing.
+
+        affected_teams is derived from downstream asset dependencies, not from
+        consumer registrations.  So each consumer team must own an asset that
+        declares an explicit dependency on the producer's asset.
+
+        Returns dict with proposal_id, producer_id, consumer_ids, asset_id.
+        """
+        safe_suffix = suffix.replace("-", "_")
+
+        producer_resp = await client.post("/api/v1/teams", json={"name": f"obj-producer{suffix}"})
+        assert producer_resp.status_code == 201
+        producer_id = producer_resp.json()["id"]
+
+        consumer_ids = []
+        for i in range(2):
+            consumer_resp = await client.post(
+                "/api/v1/teams", json={"name": f"obj-consumer-{i}{suffix}"}
+            )
+            assert consumer_resp.status_code == 201
+            consumer_ids.append(consumer_resp.json()["id"])
+
+        # Create the upstream (producer) asset
+        asset_resp = await client.post(
+            "/api/v1/assets",
+            json={"fqn": f"obj.test{safe_suffix}.table", "owner_team_id": producer_id},
+        )
+        assert asset_resp.status_code == 201
+        asset_id = asset_resp.json()["id"]
+
+        # Create downstream assets owned by each consumer and register
+        # explicit dependencies so they appear in affected_teams.
+        for i, cid in enumerate(consumer_ids):
+            downstream_resp = await client.post(
+                "/api/v1/assets",
+                json={
+                    "fqn": f"obj.downstream{safe_suffix}_{i}.table",
+                    "owner_team_id": cid,
+                },
+            )
+            assert downstream_resp.status_code == 201
+            downstream_id = downstream_resp.json()["id"]
+
+            dep_resp = await client.post(
+                f"/api/v1/assets/{downstream_id}/dependencies",
+                json={
+                    "depends_on_asset_id": asset_id,
+                    "dependency_type": "consumes",
+                },
+            )
+            assert dep_resp.status_code == 201
+
+        # Create initial contract
+        contract_resp = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            json={
+                "version": "1.0.0",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "integer"},
+                        "name": {"type": "string"},
+                    },
+                    "required": ["id", "name"],
+                },
+                "compatibility_mode": "backward",
+            },
+        )
+        assert contract_resp.status_code == 201
+        contract_id = contract_resp.json()["contract"]["id"]
+
+        # Register both consumers
+        for cid in consumer_ids:
+            reg_resp = await client.post(
+                f"/api/v1/registrations?contract_id={contract_id}",
+                json={"consumer_team_id": cid},
+            )
+            assert reg_resp.status_code == 201
+
+        # Create breaking change → proposal (affected_teams auto-populated
+        # from the downstream dependencies created above)
+        proposal_resp = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            json={
+                "version": "2.0.0",
+                "schema": {
+                    "type": "object",
+                    "properties": {"id": {"type": "integer"}},
+                    "required": ["id"],
+                },
+                "compatibility_mode": "backward",
+            },
+        )
+        assert proposal_resp.status_code == 201
+        assert proposal_resp.json()["action"] == "proposal_created"
+        proposal_id = proposal_resp.json()["proposal"]["id"]
+
+        return {
+            "asset_id": asset_id,
+            "proposal_id": proposal_id,
+            "producer_id": producer_id,
+            "consumer_ids": consumer_ids,
+        }
+
+    async def test_two_objections_both_preserved(self, client: AsyncClient):
+        """Both objections from different teams are preserved (no lost update).
+
+        When two teams file objections sequentially, both should appear in
+        the proposal's objections list.
+        """
+        setup = await self._setup_proposal_with_affected_teams(client, suffix="-both")
+
+        # First team objects
+        resp1 = await client.post(
+            f"/api/v1/proposals/{setup['proposal_id']}/object"
+            f"?objector_team_id={setup['consumer_ids'][0]}",
+            json={"reason": "This will break our pipeline"},
+        )
+        assert resp1.status_code == 201
+        assert resp1.json()["total_objections"] == 1
+
+        # Second team objects
+        resp2 = await client.post(
+            f"/api/v1/proposals/{setup['proposal_id']}/object"
+            f"?objector_team_id={setup['consumer_ids'][1]}",
+            json={"reason": "We need more migration time"},
+        )
+        assert resp2.status_code == 201
+        assert resp2.json()["total_objections"] == 2
+
+        # Verify both objections are in the proposal
+        proposal_resp = await client.get(f"/api/v1/proposals/{setup['proposal_id']}")
+        assert proposal_resp.status_code == 200
+        objections = proposal_resp.json()["objections"]
+        assert len(objections) == 2
+        objecting_teams = {obj["team_id"] for obj in objections}
+        assert objecting_teams == set(setup["consumer_ids"])
+
+    async def test_duplicate_objection_from_same_team_rejected(self, client: AsyncClient):
+        """Same team cannot file two objections on the same proposal."""
+        setup = await self._setup_proposal_with_affected_teams(client, suffix="-dupobj")
+
+        # First objection
+        resp1 = await client.post(
+            f"/api/v1/proposals/{setup['proposal_id']}/object"
+            f"?objector_team_id={setup['consumer_ids'][0]}",
+            json={"reason": "First objection"},
+        )
+        assert resp1.status_code == 201
+
+        # Duplicate objection from the same team
+        resp2 = await client.post(
+            f"/api/v1/proposals/{setup['proposal_id']}/object"
+            f"?objector_team_id={setup['consumer_ids'][0]}",
+            json={"reason": "Second objection from same team"},
+        )
+        assert resp2.status_code == 409
+
+
+class TestBulkAckEdgeCases:
+    """Tests for bulk acknowledgment edge cases."""
+
+    async def _setup_proposal_with_consumers(
+        self, client: AsyncClient, num_consumers: int = 2, suffix: str = ""
+    ) -> dict[str, Any]:
+        """Create an asset with a breaking change proposal and registered consumers."""
+        safe_suffix = suffix.replace("-", "_")
+
+        producer_resp = await client.post("/api/v1/teams", json={"name": f"bulk-producer{suffix}"})
+        assert producer_resp.status_code == 201
+        producer_id = producer_resp.json()["id"]
+
+        consumer_ids = []
+        for i in range(num_consumers):
+            consumer_resp = await client.post(
+                "/api/v1/teams", json={"name": f"bulk-consumer-{i}{suffix}"}
+            )
+            assert consumer_resp.status_code == 201
+            consumer_ids.append(consumer_resp.json()["id"])
+
+        asset_resp = await client.post(
+            "/api/v1/assets",
+            json={"fqn": f"bulk.ack{safe_suffix}.table", "owner_team_id": producer_id},
+        )
+        assert asset_resp.status_code == 201
+        asset_id = asset_resp.json()["id"]
+
+        contract_resp = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            json={
+                "version": "1.0.0",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "integer"},
+                        "name": {"type": "string"},
+                    },
+                    "required": ["id", "name"],
+                },
+                "compatibility_mode": "backward",
+            },
+        )
+        assert contract_resp.status_code == 201
+        contract_id = contract_resp.json()["contract"]["id"]
+
+        for cid in consumer_ids:
+            reg_resp = await client.post(
+                f"/api/v1/registrations?contract_id={contract_id}",
+                json={"consumer_team_id": cid},
+            )
+            assert reg_resp.status_code == 201
+
+        proposal_resp = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            json={
+                "version": "2.0.0",
+                "schema": {
+                    "type": "object",
+                    "properties": {"id": {"type": "integer"}},
+                    "required": ["id"],
+                },
+                "compatibility_mode": "backward",
+            },
+        )
+        assert proposal_resp.status_code == 201
+        assert proposal_resp.json()["action"] == "proposal_created"
+        proposal_id = proposal_resp.json()["proposal"]["id"]
+
+        return {
+            "asset_id": asset_id,
+            "proposal_id": proposal_id,
+            "producer_id": producer_id,
+            "consumer_ids": consumer_ids,
+        }
+
+    async def test_bulk_ack_duplicate_proposal_in_batch(self, client: AsyncClient):
+        """Bulk ack with same proposal from same team twice in one batch.
+
+        The second entry should fail with a duplicate error while the first
+        succeeds.
+        """
+        setup = await self._setup_proposal_with_consumers(
+            client, num_consumers=2, suffix="-bulkdup"
+        )
+
+        resp = await client.post(
+            "/api/v1/bulk/acknowledgments",
+            json={
+                "acknowledgments": [
+                    {
+                        "proposal_id": setup["proposal_id"],
+                        "consumer_team_id": setup["consumer_ids"][0],
+                        "response": "approved",
+                        "notes": "First ack in batch",
+                    },
+                    {
+                        "proposal_id": setup["proposal_id"],
+                        "consumer_team_id": setup["consumer_ids"][0],
+                        "response": "approved",
+                        "notes": "Duplicate ack in same batch",
+                    },
+                ],
+                "continue_on_error": True,
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["succeeded"] == 1
+        assert data["failed"] == 1
+        # First should succeed, second should fail
+        assert data["results"][0]["success"] is True
+        assert data["results"][1]["success"] is False
+
+    async def test_bulk_ack_all_consumers_triggers_approval(self, client: AsyncClient):
+        """Bulk ack where all consumers acknowledge — proposal auto-approves."""
+        setup = await self._setup_proposal_with_consumers(
+            client, num_consumers=2, suffix="-bulkall"
+        )
+
+        resp = await client.post(
+            "/api/v1/bulk/acknowledgments",
+            json={
+                "acknowledgments": [
+                    {
+                        "proposal_id": setup["proposal_id"],
+                        "consumer_team_id": setup["consumer_ids"][0],
+                        "response": "approved",
+                        "notes": "Consumer 0 acks",
+                    },
+                    {
+                        "proposal_id": setup["proposal_id"],
+                        "consumer_team_id": setup["consumer_ids"][1],
+                        "response": "approved",
+                        "notes": "Consumer 1 acks",
+                    },
+                ],
+                "continue_on_error": True,
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["succeeded"] == 2
+        assert data["failed"] == 0
+
+        # Verify proposal is approved
+        status_resp = await client.get(f"/api/v1/proposals/{setup['proposal_id']}/status")
+        assert status_resp.status_code == 200
+        assert status_resp.json()["status"] == "approved"

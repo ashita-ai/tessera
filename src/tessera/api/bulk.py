@@ -385,9 +385,11 @@ async def bulk_acknowledge_proposals(
                     code=ErrorCode.FORBIDDEN,
                 )
 
-            # Verify proposal exists
+            # Verify proposal exists — lock the row to prevent concurrent
+            # acks from both triggering auto-approval (matches single-ack
+            # pattern in proposals.py).
             proposal_result = await session.execute(
-                select(ProposalDB).where(ProposalDB.id == item.proposal_id)
+                select(ProposalDB).where(ProposalDB.id == item.proposal_id).with_for_update()
             )
             proposal = proposal_result.scalar_one_or_none()
             if not proposal:

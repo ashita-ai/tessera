@@ -1,5 +1,6 @@
 """Proposals API endpoints."""
 
+import logging
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -7,6 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.api.auth import Auth, RequireAdmin, RequireRead, RequireWrite
@@ -58,6 +60,8 @@ from tessera.services.webhooks import (
     send_proposal_acknowledged,
     send_proposal_status_change,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -798,17 +802,21 @@ async def file_objection(
             extra={"code": "INSUFFICIENT_PERMISSIONS"},
         )
 
-    # Get proposal with asset in single query
-    result = await session.execute(
-        select(ProposalDB, AssetDB)
-        .join(AssetDB, ProposalDB.asset_id == AssetDB.id)
-        .where(ProposalDB.id == proposal_id)
+    # Lock the proposal row to prevent two concurrent objections from
+    # both reading the same JSON array and overwriting each other (lost
+    # update on the read-modify-write of proposal.objections).
+    proposal_result = await session.execute(
+        select(ProposalDB).where(ProposalDB.id == proposal_id).with_for_update()
     )
-    row = result.one_or_none()
-    if not row:
+    proposal: ProposalDB | None = proposal_result.scalar_one_or_none()
+    if not proposal:
         raise NotFoundError(ErrorCode.PROPOSAL_NOT_FOUND, "Proposal not found")
-    proposal: ProposalDB = row[0]
-    asset: AssetDB = row[1]
+
+    # Load the asset separately (no lock needed — read-only).
+    asset_result = await session.execute(select(AssetDB).where(AssetDB.id == proposal.asset_id))
+    asset: AssetDB | None = asset_result.scalar_one_or_none()
+    if not asset:
+        raise NotFoundError(ErrorCode.ASSET_NOT_FOUND, "Asset not found")
 
     if proposal.status != ProposalStatus.PENDING:
         raise BadRequestError("Proposal is not pending", code=ErrorCode.PROPOSAL_NOT_PENDING)
@@ -978,8 +986,11 @@ async def publish_from_proposal(
             extra={"code": "INSUFFICIENT_PERMISSIONS"},
         )
 
-    # Get the proposal
-    result = await session.execute(select(ProposalDB).where(ProposalDB.id == proposal_id))
+    # Get the proposal — lock the row to prevent double-publish from
+    # concurrent requests on the same approved proposal.
+    result = await session.execute(
+        select(ProposalDB).where(ProposalDB.id == proposal_id).with_for_update()
+    )
     proposal = result.scalar_one_or_none()
     if not proposal:
         raise NotFoundError(ErrorCode.PROPOSAL_NOT_FOUND, "Proposal not found")
@@ -1005,48 +1016,59 @@ async def publish_from_proposal(
     if not asset:
         raise NotFoundError(ErrorCode.ASSET_NOT_FOUND, "Asset not found")
 
-    # Get the current active contract to deprecate
+    # Get the current active contract to deprecate — lock the row to
+    # prevent a concurrent publish from reading stale status (matches
+    # pattern in contract_publisher.py).
     current_contract_result = await session.execute(
         select(ContractDB)
         .where(ContractDB.asset_id == proposal.asset_id)
         .where(ContractDB.status == ContractStatus.ACTIVE)
         .order_by(ContractDB.published_at.desc())
         .limit(1)
+        .with_for_update()
     )
     current_contract = current_contract_result.scalar_one_or_none()
 
     # Use nested transaction (savepoint) to ensure atomicity of the multi-step publish
     # This ensures all-or-nothing: new contract + deprecate old + audit log
-    async with session.begin_nested():
-        # Create new contract from the proposal
-        # Default to BACKWARD compatibility for new contracts (safe for existing consumers)
-        compat_mode = (
-            current_contract.compatibility_mode if current_contract else CompatibilityMode.BACKWARD
-        )
-        new_contract = ContractDB(
-            asset_id=proposal.asset_id,
-            version=publish_request.version,
-            schema_def=proposal.proposed_schema,
-            compatibility_mode=compat_mode,
-            guarantees=current_contract.guarantees if current_contract else {},
-            published_by=publish_request.published_by,
-            published_by_user_id=publish_request.published_by_user_id,
-        )
-        session.add(new_contract)
+    try:
+        async with session.begin_nested():
+            # Create new contract from the proposal
+            # Default to BACKWARD compatibility for new contracts (safe for existing consumers)
+            compat_mode = (
+                current_contract.compatibility_mode
+                if current_contract
+                else CompatibilityMode.BACKWARD
+            )
+            new_contract = ContractDB(
+                asset_id=proposal.asset_id,
+                version=publish_request.version,
+                schema_def=proposal.proposed_schema,
+                compatibility_mode=compat_mode,
+                guarantees=current_contract.guarantees if current_contract else {},
+                published_by=publish_request.published_by,
+                published_by_user_id=publish_request.published_by_user_id,
+            )
+            session.add(new_contract)
 
-        # Deprecate old contract
-        if current_contract:
-            current_contract.status = ContractStatus.DEPRECATED
+            # Deprecate old contract
+            if current_contract:
+                current_contract.status = ContractStatus.DEPRECATED
 
-        await session.flush()
-        await session.refresh(new_contract)
+            await session.flush()
+            await session.refresh(new_contract)
 
-        await log_contract_published(
-            session=session,
-            contract_id=new_contract.id,
-            publisher_id=publish_request.published_by,
-            version=new_contract.version,
-            change_type=str(proposal.change_type),
+            await log_contract_published(
+                session=session,
+                contract_id=new_contract.id,
+                publisher_id=publish_request.published_by,
+                version=new_contract.version,
+                change_type=str(proposal.change_type),
+            )
+    except IntegrityError:
+        raise DuplicateError(
+            ErrorCode.DUPLICATE_CONTRACT_VERSION,
+            f"Contract version '{publish_request.version}' already exists for this asset",
         )
 
     # Get publisher team info for webhook
@@ -1055,16 +1077,27 @@ async def publish_from_proposal(
     )
     publisher_team = publisher_result.scalar_one_or_none()
 
-    # Send webhook for contract publication
-    await send_contract_published(
-        contract_id=new_contract.id,
-        asset_id=asset.id,
-        asset_fqn=asset.fqn,
-        version=new_contract.version,
-        producer_team_id=publish_request.published_by,
-        producer_team_name=publisher_team.name if publisher_team else "unknown",
-        from_proposal_id=proposal_id,
-    )
+    # Send webhook for contract publication — the contract is already
+    # committed in the savepoint above, so a webhook scheduling failure
+    # should not cause a 500 response for a successful mutation.
+    try:
+        await send_contract_published(
+            contract_id=new_contract.id,
+            asset_id=asset.id,
+            asset_fqn=asset.fqn,
+            version=new_contract.version,
+            producer_team_id=publish_request.published_by,
+            producer_team_name=publisher_team.name if publisher_team else "unknown",
+            from_proposal_id=proposal_id,
+        )
+    except Exception:
+        logger.warning(
+            "Webhook send_contract_published failed for contract %s (asset %s), "
+            "but the contract was published successfully",
+            new_contract.id,
+            asset.fqn,
+            exc_info=True,
+        )
 
     # Check audit status and add warning if failing
     audit_info = await _get_asset_audit_info(session, proposal.asset_id)
