@@ -54,7 +54,9 @@ async def _get_session_auth_context(
         if not user.team_id:
             return None
 
-        team_result = await session.execute(select(TeamDB).where(TeamDB.id == user.team_id))
+        team_result = await session.execute(
+            select(TeamDB).where(TeamDB.id == user.team_id).where(TeamDB.deleted_at.is_(None))
+        )
         team = team_result.scalar_one_or_none()
         if not team:
             return None
@@ -178,7 +180,7 @@ async def get_auth_context(
         # Return a mock auth context for development
         from sqlalchemy import select
 
-        result = await session.execute(select(TeamDB).limit(1))
+        result = await session.execute(select(TeamDB).where(TeamDB.deleted_at.is_(None)).limit(1))
         team = result.scalar_one_or_none()
 
         # If no team exists, create a mock team object (not persisted)
@@ -232,7 +234,7 @@ async def get_auth_context(
         # Bootstrap key has full admin access
         from sqlalchemy import select
 
-        result = await session.execute(select(TeamDB).limit(1))
+        result = await session.execute(select(TeamDB).where(TeamDB.deleted_at.is_(None)).limit(1))
         team = result.scalar_one_or_none()
 
         # If no team exists, create a mock team for bootstrap operations (like creating first team)

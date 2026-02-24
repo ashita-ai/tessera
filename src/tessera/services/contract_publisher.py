@@ -712,6 +712,8 @@ class ContractPublishingWorkflow:
             .join(TeamDB, RegistrationDB.consumer_team_id == TeamDB.id)
             .where(RegistrationDB.contract_id == self.current_contract.id)
             .where(RegistrationDB.status == RegistrationStatus.ACTIVE)
+            .where(RegistrationDB.deleted_at.is_(None))
+            .where(TeamDB.deleted_at.is_(None))
         )
         consumers = []
         for reg, team in result.all():

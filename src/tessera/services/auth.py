@@ -143,13 +143,14 @@ async def validate_api_key(
     prefix_lengths = (12, 8, 4)
     prefix_candidates = [f"{parts[0]}_{parts[1]}_{parts[2][:length]}" for length in prefix_lengths]
 
-    # Fetch candidate keys by prefix
+    # Fetch candidate keys by prefix, excluding keys for soft-deleted teams
     result = await session.execute(
         select(APIKeyDB, TeamDB)
         .join(TeamDB, APIKeyDB.team_id == TeamDB.id)
         .where(
             APIKeyDB.key_prefix.in_(prefix_candidates),
             APIKeyDB.revoked_at.is_(None),
+            TeamDB.deleted_at.is_(None),
             or_(
                 APIKeyDB.expires_at.is_(None),
                 APIKeyDB.expires_at > now,
