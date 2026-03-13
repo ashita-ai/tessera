@@ -13,12 +13,16 @@ so true concurrent race condition tests require PostgreSQL. These tests verify
 the sequential behavior and duplicate detection logic that prevents data corruption.
 """
 
+import asyncio
+import os
 from typing import Any
 
 import pytest
 from httpx import AsyncClient
 
 pytestmark = pytest.mark.asyncio
+
+_USE_SQLITE = os.environ.get("DATABASE_URL", "sqlite+aiosqlite:///:memory:").startswith("sqlite")
 
 
 class TestProposalAcknowledgment:
@@ -441,6 +445,90 @@ class TestContractPublish:
         published_versions = {c["version"] for c in contracts_resp.json()["results"]}
         assert "1.0.0" in published_versions
         assert "2.0.0" in published_versions
+
+    @pytest.mark.skipif(_USE_SQLITE, reason="SQLite does not support FOR UPDATE row locking")
+    async def test_concurrent_auto_publish_no_duplicate_versions(self, client: AsyncClient):
+        """Two concurrent publishes without explicit versions must not produce duplicate versions.
+
+        ContractPublishingWorkflow acquires a FOR UPDATE lock on the active contract
+        before computing the next version. Under PostgreSQL this serialises concurrent
+        publishes so the second publish either:
+          - sees the first contract as active and increments from it, or
+          - loses the race and is rejected with 409.
+
+        Either outcome is acceptable; what is NOT acceptable is two contracts with the
+        same auto-generated version (e.g. both get 1.1.0).
+        """
+        setup = await self._setup_asset(client, suffix="-concurrent")
+        asset_id = setup["asset_id"]
+        team_id = setup["team_id"]
+
+        # Publish a seed contract so subsequent auto-versions increment from 1.0.0.
+        seed_resp = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            json={
+                "version": "1.0.0",
+                "schema": {
+                    "type": "object",
+                    "properties": {"id": {"type": "integer"}},
+                },
+                "compatibility_mode": "backward",
+            },
+        )
+        assert seed_resp.status_code == 201
+
+        # Two backward-compatible changes: both add a field (no explicit version).
+        # The FOR UPDATE lock in ContractPublishingWorkflow serialises the version
+        # computation so each publish reads a distinct active contract.
+        schema_additive_a = {
+            "type": "object",
+            "properties": {
+                "id": {"type": "integer"},
+                "name": {"type": "string"},
+            },
+        }
+        schema_additive_b = {
+            "type": "object",
+            "properties": {
+                "id": {"type": "integer"},
+                "email": {"type": "string"},
+            },
+        }
+
+        results = await asyncio.gather(
+            client.post(
+                f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+                json={"schema": schema_additive_a, "compatibility_mode": "backward"},
+            ),
+            client.post(
+                f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+                json={"schema": schema_additive_b, "compatibility_mode": "backward"},
+            ),
+            return_exceptions=True,
+        )
+
+        responses = [r for r in results if not isinstance(r, Exception)]
+        successes = [r for r in responses if r.status_code == 201]
+        failures = [r for r in responses if r.status_code != 201]
+
+        assert len(successes) >= 1, (
+            f"Expected at least one concurrent publish to succeed; got statuses "
+            f"{[r.status_code for r in responses]}"
+        )
+
+        # Any failure must be a clean conflict (409), not an internal error (500).
+        for failure in failures:
+            assert (
+                failure.status_code == 409
+            ), f"Unexpected failure status {failure.status_code}: {failure.text}"
+
+        # All stored versions must be unique — no duplicate auto-generated versions.
+        contracts_resp = await client.get(f"/api/v1/assets/{asset_id}/contracts")
+        assert contracts_resp.status_code == 200
+        all_versions = [c["version"] for c in contracts_resp.json()["results"]]
+        assert len(all_versions) == len(
+            set(all_versions)
+        ), f"Duplicate versions detected: {all_versions}"
 
 
 class TestProposalCreation:
