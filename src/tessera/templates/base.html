@@ -4,16 +4,16 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}Tessera{% endblock %}</title>
-  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="stylesheet" href="/static/css/style.css?v=4">
 </head>
 <body>
   <div class="container">
     <header>
-      <div style="display: flex; justify-content: space-between; align-items: center;">
+      <div style="display: flex; justify-content: space-between; align-items: center; padding: 1rem 0 0.75rem;">
         <h1><a href="/"><img src="/static/images/logo.png" alt="Tessera" class="logo"></a></h1>
-        <div class="user-menu" style="font-size: 0.875rem;">
+        <div class="user-menu" style="font-size: 0.85rem;">
           {% if current_user %}
-          <span style="color: var(--gray);">{{ current_user.name }}</span>
+          <span style="color: var(--text-muted);">{{ current_user.name }}</span>
           <span class="status status-active" style="margin-left: 0.5rem;">{{ current_user.role }}</span>
           <a href="/settings" style="margin-left: 1rem;">Settings</a>
           <a href="/logout" style="margin-left: 0.5rem;">Logout</a>
@@ -56,7 +56,7 @@
     </footer>
   </div>
 
-  <script src="/static/js/api.js?v=2"></script>
+  <script src="/static/js/api.js?v=3"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

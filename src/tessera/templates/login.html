@@ -4,35 +4,37 @@
 
 {% block content %}
 <section>
-  <h2>Login</h2>
+  <div style="max-width: 420px; margin: 3rem auto;">
+    <div style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 2.5rem; box-shadow: var(--shadow-md);">
+      <h2 style="text-align: center; font-size: 1.5rem; margin-bottom: 2rem; border-bottom: none; padding-bottom: 0;">Login</h2>
 
-  <div style="max-width: 400px; margin: 2rem auto;">
-    {% if error %}
-    <div class="error" style="margin-bottom: 1rem;">
-      Invalid email or password. Please try again.
+      {% if error %}
+      <div class="error" style="margin-bottom: 1rem;">
+        Invalid email or password. Please try again.
+      </div>
+      {% endif %}
+
+      <form method="POST" action="/login">
+        <label for="email">Email</label>
+        <input type="email" id="email" name="email" required placeholder="your@email.com" autofocus>
+
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" required placeholder="Password">
+
+        <button type="submit" style="width: 100%; margin-top: 1rem;">Login</button>
+      </form>
+
+      {% if demo_mode %}
+      <div style="margin-top: 2rem; padding: 1.25rem; background: var(--bg-inset); border: 1px solid var(--border-color); border-radius: var(--radius);">
+        <p style="margin-bottom: 0.6rem; font-weight: 600; font-size: 0.85rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em;">Demo Accounts</p>
+        <ul style="list-style: none; padding: 0; margin: 0;">
+          <li style="padding: 0.35rem 0; font-size: 0.88rem; color: var(--text-secondary);"><code>admin@test.com</code> / <code>admin</code> (Admin)</li>
+          <li style="padding: 0.35rem 0; font-size: 0.88rem; color: var(--text-secondary);"><code>team_admin@test.com</code> / <code>team_admin</code> (Team Admin)</li>
+          <li style="padding: 0.35rem 0; font-size: 0.88rem; color: var(--text-secondary);"><code>user@test.com</code> / <code>user</code> (User)</li>
+        </ul>
+      </div>
+      {% endif %}
     </div>
-    {% endif %}
-
-    <form method="POST" action="/login">
-      <label for="email">Email</label>
-      <input type="email" id="email" name="email" required placeholder="your@email.com" autofocus>
-
-      <label for="password">Password</label>
-      <input type="password" id="password" name="password" required placeholder="Password">
-
-      <button type="submit" style="width: 100%; margin-top: 1rem;">Login</button>
-    </form>
-
-    {% if demo_mode %}
-    <div style="margin-top: 2rem; padding: 1rem; background: var(--light-gray); border-left: var(--border-thick);">
-      <p style="margin-bottom: 0.5rem;"><strong>Demo Accounts:</strong></p>
-      <ul style="list-style: none; padding: 0; margin: 0; font-size: 0.9rem;">
-        <li style="padding: 0.25rem 0;"><code>admin@test.com</code> / <code>admin</code> (Admin)</li>
-        <li style="padding: 0.25rem 0;"><code>team_admin@test.com</code> / <code>team_admin</code> (Team Admin)</li>
-        <li style="padding: 0.25rem 0;"><code>user@test.com</code> / <code>user</code> (User)</li>
-      </ul>
-    </div>
-    {% endif %}
   </div>
 </section>
 {% endblock %}
