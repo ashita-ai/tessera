@@ -387,7 +387,7 @@ function escapeHtml(str) {
 function showError(message) {
   const container = document.getElementById('error-container');
   if (container) {
-    container.innerHTML = `<div class="error">${escapeHtml(message)}</div>`;
+    container.innerHTML = `<div class="flash-message flash-error">${escapeHtml(message)}</div>`;
     container.style.display = 'block';
     setTimeout(() => {
       container.style.display = 'none';
@@ -398,7 +398,7 @@ function showError(message) {
 function showSuccess(message) {
   const container = document.getElementById('error-container');
   if (container) {
-    container.innerHTML = `<div class="success" style="background: #d4edda; color: #155724; border: 1px solid #c3e6cb; padding: 1rem; border-radius: 4px;">${escapeHtml(message)}</div>`;
+    container.innerHTML = `<div class="flash-message flash-success">${escapeHtml(message)}</div>`;
     container.style.display = 'block';
     setTimeout(() => {
       container.style.display = 'none';
