@@ -1,5 +1,7 @@
 """Tests for input validation."""
 
+from typing import Any
+
 import pytest
 from pydantic import ValidationError
 
@@ -252,8 +254,7 @@ class TestSchemaSizeValidation:
         assert "too large" in str(exc_info.value).lower()
 
     def test_invalid_schema_too_many_properties(self) -> None:
-        """Invalid schema with too many properties."""
-        # Create a schema with more than settings.max_schema_properties
+        """Invalid schema with too many properties at top level."""
         too_many_props = {
             f"field_{i}": {"type": "string"} for i in range(settings.max_schema_properties + 1)
         }
@@ -263,6 +264,72 @@ class TestSchemaSizeValidation:
                 version="1.0.0",
                 schema={"type": "object", "properties": too_many_props},
             )
+        assert "too many properties" in str(exc_info.value).lower()
+
+    def test_invalid_schema_too_many_nested_properties(self) -> None:
+        """Deeply nested schema that exceeds total property limit must be rejected."""
+        # One top-level property containing a nested object with enough children to
+        # push the total count over the limit.
+        nested_props = {
+            f"nested_{i}": {"type": "string"} for i in range(settings.max_schema_properties + 1)
+        }
+        schema = {
+            "type": "object",
+            "properties": {
+                "level1": {
+                    "type": "object",
+                    "properties": nested_props,
+                }
+            },
+        }
+
+        with pytest.raises(ValidationError) as exc_info:
+            ContractCreate(version="1.0.0", schema=schema)
+        assert "too many properties" in str(exc_info.value).lower()
+
+    def test_valid_schema_nested_within_limit(self) -> None:
+        """Nested schema within both property and depth limits is accepted."""
+        schema = {
+            "type": "object",
+            "properties": {
+                "user": {
+                    "type": "object",
+                    "properties": {
+                        "address": {
+                            "type": "object",
+                            "properties": {"city": {"type": "string"}},
+                        }
+                    },
+                }
+            },
+        }
+        contract = ContractCreate(version="1.0.0", schema=schema)
+        assert contract.schema_def == schema
+
+    def test_invalid_schema_nesting_too_deep(self) -> None:
+        """Schema nested beyond max depth must be rejected."""
+        # Build a schema nested one level deeper than the limit.
+        schema: dict[str, Any] = {"type": "string"}
+        for _ in range(settings.max_schema_nesting_depth + 1):
+            schema = {"type": "object", "properties": {"child": schema}}
+
+        with pytest.raises(ValidationError) as exc_info:
+            ContractCreate(version="1.0.0", schema=schema)
+        assert "nesting too deep" in str(exc_info.value).lower()
+
+    def test_valid_schema_array_items_counted(self) -> None:
+        """Properties inside array items are counted toward the total."""
+        # Array item with enough leaf properties to exceed the limit.
+        item_props = {
+            f"col_{i}": {"type": "string"} for i in range(settings.max_schema_properties + 1)
+        }
+        schema = {
+            "type": "array",
+            "items": {"type": "object", "properties": item_props},
+        }
+
+        with pytest.raises(ValidationError) as exc_info:
+            ContractCreate(version="1.0.0", schema=schema)
         assert "too many properties" in str(exc_info.value).lower()
 
 
