@@ -41,8 +41,22 @@ _hasher = PasswordHasher()
 
 router = APIRouter()
 
+_E: dict[int, dict[str, str]] = {
+    400: {"description": "Bad request — invalid input or parameters"},
+    401: {"description": "Authentication required"},
+    403: {"description": "Forbidden — insufficient permissions or wrong team"},
+    404: {"description": "Resource not found"},
+    409: {"description": "Conflict — duplicate resource"},
+    422: {"description": "Validation error — invalid request body"},
+}
 
-@router.post("", response_model=User, status_code=201)
+
+@router.post(
+    "",
+    response_model=User,
+    status_code=201,
+    responses={k: _E[k] for k in (400, 401, 403, 404, 409)},
+)
 @limit_write
 async def create_user(
     request: Request,
@@ -105,7 +119,7 @@ async def create_user(
     return db_user
 
 
-@router.get("")
+@router.get("", responses={k: _E[k] for k in (401, 403)})
 @limit_read
 async def list_users(
     request: Request,
@@ -166,7 +180,11 @@ async def list_users(
     }
 
 
-@router.get("/{user_id}", response_model=UserWithTeam)
+@router.get(
+    "/{user_id}",
+    response_model=UserWithTeam,
+    responses={k: _E[k] for k in (401, 403, 404)},
+)
 @limit_read
 async def get_user(
     request: Request,
@@ -197,8 +215,16 @@ async def get_user(
     return user_dict
 
 
-@router.patch("/{user_id}", response_model=User)
-@router.put("/{user_id}", response_model=User)
+@router.patch(
+    "/{user_id}",
+    response_model=User,
+    responses={k: _E[k] for k in (401, 403, 404, 409)},
+)
+@router.put(
+    "/{user_id}",
+    response_model=User,
+    responses={k: _E[k] for k in (401, 403, 404, 409)},
+)
 @limit_write
 async def update_user(
     request: Request,
@@ -271,7 +297,11 @@ async def update_user(
     return user
 
 
-@router.delete("/{user_id}", status_code=204)
+@router.delete(
+    "/{user_id}",
+    status_code=204,
+    responses={k: _E[k] for k in (401, 403, 404)},
+)
 @limit_write
 async def deactivate_user(
     request: Request,
@@ -304,7 +334,11 @@ async def deactivate_user(
     )
 
 
-@router.post("/{user_id}/reactivate", response_model=User)
+@router.post(
+    "/{user_id}/reactivate",
+    response_model=User,
+    responses={k: _E[k] for k in (401, 403, 404)},
+)
 @limit_write
 async def reactivate_user(
     request: Request,

@@ -66,6 +66,16 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+_E: dict[int, dict[str, str]] = {
+    400: {"description": "Bad request — invalid input or parameters"},
+    401: {"description": "Authentication required"},
+    403: {"description": "Forbidden — insufficient permissions or wrong team"},
+    404: {"description": "Resource not found"},
+    409: {"description": "Conflict — duplicate resource"},
+    412: {"description": "Precondition failed — passing audit run required"},
+    422: {"description": "Validation error — invalid request body"},
+}
+
 
 async def _get_asset_audit_info(session: AsyncSession, asset_id: UUID) -> dict[str, Any] | None:
     """Get the most recent audit run info for an asset.
@@ -151,7 +161,7 @@ async def check_proposal_completion(
     return all_acknowledged, len(acknowledgments)
 
 
-@router.get("")
+@router.get("", responses={k: _E[k] for k in (401, 403)})
 @limit_read
 async def list_proposals(
     request: Request,
@@ -340,7 +350,11 @@ async def list_proposals(
     }
 
 
-@router.get("/{proposal_id}", response_model=Proposal)
+@router.get(
+    "/{proposal_id}",
+    response_model=Proposal,
+    responses={k: _E[k] for k in (401, 403, 404)},
+)
 @limit_read
 async def get_proposal(
     request: Request,
@@ -360,7 +374,7 @@ async def get_proposal(
     return proposal
 
 
-@router.get("/{proposal_id}/status")
+@router.get("/{proposal_id}/status", responses={k: _E[k] for k in (401, 403, 404)})
 @limit_read
 async def get_proposal_status(
     request: Request,
@@ -520,7 +534,12 @@ async def get_proposal_status(
     }
 
 
-@router.post("/{proposal_id}/acknowledge", response_model=Acknowledgment, status_code=201)
+@router.post(
+    "/{proposal_id}/acknowledge",
+    response_model=Acknowledgment,
+    status_code=201,
+    responses={k: _E[k] for k in (400, 401, 403, 404, 409)},
+)
 @limit_write
 async def acknowledge_proposal(
     request: Request,
@@ -719,7 +738,11 @@ async def acknowledge_proposal(
     return db_ack
 
 
-@router.post("/{proposal_id}/withdraw", response_model=Proposal)
+@router.post(
+    "/{proposal_id}/withdraw",
+    response_model=Proposal,
+    responses={k: _E[k] for k in (400, 401, 403, 404)},
+)
 @limit_write
 async def withdraw_proposal(
     request: Request,
@@ -781,7 +804,11 @@ async def withdraw_proposal(
     return proposal
 
 
-@router.post("/{proposal_id}/object", status_code=201)
+@router.post(
+    "/{proposal_id}/object",
+    status_code=201,
+    responses={k: _E[k] for k in (400, 401, 403, 404, 409)},
+)
 @limit_write
 async def file_objection(
     request: Request,
@@ -905,7 +932,11 @@ async def file_objection(
     }
 
 
-@router.post("/{proposal_id}/force", response_model=Proposal)
+@router.post(
+    "/{proposal_id}/force",
+    response_model=Proposal,
+    responses={k: _E[k] for k in (400, 401, 403, 404)},
+)
 @limit_admin
 async def force_proposal(
     request: Request,
@@ -973,7 +1004,10 @@ async def force_proposal(
     return proposal
 
 
-@router.post("/{proposal_id}/publish")
+@router.post(
+    "/{proposal_id}/publish",
+    responses={k: _E[k] for k in (400, 401, 403, 404, 409)},
+)
 @limit_write
 async def publish_from_proposal(
     request: Request,
@@ -1147,7 +1181,11 @@ async def publish_from_proposal(
     return response
 
 
-@router.post("/{proposal_id}/expire", response_model=Proposal)
+@router.post(
+    "/{proposal_id}/expire",
+    response_model=Proposal,
+    responses={k: _E[k] for k in (400, 401, 403, 404)},
+)
 @limit_write
 async def expire_proposal(
     request: Request,
@@ -1199,7 +1237,7 @@ async def expire_proposal(
     return expired
 
 
-@router.post("/expire-pending")
+@router.post("/expire-pending", responses={k: _E[k] for k in (401, 403)})
 @limit_write
 async def expire_pending_proposals(
     request: Request,

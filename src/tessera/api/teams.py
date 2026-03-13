@@ -41,8 +41,22 @@ class TeamWithAssetCount(TypedDict, total=False):
 
 router = APIRouter()
 
+_E: dict[int, dict[str, str]] = {
+    400: {"description": "Bad request — invalid input or parameters"},
+    401: {"description": "Authentication required"},
+    403: {"description": "Forbidden — insufficient permissions or wrong team"},
+    404: {"description": "Resource not found"},
+    409: {"description": "Conflict — duplicate resource or team has active assets"},
+    422: {"description": "Validation error — invalid request body"},
+}
 
-@router.post("", response_model=Team, status_code=201)
+
+@router.post(
+    "",
+    response_model=Team,
+    status_code=201,
+    responses={k: _E[k] for k in (401, 403, 409)},
+)
 @limit_write
 async def create_team(
     request: Request,
@@ -79,7 +93,7 @@ async def create_team(
     return db_team
 
 
-@router.get("")
+@router.get("", responses={k: _E[k] for k in (401, 403)})
 @limit_read
 async def list_teams(
     request: Request,
@@ -126,7 +140,11 @@ async def list_teams(
     }
 
 
-@router.get("/{team_id}", response_model=Team)
+@router.get(
+    "/{team_id}",
+    response_model=Team,
+    responses={k: _E[k] for k in (401, 403, 404)},
+)
 @limit_read
 async def get_team(
     request: Request,
@@ -148,8 +166,16 @@ async def get_team(
     return team
 
 
-@router.patch("/{team_id}", response_model=Team)
-@router.put("/{team_id}", response_model=Team)
+@router.patch(
+    "/{team_id}",
+    response_model=Team,
+    responses={k: _E[k] for k in (401, 403, 404)},
+)
+@router.put(
+    "/{team_id}",
+    response_model=Team,
+    responses={k: _E[k] for k in (401, 403, 404)},
+)
 @limit_write
 async def update_team(
     request: Request,
@@ -195,7 +221,11 @@ async def update_team(
     return team
 
 
-@router.delete("/{team_id}", status_code=204)
+@router.delete(
+    "/{team_id}",
+    status_code=204,
+    responses={k: _E[k] for k in (401, 403, 404, 409)},
+)
 @limit_write
 async def delete_team(
     request: Request,
@@ -248,7 +278,11 @@ async def delete_team(
     await team_cache.delete(str(team_id))
 
 
-@router.post("/{team_id}/restore", response_model=Team)
+@router.post(
+    "/{team_id}/restore",
+    response_model=Team,
+    responses={k: _E[k] for k in (401, 403, 404)},
+)
 @limit_write
 async def restore_team(
     request: Request,
@@ -289,7 +323,7 @@ async def restore_team(
     return team
 
 
-@router.get("/{team_id}/members")
+@router.get("/{team_id}/members", responses={k: _E[k] for k in (401, 403, 404)})
 @limit_read
 async def list_team_members(
     request: Request,
@@ -343,7 +377,10 @@ class ReassignAssetsRequest(BaseModel):
     asset_ids: list[UUID] | None = None  # If None, reassign all assets
 
 
-@router.post("/{team_id}/reassign-assets")
+@router.post(
+    "/{team_id}/reassign-assets",
+    responses={k: _E[k] for k in (400, 401, 403, 404)},
+)
 @limit_write
 async def reassign_team_assets(
     request: Request,
