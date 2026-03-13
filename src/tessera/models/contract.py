@@ -32,6 +32,47 @@ class Guarantees(BaseModel):
     )
 
 
+def _count_all_properties(schema: dict[str, Any]) -> int:
+    """Count total properties across all nesting levels.
+
+    Counts properties within objects (and within array items) recursively
+    so that deeply nested schemas with many leaf properties are correctly
+    measured against ``settings.max_schema_properties``.
+    """
+    count = 0
+    if isinstance(schema, dict):
+        if schema.get("type") == "object" and "properties" in schema:
+            props: dict[str, Any] = schema["properties"]
+            count += len(props)
+            for prop_schema in props.values():
+                count += _count_all_properties(prop_schema)
+        if "items" in schema:
+            count += _count_all_properties(schema["items"])
+    return count
+
+
+def _max_nesting_depth(schema: dict[str, Any], current: int = 0) -> int:
+    """Return the maximum object-nesting depth in *schema*.
+
+    Only object types with ``properties`` advance the depth counter, so
+    arrays and scalar sub-schemas don't inflate the count.
+    """
+    if not isinstance(schema, dict):
+        return current
+    if schema.get("type") == "object" and "properties" in schema:
+        child_depth = current + 1
+        return max(
+            (
+                _max_nesting_depth(prop_schema, child_depth)
+                for prop_schema in schema["properties"].values()
+            ),
+            default=child_depth,
+        )
+    if "items" in schema:
+        return _max_nesting_depth(schema["items"], current)
+    return current
+
+
 class ContractBase(BaseModel):
     """Base contract fields."""
 
@@ -64,14 +105,22 @@ class ContractBase(BaseModel):
                 f"Current size: {len(serialized):,} bytes."
             )
 
-        # 2. Check property count (if object)
-        if v.get("type") == "object" and "properties" in v:
-            props_count = len(v["properties"])
-            if props_count > settings.max_schema_properties:
-                raise ValueError(
-                    f"Too many properties in schema. Maximum: {settings.max_schema_properties}. "
-                    f"Found: {props_count}."
-                )
+        # 2. Check total property count across all nesting levels
+        total_props = _count_all_properties(v)
+        if total_props > settings.max_schema_properties:
+            raise ValueError(
+                f"Too many properties in schema (including nested). "
+                f"Maximum: {settings.max_schema_properties}. Found: {total_props}."
+            )
+
+        # 3. Check nesting depth
+        depth = _max_nesting_depth(v)
+        if depth > settings.max_schema_nesting_depth:
+            raise ValueError(
+                f"Schema nesting too deep. "
+                f"Maximum depth: {settings.max_schema_nesting_depth}. Found: {depth}."
+            )
+
         return v
 
 

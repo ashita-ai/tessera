@@ -236,7 +236,12 @@ class Settings(BaseSettings):  # type: ignore[misc]
     )
     max_schema_properties: int = Field(
         default=1000,
-        description="Maximum number of top-level properties in a schema.",
+        description="Maximum total properties across all nesting levels in a schema.",
+    )
+    max_schema_nesting_depth: int = Field(
+        default=10,
+        description="Maximum nesting depth for schema objects. "
+        "Prevents DoS from deeply recursive schema definitions.",
     )
     max_fqn_length: int = Field(
         default=1000,
