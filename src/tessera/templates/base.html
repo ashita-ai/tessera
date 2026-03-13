@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}Tessera{% endblock %}</title>
-  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="stylesheet" href="/static/css/style.css?v=4">
 </head>
 <body>
   <div class="container">
@@ -13,12 +13,12 @@
         <h1><a href="/"><img src="/static/images/logo.png" alt="Tessera" class="logo"></a></h1>
         <div class="user-menu" style="font-size: 0.85rem;">
           {% if current_user %}
-          <span style="color: rgba(255,255,255,0.55);">{{ current_user.name }}</span>
-          <span class="status" style="font-size: 0.7rem; background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.85); border-color: rgba(255,255,255,0.2); margin-left: 0.5rem;">{{ current_user.role }}</span>
-          <a href="/settings" style="margin-left: 1rem; color: rgba(255,255,255,0.6);">Settings</a>
-          <a href="/logout" style="margin-left: 0.5rem; color: rgba(255,255,255,0.6);">Logout</a>
+          <span style="color: var(--text-muted);">{{ current_user.name }}</span>
+          <span class="status status-active" style="margin-left: 0.5rem;">{{ current_user.role }}</span>
+          <a href="/settings" style="margin-left: 1rem;">Settings</a>
+          <a href="/logout" style="margin-left: 0.5rem;">Logout</a>
           {% else %}
-          <a href="/login" style="color: rgba(255,255,255,0.7);">Login</a>
+          <a href="/login">Login</a>
           {% endif %}
         </div>
       </div>
