@@ -98,6 +98,17 @@ from tessera.services.versioning import (
 
 router = APIRouter()
 
+# Standard error response descriptions shared across endpoints.
+_E: dict[int, dict[str, str]] = {
+    400: {"description": "Bad request — invalid input or parameters"},
+    401: {"description": "Authentication required"},
+    403: {"description": "Forbidden — insufficient permissions or wrong team"},
+    404: {"description": "Resource not found"},
+    409: {"description": "Conflict — duplicate resource"},
+    412: {"description": "Precondition failed — passing audit run required"},
+    422: {"description": "Validation error — invalid request body"},
+}
+
 
 def _apply_asset_search_filters(
     query: Select[Any],
@@ -171,7 +182,12 @@ async def _get_team_name(session: AsyncSession, team_id: UUID) -> str:
     return name if name else "unknown"
 
 
-@router.post("", response_model=Asset, status_code=201)
+@router.post(
+    "",
+    response_model=Asset,
+    status_code=201,
+    responses={k: _E[k] for k in (400, 401, 403, 404, 409)},
+)
 @limit_write
 async def create_asset(
     request: Request,
@@ -261,7 +277,7 @@ async def create_asset(
     return db_asset
 
 
-@router.get("")
+@router.get("", responses={k: _E[k] for k in (401, 403)})
 @limit_read
 async def list_assets(
     request: Request,
@@ -382,7 +398,7 @@ async def list_assets(
     }
 
 
-@router.get("/search")
+@router.get("/search", responses={k: _E[k] for k in (401, 403)})
 @limit_read
 async def search_assets(
     request: Request,
@@ -463,7 +479,7 @@ async def search_assets(
     return response
 
 
-@router.get("/{asset_id}")
+@router.get("/{asset_id}", responses={k: _E[k] for k in (401, 403, 404)})
 @limit_read
 async def get_asset(
     request: Request,
@@ -510,7 +526,11 @@ async def get_asset(
     return asset_dict
 
 
-@router.patch("/{asset_id}", response_model=Asset)
+@router.patch(
+    "/{asset_id}",
+    response_model=Asset,
+    responses={k: _E[k] for k in (400, 401, 403, 404)},
+)
 @limit_write
 async def update_asset(
     request: Request,
@@ -600,7 +620,11 @@ async def update_asset(
     return asset
 
 
-@router.delete("/{asset_id}", status_code=204)
+@router.delete(
+    "/{asset_id}",
+    status_code=204,
+    responses={k: _E[k] for k in (401, 403, 404)},
+)
 @limit_write
 async def delete_asset(
     request: Request,
@@ -648,7 +672,11 @@ async def delete_asset(
     await asset_cache.delete(str(asset_id))
 
 
-@router.post("/{asset_id}/restore", response_model=Asset)
+@router.post(
+    "/{asset_id}/restore",
+    response_model=Asset,
+    responses={k: _E[k] for k in (401, 403, 404)},
+)
 @limit_write
 async def restore_asset(
     request: Request,
@@ -754,7 +782,12 @@ def _build_publish_response(
     return response
 
 
-@router.post("/{asset_id}/contracts", status_code=201, response_model=None)
+@router.post(
+    "/{asset_id}/contracts",
+    status_code=201,
+    response_model=None,
+    responses={k: _E[k] for k in (400, 401, 403, 404, 409, 412)},
+)
 @limit_write
 async def create_contract(
     request: Request,
@@ -1006,7 +1039,7 @@ async def create_contract(
     return _build_publish_response(result, original_format)
 
 
-@router.get("/{asset_id}/contracts")
+@router.get("/{asset_id}/contracts", responses={k: _E[k] for k in (401, 403)})
 @limit_read
 async def list_asset_contracts(
     request: Request,
@@ -1072,7 +1105,10 @@ async def list_asset_contracts(
     return response
 
 
-@router.get("/{asset_id}/contracts/history")
+@router.get(
+    "/{asset_id}/contracts/history",
+    responses={k: _E[k] for k in (401, 403, 404)},
+)
 @limit_read
 async def get_contract_history(
     request: Request,
@@ -1133,7 +1169,10 @@ async def get_contract_history(
     )
 
 
-@router.get("/{asset_id}/contracts/diff")
+@router.get(
+    "/{asset_id}/contracts/diff",
+    responses={k: _E[k] for k in (400, 401, 403, 404)},
+)
 @limit_read
 @limit_expensive  # Per-team rate limit for expensive schema diff operation
 async def diff_contract_versions(
@@ -1214,7 +1253,11 @@ async def diff_contract_versions(
     )
 
 
-@router.post("/{asset_id}/version-suggestion", response_model=VersionSuggestion)
+@router.post(
+    "/{asset_id}/version-suggestion",
+    response_model=VersionSuggestion,
+    responses={k: _E[k] for k in (400, 401, 403, 404)},
+)
 @limit_read
 async def preview_version_suggestion(
     request: Request,
@@ -1307,7 +1350,7 @@ async def preview_version_suggestion(
         return compute_version_suggestion(None, ChangeType.PATCH, True)
 
 
-@router.post("/bulk-assign")
+@router.post("/bulk-assign", responses={k: _E[k] for k in (401, 403, 404)})
 @limit_write
 async def bulk_assign_owner(
     request: Request,
