@@ -133,15 +133,16 @@ class SchemaFormat(StrEnum):
 class ResourceType(StrEnum):
     """Type of asset resource.
 
-    Tessera supports data warehouse assets (via dbt sync) and API assets
-    (via OpenAPI/GraphQL sync). The resource type is set during import
-    and used for filtering/display - all types follow the same contract
-    and compatibility workflows.
+    Tessera supports data warehouse assets (via dbt sync), API assets
+    (via OpenAPI/GraphQL sync), and gRPC services (via protobuf sync).
+    The resource type is set during import and used for filtering/display -
+    all types follow the same contract and compatibility workflows.
 
     Implemented types have dedicated sync endpoints:
     - dbt: POST /sync/dbt with manifest.json
     - OpenAPI: POST /sync/openapi with OpenAPI spec
     - GraphQL: POST /sync/graphql with introspection query result
+    - gRPC: POST /sync/grpc with .proto file content
 
     For streaming assets (Kafka), use schema_format="avro" when publishing
     contracts. The resource_type is just metadata - Avro schema validation
@@ -157,6 +158,9 @@ class ResourceType(StrEnum):
     # API types - IMPLEMENTED via /sync/openapi and /sync/graphql
     API_ENDPOINT = "api_endpoint"  # REST API endpoint (from OpenAPI spec)
     GRAPHQL_QUERY = "graphql_query"  # GraphQL query/mutation (from introspection)
+
+    # gRPC types - IMPLEMENTED via /sync/grpc
+    GRPC_SERVICE = "grpc_service"  # gRPC RPC method (from .proto file)
 
     # Streaming types - use schema_format="avro" for Kafka schemas
     # Resource type is metadata only; no special handling
