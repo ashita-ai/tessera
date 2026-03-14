@@ -70,6 +70,35 @@ class ObjectionCreate(BaseModel):
         return v
 
 
+class PendingProposalSummary(BaseModel):
+    """A proposal awaiting acknowledgment from a specific team."""
+
+    proposal_id: str = Field(..., description="Proposal UUID")
+    asset_id: str = Field(..., description="Asset UUID this proposal targets")
+    asset_fqn: str = Field(..., description="Fully-qualified name of the asset")
+    proposed_by_team: str = Field(..., description="Name of the team that proposed the change")
+    proposed_at: datetime = Field(..., description="When the proposal was created")
+    expires_at: datetime | None = Field(None, description="When the proposal expires")
+    breaking_changes_summary: list[str] = Field(
+        default_factory=list,
+        description="Human-readable summary of each breaking change",
+    )
+    total_consumers: int = Field(..., description="Total registered consumers for this contract")
+    acknowledged_count: int = Field(..., description="How many consumers have acknowledged")
+    your_team_status: str = Field(
+        ..., description="This team's acknowledgment status (e.g., AWAITING_RESPONSE)"
+    )
+
+
+class PendingProposalsResponse(BaseModel):
+    """Response for the pending proposals endpoint."""
+
+    pending_proposals: list[PendingProposalSummary]
+    total: int
+    limit: int
+    offset: int
+
+
 class ProposalBase(BaseModel):
     """Base proposal fields."""
 

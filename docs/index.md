@@ -1,19 +1,19 @@
 # Tessera
 
-**Data contract coordination for data warehouses.**
+**Data contract coordination for warehouses — and the AI agents that query them.**
 
 Tessera helps data teams coordinate schema changes across producers and consumers. When a producer wants to make a breaking change, consumers are notified and must acknowledge before the change goes live.
 
 ## Why Tessera?
 
-Data teams face a common problem: **breaking changes break pipelines**.
+Data teams face a common problem: **breaking changes break pipelines**. AI agents make this worse — they query data and modify schemas without checking whether the data is fresh, authoritative, or safe to use.
 
 - A data engineer renames a column
 - Downstream dashboards break
-- Analysts discover it days later
+- An AI agent silently starts using stale data for decisions
 - Everyone scrambles to fix it
 
-Tessera solves this by making breaking changes explicit:
+Tessera solves this by making breaking changes explicit — for human teams and AI agents alike:
 
 1. **Producers publish contracts** - JSON Schema definitions of their data assets
 2. **Consumers register dependencies** - Teams declare which assets they depend on
@@ -78,6 +78,14 @@ If you later try to remove `email` (a breaking change), Tessera will:
 
     [:octicons-arrow-right-24: Installation](getting-started/installation.md)
 
+-   :material-robot:{ .lg .middle } **AI Agent Integration**
+
+    ---
+
+    Give your AI agents contract-aware guardrails
+
+    [:octicons-arrow-right-24: Agent Guide](guides/ai-agent-integration.md)
+
 -   :material-book-open-variant:{ .lg .middle } **Concepts**
 
     ---
@@ -99,10 +107,10 @@ If you later try to remove `email` (a breaking change), Tessera will:
 ## Architecture
 
 ```
-┌─────────────────┐     ┌─────────────────┐
-│  dbt Project    │────▶│    Tessera      │
-│  (manifest.json)│     │    Server       │
-└─────────────────┘     └────────┬────────┘
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│  dbt Project    │────▶│    Tessera      │◀────│   AI Agent     │
+│  (manifest.json)│     │    Server       │     │  (via REST API) │
+└─────────────────┘     └────────┬────────┘     └─────────────────┘
                                  │
         ┌────────────────────────┼────────────────────────┐
         │                        │                        │

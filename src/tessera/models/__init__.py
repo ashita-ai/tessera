@@ -52,6 +52,8 @@ from tessera.models.proposal import (
     AffectedTeam,
     Objection,
     ObjectionCreate,
+    PendingProposalsResponse,
+    PendingProposalSummary,
     Proposal,
     ProposalCreate,
 )
@@ -102,6 +104,8 @@ __all__ = [
     "AffectedTeam",
     "Objection",
     "ObjectionCreate",
+    "PendingProposalSummary",
+    "PendingProposalsResponse",
     "Proposal",
     "ProposalCreate",
     # Acknowledgment
