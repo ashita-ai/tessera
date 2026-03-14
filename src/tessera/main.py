@@ -29,6 +29,8 @@ from tessera.api import (
     contracts,
     dependencies,
     impact,
+    impact_preview,
+    pending_proposals,
     proposals,
     registrations,
     schemas,
@@ -204,9 +206,11 @@ api_v1.include_router(assets.router, prefix="/assets", tags=["assets"])
 api_v1.include_router(audits.router, prefix="/assets", tags=["audits"])
 api_v1.include_router(dependencies.router, prefix="/assets", tags=["dependencies"])
 api_v1.include_router(impact.router, prefix="/assets", tags=["impact"])
+api_v1.include_router(impact_preview.router, prefix="/assets", tags=["impact-preview"])
 api_v1.include_router(contracts.router, prefix="/contracts", tags=["contracts"])
 api_v1.include_router(registrations.router, prefix="/registrations", tags=["registrations"])
 api_v1.include_router(proposals.router, prefix="/proposals", tags=["proposals"])
+api_v1.include_router(pending_proposals.router, tags=["proposals"])
 api_v1.include_router(schemas.router, prefix="/schemas", tags=["schemas"])
 api_v1.include_router(sync.router, prefix="/sync", tags=["sync"])
 api_v1.include_router(api_keys.router, prefix="/api-keys", tags=["api-keys"])

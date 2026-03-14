@@ -35,6 +35,14 @@ from tessera.services.graphql import (
 from tessera.services.graphql import (
     generate_fqn as generate_graphql_fqn,
 )
+from tessera.services.impact_preview import (
+    ImpactPreviewResult,
+    compute_impact_preview,
+)
+from tessera.services.migration_suggester import (
+    MigrationSuggestion,
+    suggest_migrations,
+)
 from tessera.services.openapi import (
     AssetFromOpenAPI,
     OpenAPIEndpoint,
@@ -125,4 +133,10 @@ __all__ = [
     "is_prerelease",
     "parse_semver",
     "parse_semver_lenient",
+    # Impact preview
+    "ImpactPreviewResult",
+    "compute_impact_preview",
+    # Migration suggester
+    "MigrationSuggestion",
+    "suggest_migrations",
 ]
