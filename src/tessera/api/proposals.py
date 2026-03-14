@@ -419,11 +419,11 @@ async def get_pending_proposals(
     if not registered_contract_ids:
         return empty
 
-    # Step 2: Find assets that have these contracts as their active contract
+    # Step 2: Find assets associated with these contracts.
+    # No status filter — registrations may point at deprecated contracts
+    # when a compatible update was published without migrating registrations.
     asset_ids_result = await session.execute(
-        select(ContractDB.asset_id)
-        .where(ContractDB.id.in_(registered_contract_ids))
-        .where(ContractDB.status == ContractStatus.ACTIVE)
+        select(ContractDB.asset_id).where(ContractDB.id.in_(registered_contract_ids)).distinct()
     )
     relevant_asset_ids = [a[0] for a in asset_ids_result.all()]
     if not relevant_asset_ids:
