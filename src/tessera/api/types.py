@@ -51,6 +51,7 @@ class AssetWithOwnerInfo(TypedDict, total=False):
     semver_mode: str
     created_at: datetime
     metadata: dict[str, object]
+    tags: list[str]
 
     # Optional enrichment fields
     owner_user_id: UUID | None
@@ -77,6 +78,8 @@ class ContractWithPublisherInfo(TypedDict, total=False):
     # Optional fields
     published_by_user_id: UUID | None
     guarantees: dict[str, object] | None
+    field_descriptions: dict[str, str]
+    field_tags: dict[str, list[str]]
 
     # Enrichment fields
     published_by_team_name: str | None

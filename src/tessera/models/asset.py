@@ -53,6 +53,9 @@ class AssetCreate(AssetBase):
     resource_type: ResourceType = ResourceType.OTHER
     guarantee_mode: GuaranteeMode = GuaranteeMode.NOTIFY
     semver_mode: SemverMode = SemverMode.AUTO
+    tags: list[str] = Field(
+        default_factory=list, description="Free-form labels (e.g., ['pii', 'financial'])"
+    )
 
 
 class AssetUpdate(BaseModel):
@@ -66,6 +69,7 @@ class AssetUpdate(BaseModel):
     guarantee_mode: GuaranteeMode | None = None
     semver_mode: SemverMode | None = None
     metadata: dict[str, Any] | None = None
+    tags: list[str] | None = None
 
 
 class Asset(BaseModel):
@@ -82,6 +86,16 @@ class Asset(BaseModel):
     guarantee_mode: GuaranteeMode = GuaranteeMode.NOTIFY
     semver_mode: SemverMode = SemverMode.AUTO
     metadata: dict[str, Any] = Field(default_factory=dict, validation_alias="metadata_")
+    tags: list[str] = Field(default_factory=list)
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def coerce_tags_none(cls, v: Any) -> list[str]:
+        """Coerce None to empty list for tags."""
+        if v is None:
+            return []
+        return list(v)
+
     created_at: datetime
     updated_at: datetime | None = None
 

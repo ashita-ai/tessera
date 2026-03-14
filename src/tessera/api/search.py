@@ -5,8 +5,9 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy import or_, select
+from sqlalchemy import cast, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.types import String
 
 from tessera.api.auth import Auth, RequireRead
 from tessera.db import get_session
@@ -94,6 +95,7 @@ async def search(
     q: str = Query(..., min_length=1, max_length=100, description="Search query"),
     limit: int = Query(10, ge=1, le=50, description="Max results per entity type"),
     types: list[SearchEntityType] | None = Query(None, description="Limit results to entity types"),
+    tags: str | None = Query(None, description="Comma-separated tags to filter assets"),
     _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
 ) -> SearchResponse:
@@ -102,7 +104,9 @@ async def search(
     Returns results grouped by entity type with matches highlighted.
     Search is case-insensitive and matches partial strings.
     """
-    if limit == 10 and not types:
+    tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
+
+    if limit == 10 and not types and not tag_list:
         cached = await get_cached_global_search(q, limit)
         if cached:
             return SearchResponse.model_validate(cached)
@@ -142,15 +146,20 @@ async def search(
         )
         users = list(users_result.scalars().all())
 
-    # Search assets by FQN
+    # Search assets by FQN, optionally filtered by tags
     assets: list[AssetDB] = []
     if "assets" in type_values:
-        assets_result = await session.execute(
+        asset_query = (
             select(AssetDB)
             .where(AssetDB.deleted_at.is_(None))
             .where(AssetDB.fqn.ilike(search_term))
-            .limit(limit)
         )
+        if tag_list:
+            # Filter assets whose tags JSON column contains all requested tags.
+            # Use a portable approach: cast tags to string and check for each tag.
+            for tag in tag_list:
+                asset_query = asset_query.where(cast(AssetDB.tags, String).contains(f'"{tag}"'))
+        assets_result = await session.execute(asset_query.limit(limit))
         assets = list(assets_result.scalars().all())
 
     # Search contracts by version (less common but useful)
@@ -209,6 +218,6 @@ async def search(
             total=len(teams) + len(users) + len(assets) + len(contracts),
         ),
     )
-    if limit == 10 and not types:
+    if limit == 10 and not types and not tag_list:
         await cache_global_search(q, limit, response.model_dump())
     return response

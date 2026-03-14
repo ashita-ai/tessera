@@ -206,6 +206,7 @@ async def import_openapi(
                     environment=import_req.environment,
                     resource_type=ResourceType.API_ENDPOINT,
                     metadata_=asset_def.metadata,
+                    tags=asset_def.tags,
                 )
                 session.add(new_asset)
                 await session.flush()
@@ -236,6 +237,7 @@ async def import_openapi(
                         schema_def=asset_def.schema_def,
                         compatibility_mode=CompatibilityMode.BACKWARD,
                         guarantees=merged_guarantees,
+                        field_descriptions=asset_def.field_descriptions,
                         published_by=import_req.owner_team_id,
                     )
                     session.add(new_contract)
