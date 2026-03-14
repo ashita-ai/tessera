@@ -88,9 +88,9 @@ Force-approve is available for emergencies, but it's audit-logged.
 - **Semantic metadata** - Tag assets with free-form labels (e.g., `pii`, `financial`) and annotate individual contract fields with descriptions and tags using JSONPath keys. Metadata carries forward automatically across contract versions for unchanged fields
 - **Team-based ownership** - Assets belong to teams (survives personnel changes), with optional user-level stewardship
 - **Webhooks** - Signed delivery with SSRF protection, retry with backoff, delivery tracking
-- **API keys** - Scoped (read, write, admin), revocable, expiring
+- **API keys** - Scoped (read, write, admin), revocable, expiring. Supports agent identity (`agent_name`, `agent_framework`) with separate rate limit tiers for machine clients
 - **Preflight checks** - Consumption-time endpoint returns contract metadata, freshness SLAs, and guarantees; every call is audit-logged for utilization tracking
-- **Audit log** - Append-only history of every contract publish, proposal, acknowledgment, force-approve, and consumption event
+- **Audit log** - Append-only history of every contract publish, proposal, acknowledgment, force-approve, and consumption event. Tracks whether each action was performed by a human or agent (`actor_type`)
 - **Web UI** - Browse assets, view contract history, manage teams
 
 ## Configuration

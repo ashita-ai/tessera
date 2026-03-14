@@ -226,6 +226,18 @@ class Settings(BaseSettings):  # type: ignore[misc]
         default="10/minute",
         description="Per-team rate limit for bulk operations.",
     )
+    rate_limit_agent_read: str = Field(
+        default="5000/minute",
+        description="Per-key rate limit for agent read (GET) endpoints.",
+    )
+    rate_limit_agent_write: str = Field(
+        default="500/minute",
+        description="Per-key rate limit for agent write (POST/PUT/PATCH) endpoints.",
+    )
+    rate_limit_agent_admin: str = Field(
+        default="250/minute",
+        description="Per-key rate limit for agent admin (DELETE, key management) endpoints.",
+    )
 
     # ── Resource Constraints ─────────────────────────────────────
 
