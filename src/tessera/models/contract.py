@@ -135,7 +135,14 @@ class ContractBase(BaseModel):
 class ContractCreate(ContractBase):
     """Fields for creating a contract."""
 
-    pass
+    field_descriptions: dict[str, str] = Field(
+        default_factory=dict,
+        description="Map of JSON path -> human-readable description",
+    )
+    field_tags: dict[str, list[str]] = Field(
+        default_factory=dict,
+        description="Map of JSON path -> list of tags",
+    )
 
 
 class Contract(ContractBase):
@@ -150,6 +157,25 @@ class Contract(ContractBase):
         SchemaFormat.JSON_SCHEMA,
         description="Original schema format submitted (json_schema or avro).",
     )
+    field_descriptions: dict[str, str] = Field(default_factory=dict)
+    field_tags: dict[str, list[str]] = Field(default_factory=dict)
+
+    @field_validator("field_descriptions", mode="before")
+    @classmethod
+    def coerce_field_descriptions_none(cls, v: Any) -> dict[str, str]:
+        """Coerce None to empty dict."""
+        if v is None:
+            return {}
+        return dict(v)
+
+    @field_validator("field_tags", mode="before")
+    @classmethod
+    def coerce_field_tags_none(cls, v: Any) -> dict[str, list[str]]:
+        """Coerce None to empty dict."""
+        if v is None:
+            return {}
+        return dict(v)
+
     status: ContractStatus = ContractStatus.ACTIVE
     published_at: datetime
     published_by: UUID

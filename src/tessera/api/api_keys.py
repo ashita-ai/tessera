@@ -45,17 +45,22 @@ async def create_key(
         api_key = await create_api_key(session, key_data)
 
         # Audit log
+        payload: dict[str, object] = {
+            "name": api_key.name,
+            "team_id": str(api_key.team_id),
+            "scopes": [s.value for s in api_key.scopes],
+        }
+        if api_key.agent_name:
+            payload["agent_name"] = api_key.agent_name
+            payload["agent_framework"] = api_key.agent_framework
         await audit.log_event(
             session=session,
             entity_type="api_key",
             entity_id=api_key.id,
             action=AuditAction.API_KEY_CREATED,
             actor_id=auth.team_id,
-            payload={
-                "name": api_key.name,
-                "team_id": str(api_key.team_id),
-                "scopes": [s.value for s in api_key.scopes],
-            },
+            payload=payload,
+            actor_type=auth.actor_type,
         )
 
         return api_key
@@ -70,18 +75,22 @@ async def list_keys(
     auth: Auth,
     team_id: UUID | None = None,
     include_revoked: bool = False,
+    is_agent: bool | None = None,
     session: AsyncSession = Depends(get_session),
 ) -> APIKeyList:
     """List API keys.
 
     Non-admin users can only see keys for their own team.
     Admin users can see keys for any team or all teams.
+    Use is_agent=true to filter to agent keys only, is_agent=false for human keys only.
     """
     # Non-admins can only see their own team's keys
     if not auth.has_scope(APIKeyScope.ADMIN):
         team_id = auth.team_id
 
-    keys = await list_api_keys(session, team_id=team_id, include_revoked=include_revoked)
+    keys = await list_api_keys(
+        session, team_id=team_id, include_revoked=include_revoked, is_agent=is_agent
+    )
     return APIKeyList(keys=keys)
 
 
@@ -136,6 +145,7 @@ async def revoke_key(
             "name": api_key.name,
             "team_id": str(api_key.team_id),
         },
+        actor_type=auth.actor_type,
     )
 
     return api_key

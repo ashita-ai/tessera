@@ -22,6 +22,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from tessera.api import (
     api_keys,
+    asset_context,
     assets,
     audit,
     audits,
@@ -29,6 +30,9 @@ from tessera.api import (
     contracts,
     dependencies,
     impact,
+    impact_preview,
+    pending_proposals,
+    preflight,
     proposals,
     registrations,
     schemas,
@@ -200,19 +204,23 @@ register_login_required_handler(app)
 api_v1 = APIRouter(prefix="/api/v1")
 api_v1.include_router(users.router, prefix="/users", tags=["users"])
 api_v1.include_router(teams.router, prefix="/teams", tags=["teams"])
+api_v1.include_router(asset_context.router, prefix="/assets", tags=["assets"])
 api_v1.include_router(assets.router, prefix="/assets", tags=["assets"])
 api_v1.include_router(audits.router, prefix="/assets", tags=["audits"])
 api_v1.include_router(dependencies.router, prefix="/assets", tags=["dependencies"])
 api_v1.include_router(impact.router, prefix="/assets", tags=["impact"])
+api_v1.include_router(impact_preview.router, prefix="/assets", tags=["impact-preview"])
 api_v1.include_router(contracts.router, prefix="/contracts", tags=["contracts"])
 api_v1.include_router(registrations.router, prefix="/registrations", tags=["registrations"])
 api_v1.include_router(proposals.router, prefix="/proposals", tags=["proposals"])
+api_v1.include_router(pending_proposals.router, tags=["proposals"])
 api_v1.include_router(schemas.router, prefix="/schemas", tags=["schemas"])
 api_v1.include_router(sync.router, prefix="/sync", tags=["sync"])
 api_v1.include_router(api_keys.router, prefix="/api-keys", tags=["api-keys"])
 api_v1.include_router(search.router)
 api_v1.include_router(webhooks.router)
 api_v1.include_router(audit.router)
+api_v1.include_router(preflight.router, prefix="/assets", tags=["preflight"])
 api_v1.include_router(bulk.router, prefix="/bulk", tags=["bulk"])
 
 app.include_router(api_v1)

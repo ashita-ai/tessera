@@ -144,6 +144,7 @@ class AssetDB(Base):
     )
     semver_mode: Mapped[SemverMode] = mapped_column(Enum(SemverMode), default=SemverMode.AUTO)
     metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
+    tags: Mapped[list[str]] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, onupdate=_utcnow
@@ -183,6 +184,8 @@ class ContractDB(Base):
         Enum(CompatibilityMode), default=CompatibilityMode.BACKWARD
     )
     guarantees: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    field_descriptions: Mapped[dict[str, str]] = mapped_column(JSON, default=dict)
+    field_tags: Mapped[dict[str, list[str]]] = mapped_column(JSON, default=dict)
     status: Mapped[ContractStatus] = mapped_column(
         Enum(ContractStatus), default=ContractStatus.ACTIVE, index=True
     )
@@ -377,6 +380,9 @@ class AuditEventDB(Base):
     entity_id: Mapped[UUID] = mapped_column(Uuid, nullable=False, index=True)
     action: Mapped[str] = mapped_column(String(100), nullable=False)
     actor_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True, index=True)
+    actor_type: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="human"
+    )  # "human" or "agent"
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     occurred_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, index=True
@@ -402,6 +408,12 @@ class APIKeyDB(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     team_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("teams.id"), nullable=False, index=True)
     scopes: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    agent_name: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )  # Non-null → agent key
+    agent_framework: Mapped[str | None] = mapped_column(
+        String(100), nullable=True
+    )  # e.g., "claude-code", "langchain"
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, onupdate=_utcnow
@@ -409,6 +421,11 @@ class APIKeyDB(Base):
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    @property
+    def is_agent(self) -> bool:
+        """A key is an agent key when agent_name is set."""
+        return self.agent_name is not None
 
     # Relationships
     team: Mapped["TeamDB"] = relationship()

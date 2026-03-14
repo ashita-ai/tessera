@@ -107,6 +107,7 @@ async def create_asset(
         guarantee_mode=asset.guarantee_mode,
         semver_mode=asset.semver_mode,
         metadata_=asset.metadata,
+        tags=asset.tags,
     )
     session.add(db_asset)
     try:
@@ -225,6 +226,8 @@ async def update_asset(
         asset.semver_mode = update.semver_mode
     if update.metadata is not None:
         asset.metadata_ = update.metadata
+    if update.tags is not None:
+        asset.tags = update.tags
 
     # Handle owner_team_id and owner_user_id together for validation
     new_team_id = update.owner_team_id if update.owner_team_id is not None else asset.owner_team_id

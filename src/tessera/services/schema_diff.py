@@ -966,8 +966,9 @@ class GuaranteeDiff:
         old_guarantees: dict[str, Any] | None,
         new_guarantees: dict[str, Any] | None,
     ):
-        self.old = old_guarantees or {}
-        self.new = new_guarantees or {}
+        # Normalize: replace None values with {} so .get("key", {}).keys() never fails
+        self.old = {k: v or {} for k, v in (old_guarantees or {}).items()}
+        self.new = {k: v or {} for k, v in (new_guarantees or {}).items()}
         self.changes: list[GuaranteeChange] = []
 
     def diff(self) -> GuaranteeDiffResult:

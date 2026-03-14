@@ -20,6 +20,16 @@ class APIKeyCreate(BaseModel):
         description="Permission scopes for this key",
     )
     expires_at: datetime | None = Field(None, description="Optional expiration time")
+    agent_name: str | None = Field(
+        None,
+        max_length=255,
+        description="Agent name (set to create an agent key, e.g. 'dbt-codegen-agent')",
+    )
+    agent_framework: str | None = Field(
+        None,
+        max_length=100,
+        description="Agent framework identifier (e.g. 'claude-code', 'cursor', 'langchain')",
+    )
 
     @field_validator("name")
     @classmethod
@@ -42,6 +52,9 @@ class APIKeyCreated(BaseModel):
     name: str
     team_id: UUID
     scopes: list[APIKeyScope]
+    agent_name: str | None = None
+    agent_framework: str | None = None
+    is_agent: bool = False
     created_at: datetime
     expires_at: datetime | None = None
 
@@ -56,6 +69,9 @@ class APIKey(BaseModel):
     name: str
     team_id: UUID
     scopes: list[APIKeyScope]
+    agent_name: str | None = None
+    agent_framework: str | None = None
+    is_agent: bool = False
     created_at: datetime
     expires_at: datetime | None = None
     last_used_at: datetime | None = None

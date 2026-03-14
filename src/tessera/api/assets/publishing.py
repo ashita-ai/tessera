@@ -288,6 +288,8 @@ async def create_contract(
         guarantees=contract.guarantees.model_dump() if contract.guarantees else None,
         force=force,
         audit_warning=audit_warning,
+        field_descriptions=contract.field_descriptions,
+        field_tags=contract.field_tags,
     )
     result = await workflow.execute()
 

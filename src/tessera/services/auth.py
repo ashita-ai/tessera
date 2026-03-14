@@ -61,6 +61,9 @@ def _db_to_api_key(api_key_db: APIKeyDB) -> APIKey:
         name=api_key_db.name,
         team_id=api_key_db.team_id,
         scopes=[APIKeyScope(s) for s in api_key_db.scopes],
+        agent_name=api_key_db.agent_name,
+        agent_framework=api_key_db.agent_framework,
+        is_agent=api_key_db.is_agent,
         created_at=api_key_db.created_at,
         expires_at=api_key_db.expires_at,
         last_used_at=api_key_db.last_used_at,
@@ -99,6 +102,8 @@ async def create_api_key(
         name=key_data.name,
         team_id=key_data.team_id,
         scopes=[scope.value for scope in key_data.scopes],
+        agent_name=key_data.agent_name,
+        agent_framework=key_data.agent_framework,
         expires_at=key_data.expires_at,
     )
     session.add(api_key_db)
@@ -111,6 +116,9 @@ async def create_api_key(
         name=api_key_db.name,
         team_id=api_key_db.team_id,
         scopes=[APIKeyScope(s) for s in api_key_db.scopes],
+        agent_name=api_key_db.agent_name,
+        agent_framework=api_key_db.agent_framework,
+        is_agent=api_key_db.is_agent,
         created_at=api_key_db.created_at,
         expires_at=api_key_db.expires_at,
     )
@@ -196,6 +204,7 @@ async def list_api_keys(
     session: AsyncSession,
     team_id: UUID | None = None,
     include_revoked: bool = False,
+    is_agent: bool | None = None,
 ) -> list[APIKey]:
     """List API keys.
 
@@ -203,6 +212,7 @@ async def list_api_keys(
         session: Database session
         team_id: Optional team ID to filter by
         include_revoked: Whether to include revoked keys
+        is_agent: Optional filter — True for agent keys only, False for human only
 
     Returns:
         List of API keys
@@ -214,6 +224,11 @@ async def list_api_keys(
 
     if not include_revoked:
         query = query.where(APIKeyDB.revoked_at.is_(None))
+
+    if is_agent is True:
+        query = query.where(APIKeyDB.agent_name.isnot(None))
+    elif is_agent is False:
+        query = query.where(APIKeyDB.agent_name.is_(None))
 
     query = query.order_by(APIKeyDB.created_at.desc())
 
