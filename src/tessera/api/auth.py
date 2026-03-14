@@ -106,6 +106,26 @@ class AuthContext:
         """Get the authenticated team ID."""
         return self.team.id
 
+    @property
+    def is_agent(self) -> bool:
+        """Whether the authenticated key is an agent key."""
+        return self.api_key.is_agent
+
+    @property
+    def agent_name(self) -> str | None:
+        """The agent name, if this is an agent key."""
+        return self.api_key.agent_name
+
+    @property
+    def agent_framework(self) -> str | None:
+        """The agent framework, if this is an agent key."""
+        return self.api_key.agent_framework
+
+    @property
+    def actor_type(self) -> str:
+        """'agent' if this is an agent key, 'human' otherwise."""
+        return "agent" if self.is_agent else "human"
+
     def has_scope(self, scope: APIKeyScope) -> bool:
         """
         Check whether the authenticated API key grants the given scope.
@@ -275,6 +295,12 @@ async def get_auth_context(
         scopes=scopes,
     )
     request.state.auth = auth_context
+
+    # Attach agent metadata for downstream consumers (audit logging, etc.)
+    request.state.is_agent = auth_context.is_agent
+    request.state.agent_name = auth_context.agent_name
+    request.state.agent_framework = auth_context.agent_framework
+
     return auth_context
 
 
