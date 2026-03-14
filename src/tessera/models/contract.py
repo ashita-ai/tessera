@@ -35,42 +35,50 @@ class Guarantees(BaseModel):
 def _count_all_properties(schema: dict[str, Any]) -> int:
     """Count total properties across all nesting levels.
 
-    Counts properties within objects (and within array items) recursively
-    so that deeply nested schemas with many leaf properties are correctly
-    measured against ``settings.max_schema_properties``.
+    Uses an iterative (stack-based) traversal to avoid ``RecursionError``
+    on deeply nested schemas.  Counts properties within objects and within
+    array items so that deeply nested schemas with many leaf properties are
+    correctly measured against ``settings.max_schema_properties``.
     """
     count = 0
-    if isinstance(schema, dict):
-        if schema.get("type") == "object" and "properties" in schema:
-            props: dict[str, Any] = schema["properties"]
+    stack: list[Any] = [schema]
+    while stack:
+        node = stack.pop()
+        if not isinstance(node, dict):
+            continue
+        if node.get("type") == "object" and "properties" in node:
+            props: dict[str, Any] = node["properties"]
             count += len(props)
-            for prop_schema in props.values():
-                count += _count_all_properties(prop_schema)
-        if "items" in schema:
-            count += _count_all_properties(schema["items"])
+            stack.extend(props.values())
+        if "items" in node:
+            stack.append(node["items"])
     return count
 
 
-def _max_nesting_depth(schema: dict[str, Any], current: int = 0) -> int:
+def _max_nesting_depth(schema: dict[str, Any]) -> int:
     """Return the maximum object-nesting depth in *schema*.
 
-    Only object types with ``properties`` advance the depth counter, so
-    arrays and scalar sub-schemas don't inflate the count.
+    Uses an iterative (stack-based) traversal to avoid ``RecursionError``
+    on deeply nested schemas.  Only object types with ``properties`` advance
+    the depth counter, so arrays and scalar sub-schemas don't inflate the
+    count.
     """
-    if not isinstance(schema, dict):
-        return current
-    if schema.get("type") == "object" and "properties" in schema:
-        child_depth = current + 1
-        return max(
-            (
-                _max_nesting_depth(prop_schema, child_depth)
-                for prop_schema in schema["properties"].values()
-            ),
-            default=child_depth,
-        )
-    if "items" in schema:
-        return _max_nesting_depth(schema["items"], current)
-    return current
+    max_depth = 0
+    # Stack entries: (node, current_depth)
+    stack: list[tuple[Any, int]] = [(schema, 0)]
+    while stack:
+        node, current = stack.pop()
+        if not isinstance(node, dict):
+            continue
+        if node.get("type") == "object" and "properties" in node:
+            child_depth = current + 1
+            if child_depth > max_depth:
+                max_depth = child_depth
+            for prop_schema in node["properties"].values():
+                stack.append((prop_schema, child_depth))
+        if "items" in node:
+            stack.append((node["items"], current))
+    return max_depth
 
 
 class ContractBase(BaseModel):

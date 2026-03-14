@@ -229,10 +229,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         if self.environment == "production":
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
 
-        # CSP: Strict for API endpoints, permissive for web UI pages
-        # API paths start with /api/ or /health; everything else is web UI
-        is_api = request.url.path.startswith("/api/") or request.url.path.startswith("/health")
-        if not is_api:
+        # CSP: Permissive for known web UI paths, strict for everything else.
+        # Allowlist approach ensures unknown/future paths default to strict.
+        is_web_ui = request.url.path.startswith(("/web", "/static"))
+        if is_web_ui:
             response.headers["Content-Security-Policy"] = (
                 "default-src 'self'; "
                 "script-src 'self' 'unsafe-inline'; "
@@ -242,7 +242,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 "frame-ancestors 'none'"
             )
         else:
-            # Strict CSP for API endpoints
+            # Strict CSP for API endpoints and all other paths
             response.headers["Content-Security-Policy"] = (
                 "default-src 'none'; frame-ancestors 'none'"
             )
