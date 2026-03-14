@@ -44,7 +44,7 @@ curl -X POST http://localhost:8000/api/v1/api-keys \
   -H "Content-Type: application/json" \
   -d '{
     "name": "ml-pipeline-agent",
-    "scope": "write",
+    "scopes": ["read", "write"],
     "team_id": "your-team-uuid"
   }'
 ```
