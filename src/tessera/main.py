@@ -22,6 +22,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from tessera.api import (
     api_keys,
+    asset_context,
     assets,
     audit,
     audits,
@@ -31,6 +32,7 @@ from tessera.api import (
     impact,
     impact_preview,
     pending_proposals,
+    preflight,
     proposals,
     registrations,
     schemas,
@@ -202,6 +204,7 @@ register_login_required_handler(app)
 api_v1 = APIRouter(prefix="/api/v1")
 api_v1.include_router(users.router, prefix="/users", tags=["users"])
 api_v1.include_router(teams.router, prefix="/teams", tags=["teams"])
+api_v1.include_router(asset_context.router, prefix="/assets", tags=["assets"])
 api_v1.include_router(assets.router, prefix="/assets", tags=["assets"])
 api_v1.include_router(audits.router, prefix="/assets", tags=["audits"])
 api_v1.include_router(dependencies.router, prefix="/assets", tags=["dependencies"])
@@ -217,6 +220,7 @@ api_v1.include_router(api_keys.router, prefix="/api-keys", tags=["api-keys"])
 api_v1.include_router(search.router)
 api_v1.include_router(webhooks.router)
 api_v1.include_router(audit.router)
+api_v1.include_router(preflight.router, prefix="/assets", tags=["preflight"])
 api_v1.include_router(bulk.router, prefix="/bulk", tags=["bulk"])
 
 app.include_router(api_v1)

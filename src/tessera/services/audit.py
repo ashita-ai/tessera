@@ -79,6 +79,9 @@ class AuditAction(StrEnum):
     DBT_SYNC = "dbt.sync"
     DBT_SYNC_UPLOAD = "dbt.sync_upload"
 
+    # Consumption actions
+    PREFLIGHT_CHECKED = "preflight.checked"
+
 
 async def log_event(
     session: AsyncSession,
@@ -498,5 +501,49 @@ async def log_dependency_deleted(
         payload={
             "source_asset_id": str(source_asset_id),
             "target_asset_id": str(target_asset_id),
+        },
+    )
+
+
+async def log_preflight_checked(
+    session: AsyncSession,
+    asset_id: UUID,
+    actor_id: UUID | None,
+    asset_fqn: str,
+    contract_version: str,
+    freshness_status: str,
+    guarantees_checked: bool,
+    consumer_type: str | None = None,
+) -> AuditEventDB:
+    """Log a preflight consumption event.
+
+    Records that a consumer checked contract metadata before querying data.
+    This enables contract utilization metrics and agent observability.
+
+    Args:
+        session: Database session.
+        asset_id: ID of the asset whose contract was checked.
+        actor_id: Team ID of the consumer (from API key or query param).
+        asset_fqn: Fully qualified name of the asset.
+        contract_version: Version of the active contract returned.
+        freshness_status: Whether the data was fresh or stale.
+        guarantees_checked: Whether guarantee data was included.
+        consumer_type: Type of consumer (e.g., "agent", "human", "pipeline").
+
+    Returns:
+        The created audit event.
+    """
+    return await log_event(
+        session=session,
+        entity_type="asset",
+        entity_id=asset_id,
+        action=AuditAction.PREFLIGHT_CHECKED,
+        actor_id=actor_id,
+        payload={
+            "asset_fqn": asset_fqn,
+            "contract_version": contract_version,
+            "freshness_status": freshness_status,
+            "guarantees_checked": guarantees_checked,
+            "consumer_type": consumer_type,
         },
     )

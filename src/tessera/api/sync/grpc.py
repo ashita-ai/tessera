@@ -1,6 +1,6 @@
-"""OpenAPI sync endpoints.
+"""gRPC / Protocol Buffers sync endpoints.
 
-Endpoints for synchronizing schemas from OpenAPI specifications.
+Endpoints for synchronizing schemas from .proto file definitions.
 """
 
 from typing import Any
@@ -18,11 +18,10 @@ from tessera.db import AssetDB, ContractDB, TeamDB, get_session
 from tessera.models.enums import CompatibilityMode, ContractStatus, ResourceType
 from tessera.services import audit
 from tessera.services.audit import AuditAction, log_contract_published
-from tessera.services.openapi import (
-    OpenAPIEndpoint,
-    _merge_guarantees,
-    endpoints_to_assets,
-    parse_openapi,
+from tessera.services.grpc import (
+    GRPCRpcMethod,
+    parse_proto,
+    rpc_methods_to_assets,
 )
 from tessera.services.schema_diff import check_compatibility, diff_schemas
 from tessera.services.versioning import INITIAL_VERSION
@@ -31,14 +30,18 @@ router = APIRouter()
 
 
 # =============================================================================
-# OpenAPI Import
+# gRPC Import
 # =============================================================================
 
 
-class OpenAPIImportRequest(BaseModel):
-    """Request body for OpenAPI spec import."""
+class GRPCImportRequest(BaseModel):
+    """Request body for gRPC proto import."""
 
-    spec: dict[str, Any] = Field(..., description="OpenAPI 3.x specification as JSON")
+    proto_content: str = Field(
+        ...,
+        min_length=1,
+        description="Raw .proto file content (proto3 syntax)",
+    )
     owner_team_id: UUID = Field(..., description="Team that will own the imported assets")
     environment: str = Field(
         default="production", min_length=1, max_length=50, description="Environment for assets"
@@ -47,17 +50,13 @@ class OpenAPIImportRequest(BaseModel):
         default=True, description="Automatically publish contracts for new assets"
     )
     dry_run: bool = Field(default=False, description="Preview changes without creating assets")
-    default_guarantees: dict[str, Any] | None = Field(
-        default=None,
-        description="Default guarantees to apply to all endpoints",
-    )
 
 
-class OpenAPIEndpointResult(BaseModel):
-    """Result for a single endpoint import."""
+class GRPCMethodResult(BaseModel):
+    """Result for a single RPC method import."""
 
     fqn: str
-    path: str
+    service: str
     method: str
     action: str  # "created", "updated", "skipped", "error"
     asset_id: str | None = None
@@ -65,40 +64,42 @@ class OpenAPIEndpointResult(BaseModel):
     error: str | None = None
 
 
-class OpenAPIImportResponse(BaseModel):
-    """Response from OpenAPI spec import."""
+class GRPCImportResponse(BaseModel):
+    """Response from gRPC proto import."""
 
-    api_title: str
-    api_version: str
-    endpoints_found: int
+    package: str
+    syntax: str
+    services_found: int
+    methods_found: int
     assets_created: int
     assets_updated: int
     assets_skipped: int
     contracts_published: int
-    endpoints: list[OpenAPIEndpointResult]
+    methods: list[GRPCMethodResult]
     parse_errors: list[str]
 
 
-@router.post("/openapi", response_model=OpenAPIImportResponse)
+@router.post("/grpc", response_model=GRPCImportResponse)
 @limit_admin
-async def import_openapi(
+async def import_grpc(
     request: Request,
-    import_req: OpenAPIImportRequest,
+    import_req: GRPCImportRequest,
     auth: Auth,
     _: None = RequireAdmin,
     session: AsyncSession = Depends(get_session),
-) -> OpenAPIImportResponse:
-    """Import assets and contracts from an OpenAPI specification.
+) -> GRPCImportResponse:
+    """Import assets and contracts from a Protocol Buffer (.proto) file.
 
-    Parses an OpenAPI 3.x spec and creates assets for each endpoint.
-    Each endpoint becomes an asset with resource_type=api_endpoint.
-    The request/response schemas are combined into a contract.
+    Parses a proto3 file and creates assets for each RPC method in every
+    service definition. Each RPC method becomes an asset with
+    resource_type=grpc_service. The request/response message types are
+    converted to JSON Schema and combined into a contract.
 
     Requires admin scope.
 
     Behavior:
-    - New endpoints: Create asset and optionally publish contract
-    - Existing endpoints: Update metadata, check for schema changes
+    - New RPC methods: Create asset and optionally publish contract
+    - Existing RPC methods: Update metadata
     - dry_run=True: Preview changes without persisting
 
     Returns a summary of what was created/updated.
@@ -109,28 +110,40 @@ async def import_openapi(
     if not owner_team:
         raise NotFoundError(ErrorCode.TEAM_NOT_FOUND, "Owner team not found")
 
-    # Parse the OpenAPI spec
-    parse_result = parse_openapi(import_req.spec)
+    # Parse the proto file
+    parse_result = parse_proto(import_req.proto_content)
 
-    if not parse_result.endpoints and parse_result.errors:
+    if not parse_result.rpc_methods and parse_result.errors:
         raise BadRequestError(
-            "Failed to parse OpenAPI spec",
-            code=ErrorCode.INVALID_OPENAPI_SPEC,
+            "Failed to parse .proto file",
+            code=ErrorCode.INVALID_PROTO_SPEC,
             details={"errors": parse_result.errors},
         )
 
-    # Convert endpoints to asset definitions
-    asset_defs = endpoints_to_assets(parse_result, import_req.owner_team_id, import_req.environment)
+    if not parse_result.rpc_methods and not parse_result.errors:
+        raise BadRequestError(
+            "No RPC methods found in .proto file",
+            code=ErrorCode.INVALID_PROTO_SPEC,
+            details={
+                "services_found": len(parse_result.services),
+                "messages_found": len(parse_result.messages),
+            },
+        )
+
+    # Convert to asset definitions
+    asset_defs = rpc_methods_to_assets(
+        parse_result, import_req.owner_team_id, import_req.environment
+    )
 
     # Track results
-    endpoints_results: list[OpenAPIEndpointResult] = []
+    method_results: list[GRPCMethodResult] = []
     assets_created = 0
     assets_updated = 0
     assets_skipped = 0
     contracts_published = 0
 
     for i, asset_def in enumerate(asset_defs):
-        endpoint = parse_result.endpoints[i]
+        rpc = parse_result.rpc_methods[i]
 
         try:
             # Check if asset already exists
@@ -143,24 +156,23 @@ async def import_openapi(
             existing_asset = existing_result.scalar_one_or_none()
 
             if import_req.dry_run:
-                # Dry run - just report what would happen
                 if existing_asset:
-                    endpoints_results.append(
-                        OpenAPIEndpointResult(
+                    method_results.append(
+                        GRPCMethodResult(
                             fqn=asset_def.fqn,
-                            path=endpoint.path,
-                            method=endpoint.method,
+                            service=rpc.service_name,
+                            method=rpc.method_name,
                             action="would_update",
                             asset_id=str(existing_asset.id),
                         )
                     )
                     assets_updated += 1
                 else:
-                    endpoints_results.append(
-                        OpenAPIEndpointResult(
+                    method_results.append(
+                        GRPCMethodResult(
                             fqn=asset_def.fqn,
-                            path=endpoint.path,
-                            method=endpoint.method,
+                            service=rpc.service_name,
+                            method=rpc.method_name,
                             action="would_create",
                         )
                     )
@@ -175,24 +187,23 @@ async def import_openapi(
                     **existing_asset.metadata_,
                     **asset_def.metadata,
                 }
-                existing_asset.resource_type = ResourceType.API_ENDPOINT
+                existing_asset.resource_type = ResourceType.GRPC_SERVICE
                 await session.flush()
 
-                # Log per-asset audit event
                 await audit.log_event(
                     session=session,
                     entity_type="asset",
                     entity_id=existing_asset.id,
                     action=AuditAction.ASSET_UPDATED,
                     actor_id=import_req.owner_team_id,
-                    payload={"fqn": asset_def.fqn, "triggered_by": "import_openapi"},
+                    payload={"fqn": asset_def.fqn, "triggered_by": "import_grpc"},
                 )
 
-                endpoints_results.append(
-                    OpenAPIEndpointResult(
+                method_results.append(
+                    GRPCMethodResult(
                         fqn=asset_def.fqn,
-                        path=endpoint.path,
-                        method=endpoint.method,
+                        service=rpc.service_name,
+                        method=rpc.method_name,
                         action="updated",
                         asset_id=str(existing_asset.id),
                     )
@@ -204,40 +215,30 @@ async def import_openapi(
                     fqn=asset_def.fqn,
                     owner_team_id=import_req.owner_team_id,
                     environment=import_req.environment,
-                    resource_type=ResourceType.API_ENDPOINT,
+                    resource_type=ResourceType.GRPC_SERVICE,
                     metadata_=asset_def.metadata,
-                    tags=asset_def.tags,
                 )
                 session.add(new_asset)
                 await session.flush()
                 await session.refresh(new_asset)
 
-                # Log per-asset audit event
                 await audit.log_event(
                     session=session,
                     entity_type="asset",
                     entity_id=new_asset.id,
                     action=AuditAction.ASSET_CREATED,
                     actor_id=import_req.owner_team_id,
-                    payload={"fqn": asset_def.fqn, "triggered_by": "import_openapi"},
+                    payload={"fqn": asset_def.fqn, "triggered_by": "import_grpc"},
                 )
 
                 contract_id: str | None = None
 
-                # Auto-publish contract if enabled
                 if import_req.auto_publish_contracts:
-                    # Merge default_guarantees with per-operation guarantees
-                    merged_guarantees = _merge_guarantees(
-                        import_req.default_guarantees, asset_def.guarantees
-                    )
-
                     new_contract = ContractDB(
                         asset_id=new_asset.id,
                         version=INITIAL_VERSION,
                         schema_def=asset_def.schema_def,
                         compatibility_mode=CompatibilityMode.BACKWARD,
-                        guarantees=merged_guarantees,
-                        field_descriptions=asset_def.field_descriptions,
                         published_by=import_req.owner_team_id,
                     )
                     session.add(new_contract)
@@ -253,11 +254,11 @@ async def import_openapi(
                     contract_id = str(new_contract.id)
                     contracts_published += 1
 
-                endpoints_results.append(
-                    OpenAPIEndpointResult(
+                method_results.append(
+                    GRPCMethodResult(
                         fqn=asset_def.fqn,
-                        path=endpoint.path,
-                        method=endpoint.method,
+                        service=rpc.service_name,
+                        method=rpc.method_name,
                         action="created",
                         asset_id=str(new_asset.id),
                         contract_id=contract_id,
@@ -266,39 +267,44 @@ async def import_openapi(
                 assets_created += 1
 
         except Exception as e:
-            endpoints_results.append(
-                OpenAPIEndpointResult(
+            method_results.append(
+                GRPCMethodResult(
                     fqn=asset_def.fqn,
-                    path=endpoint.path,
-                    method=endpoint.method,
+                    service=rpc.service_name,
+                    method=rpc.method_name,
                     action="error",
                     error=str(e),
                 )
             )
             assets_skipped += 1
 
-    return OpenAPIImportResponse(
-        api_title=parse_result.title,
-        api_version=parse_result.version,
-        endpoints_found=len(parse_result.endpoints),
+    return GRPCImportResponse(
+        package=parse_result.package,
+        syntax=parse_result.syntax,
+        services_found=len(parse_result.services),
+        methods_found=len(parse_result.rpc_methods),
         assets_created=assets_created,
         assets_updated=assets_updated,
         assets_skipped=assets_skipped,
         contracts_published=contracts_published,
-        endpoints=endpoints_results,
+        methods=method_results,
         parse_errors=parse_result.errors,
     )
 
 
 # =============================================================================
-# OpenAPI Impact and Diff Endpoints
+# gRPC Impact and Diff Endpoints
 # =============================================================================
 
 
-class OpenAPIImpactRequest(BaseModel):
-    """Request body for OpenAPI spec impact analysis."""
+class GRPCImpactRequest(BaseModel):
+    """Request body for gRPC proto impact analysis."""
 
-    spec: dict[str, Any] = Field(..., description="OpenAPI 3.x specification as JSON")
+    proto_content: str = Field(
+        ...,
+        min_length=1,
+        description="Raw .proto file content (proto3 syntax)",
+    )
     environment: str = Field(
         default="production",
         min_length=1,
@@ -307,11 +313,11 @@ class OpenAPIImpactRequest(BaseModel):
     )
 
 
-class OpenAPIImpactResult(BaseModel):
-    """Impact analysis result for a single OpenAPI endpoint."""
+class GRPCImpactResult(BaseModel):
+    """Impact analysis result for a single RPC method."""
 
     fqn: str
-    path: str
+    service: str
     method: str
     has_contract: bool
     safe_to_publish: bool
@@ -319,31 +325,29 @@ class OpenAPIImpactResult(BaseModel):
     breaking_changes: list[dict[str, Any]] = Field(default_factory=list)
 
 
-class OpenAPIImpactResponse(BaseModel):
-    """Response from OpenAPI spec impact analysis."""
+class GRPCImpactResponse(BaseModel):
+    """Response from gRPC proto impact analysis."""
 
     status: str
-    api_title: str
-    api_version: str
-    total_endpoints: int
-    endpoints_with_contracts: int
+    package: str
+    total_methods: int
+    methods_with_contracts: int
     breaking_changes_count: int
-    results: list[OpenAPIImpactResult]
+    results: list[GRPCImpactResult]
     parse_errors: list[str] = Field(default_factory=list)
 
 
-async def _check_openapi_endpoint_impact(
-    endpoint: "OpenAPIEndpoint",
-    api_title: str,
+async def _check_grpc_method_impact(
+    rpc: GRPCRpcMethod,
+    package: str,
     environment: str,
     session: AsyncSession,
-) -> OpenAPIImpactResult:
-    """Check impact of a single OpenAPI endpoint against its registered contract."""
-    from tessera.services.openapi import generate_fqn as openapi_generate_fqn
+) -> GRPCImpactResult:
+    """Check impact of a single RPC method against its registered contract."""
+    from tessera.services.grpc import generate_fqn as grpc_generate_fqn
 
-    fqn = openapi_generate_fqn(api_title, endpoint.path, endpoint.method)
+    fqn = grpc_generate_fqn(package, rpc.service_name, rpc.method_name)
 
-    # Look up existing asset and active contract
     asset_result = await session.execute(
         select(AssetDB)
         .where(AssetDB.fqn == fqn)
@@ -353,17 +357,14 @@ async def _check_openapi_endpoint_impact(
     existing_asset = asset_result.scalar_one_or_none()
 
     if not existing_asset:
-        return OpenAPIImpactResult(
+        return GRPCImpactResult(
             fqn=fqn,
-            path=endpoint.path,
-            method=endpoint.method,
+            service=rpc.service_name,
+            method=rpc.method_name,
             has_contract=False,
             safe_to_publish=True,
-            change_type=None,
-            breaking_changes=[],
         )
 
-    # Get active contract for this asset
     contract_result = await session.execute(
         select(ContractDB).where(
             ContractDB.asset_id == existing_asset.id,
@@ -373,18 +374,15 @@ async def _check_openapi_endpoint_impact(
     existing_contract = contract_result.scalar_one_or_none()
 
     if not existing_contract:
-        return OpenAPIImpactResult(
+        return GRPCImpactResult(
             fqn=fqn,
-            path=endpoint.path,
-            method=endpoint.method,
+            service=rpc.service_name,
+            method=rpc.method_name,
             has_contract=False,
             safe_to_publish=True,
-            change_type=None,
-            breaking_changes=[],
         )
 
-    # Compare schemas
-    proposed_schema = endpoint.combined_schema
+    proposed_schema = rpc.combined_schema
     existing_schema = existing_contract.schema_def
 
     diff_result = diff_schemas(existing_schema, proposed_schema)
@@ -394,10 +392,10 @@ async def _check_openapi_endpoint_impact(
         existing_contract.compatibility_mode,
     )
 
-    return OpenAPIImpactResult(
+    return GRPCImpactResult(
         fqn=fqn,
-        path=endpoint.path,
-        method=endpoint.method,
+        service=rpc.service_name,
+        method=rpc.method_name,
         has_contract=True,
         safe_to_publish=is_compatible,
         change_type=diff_result.change_type.value,
@@ -405,63 +403,64 @@ async def _check_openapi_endpoint_impact(
     )
 
 
-@router.post("/openapi/impact", response_model=OpenAPIImpactResponse)
+@router.post("/grpc/impact", response_model=GRPCImpactResponse)
 @limit_admin
-async def check_openapi_impact(
+async def check_grpc_impact(
     request: Request,
-    impact_req: OpenAPIImpactRequest,
+    impact_req: GRPCImpactRequest,
     auth: Auth,
     _: None = RequireAdmin,
     session: AsyncSession = Depends(get_session),
-) -> OpenAPIImpactResponse:
-    """Check impact of an OpenAPI spec against registered contracts.
+) -> GRPCImpactResponse:
+    """Check impact of a .proto file against registered contracts.
 
-    Parses an OpenAPI 3.x spec and checks each endpoint's schema against
-    existing contracts. This is the primary CI/CD integration point for API
-    contract validation.
+    Parses a proto3 file and checks each RPC method's schema against existing
+    contracts. Use this in CI/CD to detect breaking changes.
 
-    Returns impact analysis for each endpoint, identifying breaking changes.
+    Returns impact analysis for each RPC method.
     """
-    # Parse the OpenAPI spec
-    parse_result = parse_openapi(impact_req.spec)
+    parse_result = parse_proto(impact_req.proto_content)
 
-    if not parse_result.endpoints and parse_result.errors:
+    if not parse_result.rpc_methods and parse_result.errors:
         raise BadRequestError(
-            "Failed to parse OpenAPI spec",
-            code=ErrorCode.INVALID_OPENAPI_SPEC,
+            "Failed to parse .proto file",
+            code=ErrorCode.INVALID_PROTO_SPEC,
             details={"errors": parse_result.errors},
         )
 
-    results: list[OpenAPIImpactResult] = []
+    results: list[GRPCImpactResult] = []
 
-    for endpoint in parse_result.endpoints:
-        result = await _check_openapi_endpoint_impact(
-            endpoint,
-            parse_result.title,
+    for rpc in parse_result.rpc_methods:
+        result = await _check_grpc_method_impact(
+            rpc,
+            parse_result.package,
             impact_req.environment,
             session,
         )
         results.append(result)
 
-    endpoints_with_contracts = sum(1 for r in results if r.has_contract)
+    methods_with_contracts = sum(1 for r in results if r.has_contract)
     breaking_changes_count = sum(1 for r in results if not r.safe_to_publish)
 
-    return OpenAPIImpactResponse(
+    return GRPCImpactResponse(
         status="success" if breaking_changes_count == 0 else "breaking_changes_detected",
-        api_title=parse_result.title,
-        api_version=parse_result.version,
-        total_endpoints=len(results),
-        endpoints_with_contracts=endpoints_with_contracts,
+        package=parse_result.package,
+        total_methods=len(results),
+        methods_with_contracts=methods_with_contracts,
         breaking_changes_count=breaking_changes_count,
         results=results,
         parse_errors=parse_result.errors,
     )
 
 
-class OpenAPIDiffRequest(BaseModel):
-    """Request body for OpenAPI spec diff (CI preview)."""
+class GRPCDiffRequest(BaseModel):
+    """Request body for gRPC proto diff (CI preview)."""
 
-    spec: dict[str, Any] = Field(..., description="OpenAPI 3.x specification as JSON")
+    proto_content: str = Field(
+        ...,
+        min_length=1,
+        description="Raw .proto file content (proto3 syntax)",
+    )
     environment: str = Field(
         default="production", min_length=1, max_length=50, description="Environment to diff against"
     )
@@ -471,11 +470,11 @@ class OpenAPIDiffRequest(BaseModel):
     )
 
 
-class OpenAPIDiffItem(BaseModel):
-    """A single change detected in OpenAPI spec."""
+class GRPCDiffItem(BaseModel):
+    """A single change detected in gRPC proto."""
 
     fqn: str
-    path: str
+    service: str
     method: str
     change_type: str  # 'new', 'modified', 'unchanged'
     has_schema: bool = True
@@ -483,85 +482,78 @@ class OpenAPIDiffItem(BaseModel):
     breaking_changes: list[dict[str, Any]] = Field(default_factory=list)
 
 
-class OpenAPIDiffResponse(BaseModel):
-    """Response from OpenAPI spec diff (CI preview)."""
+class GRPCDiffResponse(BaseModel):
+    """Response from gRPC proto diff (CI preview)."""
 
     status: str  # 'clean', 'changes_detected', 'breaking_changes_detected'
-    api_title: str
-    api_version: str
+    package: str
     summary: dict[str, int]  # {'new': N, 'modified': M, 'unchanged': U, 'breaking': B}
-    blocking: bool  # True if CI should fail
-    endpoints: list[OpenAPIDiffItem]
+    blocking: bool
+    methods: list[GRPCDiffItem]
     parse_errors: list[str] = Field(default_factory=list)
 
 
-@router.post("/openapi/diff", response_model=OpenAPIDiffResponse)
+@router.post("/grpc/diff", response_model=GRPCDiffResponse)
 @limit_admin
-async def diff_openapi_spec(
+async def diff_grpc_proto(
     request: Request,
-    diff_req: OpenAPIDiffRequest,
+    diff_req: GRPCDiffRequest,
     auth: Auth,
     _: None = RequireAdmin,
     session: AsyncSession = Depends(get_session),
-) -> OpenAPIDiffResponse:
-    """Preview what would change if this OpenAPI spec is applied (CI dry-run).
+) -> GRPCDiffResponse:
+    """Preview what would change if this .proto file is applied (CI dry-run).
 
-    This is the primary CI/CD integration point for API contract validation. Call this
-    in your PR checks to:
-    1. See what endpoints would be created/modified
-    2. Detect breaking schema changes
-    3. Fail the build if breaking changes aren't acknowledged
+    Parses a proto3 file and compares each RPC method's schema against existing
+    contracts. Use in PR checks to detect breaking changes before merging.
 
     Example CI usage:
     ```yaml
-    - name: Check API contract impact
+    - name: Check gRPC contract impact
       run: |
-        curl -X POST $TESSERA_URL/api/v1/sync/openapi/diff \\
+        curl -X POST $TESSERA_URL/api/v1/sync/grpc/diff \\
           -H "Authorization: Bearer $TESSERA_API_KEY" \\
           -H "Content-Type: application/json" \\
-          -d '{"spec": '$(cat openapi.json)', "fail_on_breaking": true}'
+          -d '{"proto_content": "'$(cat service.proto | jq -Rs .)'", "fail_on_breaking": true}'
     ```
     """
-    from tessera.services.openapi import generate_fqn as openapi_generate_fqn
+    from tessera.services.grpc import generate_fqn as grpc_generate_fqn
 
-    # Parse the OpenAPI spec
-    parse_result = parse_openapi(diff_req.spec)
+    parse_result = parse_proto(diff_req.proto_content)
 
-    if not parse_result.endpoints and parse_result.errors:
+    if not parse_result.rpc_methods and parse_result.errors:
         raise BadRequestError(
-            "Failed to parse OpenAPI spec",
-            code=ErrorCode.INVALID_OPENAPI_SPEC,
+            "Failed to parse .proto file",
+            code=ErrorCode.INVALID_PROTO_SPEC,
             details={"errors": parse_result.errors},
         )
 
-    endpoints: list[OpenAPIDiffItem] = []
+    methods: list[GRPCDiffItem] = []
 
-    # Build FQN -> endpoint mapping from spec
-    spec_fqns: dict[str, OpenAPIEndpoint] = {}
-    for endpoint in parse_result.endpoints:
-        fqn = openapi_generate_fqn(parse_result.title, endpoint.path, endpoint.method)
-        spec_fqns[fqn] = endpoint
+    # Build FQN -> RPC mapping
+    proto_fqns: dict[str, GRPCRpcMethod] = {}
+    for rpc in parse_result.rpc_methods:
+        fqn = grpc_generate_fqn(parse_result.package, rpc.service_name, rpc.method_name)
+        proto_fqns[fqn] = rpc
 
-    # Get all existing assets for this environment
+    # Get all existing gRPC assets
     existing_result = await session.execute(
         select(AssetDB)
         .where(AssetDB.environment == diff_req.environment)
         .where(AssetDB.deleted_at.is_(None))
-        .where(AssetDB.resource_type == ResourceType.API_ENDPOINT)
+        .where(AssetDB.resource_type == ResourceType.GRPC_SERVICE)
     )
     existing_assets = {a.fqn: a for a in existing_result.scalars().all()}
 
-    # Process each endpoint in the spec
-    for fqn, endpoint in spec_fqns.items():
+    for fqn, rpc in proto_fqns.items():
         existing_asset = existing_assets.get(fqn)
 
         if not existing_asset:
-            # New endpoint
-            endpoints.append(
-                OpenAPIDiffItem(
+            methods.append(
+                GRPCDiffItem(
                     fqn=fqn,
-                    path=endpoint.path,
-                    method=endpoint.method,
+                    service=rpc.service_name,
+                    method=rpc.method_name,
                     change_type="new",
                     has_schema=True,
                     schema_change_type=None,
@@ -569,7 +561,6 @@ async def diff_openapi_spec(
                 )
             )
         else:
-            # Existing endpoint - check for schema changes
             contract_result = await session.execute(
                 select(ContractDB)
                 .where(ContractDB.asset_id == existing_asset.id)
@@ -578,12 +569,11 @@ async def diff_openapi_spec(
             existing_contract = contract_result.scalar_one_or_none()
 
             if not existing_contract:
-                # No contract to compare
-                endpoints.append(
-                    OpenAPIDiffItem(
+                methods.append(
+                    GRPCDiffItem(
                         fqn=fqn,
-                        path=endpoint.path,
-                        method=endpoint.method,
+                        service=rpc.service_name,
+                        method=rpc.method_name,
                         change_type="modified",
                         has_schema=True,
                         schema_change_type=None,
@@ -591,8 +581,7 @@ async def diff_openapi_spec(
                     )
                 )
             else:
-                # Compare schemas
-                proposed_schema = endpoint.combined_schema
+                proposed_schema = rpc.combined_schema
                 existing_schema = existing_contract.schema_def
 
                 diff_result = diff_schemas(existing_schema, proposed_schema)
@@ -612,11 +601,11 @@ async def diff_openapi_spec(
                     schema_change_type = "breaking"
                     change_type = "modified"
 
-                endpoints.append(
-                    OpenAPIDiffItem(
+                methods.append(
+                    GRPCDiffItem(
                         fqn=fqn,
-                        path=endpoint.path,
-                        method=endpoint.method,
+                        service=rpc.service_name,
+                        method=rpc.method_name,
                         change_type=change_type,
                         has_schema=True,
                         schema_change_type=schema_change_type,
@@ -624,15 +613,13 @@ async def diff_openapi_spec(
                     )
                 )
 
-    # Calculate summary
     summary = {
-        "new": sum(1 for e in endpoints if e.change_type == "new"),
-        "modified": sum(1 for e in endpoints if e.change_type == "modified"),
-        "unchanged": sum(1 for e in endpoints if e.change_type == "unchanged"),
-        "breaking": sum(1 for e in endpoints if e.schema_change_type == "breaking"),
+        "new": sum(1 for m in methods if m.change_type == "new"),
+        "modified": sum(1 for m in methods if m.change_type == "modified"),
+        "unchanged": sum(1 for m in methods if m.change_type == "unchanged"),
+        "breaking": sum(1 for m in methods if m.schema_change_type == "breaking"),
     }
 
-    # Determine status and blocking
     has_breaking = summary["breaking"] > 0
 
     if has_breaking:
@@ -644,12 +631,11 @@ async def diff_openapi_spec(
 
     blocking = has_breaking and diff_req.fail_on_breaking
 
-    return OpenAPIDiffResponse(
+    return GRPCDiffResponse(
         status=status,
-        api_title=parse_result.title,
-        api_version=parse_result.version,
+        package=parse_result.package,
         summary=summary,
         blocking=blocking,
-        endpoints=endpoints,
+        methods=methods,
         parse_errors=parse_result.errors,
     )

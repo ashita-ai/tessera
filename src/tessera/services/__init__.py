@@ -124,6 +124,9 @@ __all__ = [
     "PublishAction",
     "SinglePublishResult",
     "get_last_audit_status",
+    # Migration suggester
+    "MigrationSuggestion",
+    "suggest_migrations",
     # Versioning
     "INITIAL_VERSION",
     "bump_version",

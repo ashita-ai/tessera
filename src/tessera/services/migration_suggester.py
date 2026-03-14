@@ -1,409 +1,312 @@
 """Rule-based migration suggester for breaking schema changes.
 
-When a schema change is breaking, this service generates non-breaking
-alternatives using deterministic rules. Each rule targets a specific
-breaking change pattern and produces a modified schema that avoids the break.
+Given a set of breaking changes detected by schema_diff, produces non-breaking
+migration alternatives. Each rule handles one ChangeKind and modifies the
+proposed schema to avoid the break. When multiple breaking changes exist,
+the service composes them into a single suggested schema—falling back to
+standalone per-change suggestions when modifications conflict.
 
-Rules:
-    1. PROPERTY_REMOVED → deprecate (re-add with deprecated: true)
-    2. REQUIRED_FIELD_ADDED → default (make optional, add type-appropriate default)
-    3. TYPE_CHANGED (narrowed) → additive (add {field}_v2, deprecate old)
-    4. ENUM_VALUES_REMOVED → deprecate (re-add removed values, note deprecated)
-    5. TYPE_CHANGED (other) → additive (keep old, add {field}_v2)
-    6. CONSTRAINT_TIGHTENED → keep_constraint (keep the old looser constraint)
+Ref: docs/adrs/specs/003-migration-suggester.md
 """
 
-from __future__ import annotations
-
 import copy
-from dataclasses import dataclass
 from typing import Any
+
+from pydantic import BaseModel, Field
 
 from tessera.models.enums import CompatibilityMode
 from tessera.services.schema_diff import BreakingChange, ChangeKind
 
 
-@dataclass(frozen=True)
-class MigrationSuggestion:
-    """A single migration suggestion for avoiding a breaking change."""
+class MigrationSuggestion(BaseModel):
+    """A single migration suggestion that avoids a breaking change."""
 
-    strategy: str
-    description: str
-    confidence: str
-    suggested_schema: dict[str, Any]
-    changes_made: list[str]
+    strategy: str = Field(
+        ..., description="Migration strategy: additive, deprecate, default, keep_constraint"
+    )
+    description: str = Field(..., description="Human-readable explanation of the suggestion")
+    confidence: str = Field(..., description="Confidence level: high, medium, low")
+    suggested_schema: dict[str, Any] = Field(
+        ..., description="Modified schema that avoids the breaking change"
+    )
+    changes_made: list[str] = Field(
+        default_factory=list, description="List of modifications applied to the schema"
+    )
 
 
-# Default values by JSON Schema type
+# Type -> sensible default value mapping for Rule 2
 _TYPE_DEFAULTS: dict[str, Any] = {
     "string": "",
     "integer": 0,
-    "number": 0.0,
+    "number": 0,
     "boolean": False,
     "array": [],
     "object": {},
-    "null": None,
 }
 
 
 def _get_property_at_path(schema: dict[str, Any], path: str) -> tuple[dict[str, Any] | None, str]:
-    """Navigate to the parent container and return (parent_props, field_name).
+    """Navigate to the parent container and return (container, field_name).
 
-    Handles paths like 'properties.email' or 'properties.address.properties.city'.
-    Returns (None, '') if the path is not navigable.
+    Paths from BreakingChange look like "properties.email" or
+    "properties.address.properties.zip". We walk through the schema
+    following each segment.
     """
-    parts = path.split(".")
+    segments = path.split(".")
     current = schema
-
-    # Walk to the parent 'properties' dict
-    for i, part in enumerate(parts[:-1]):
-        if part == "properties" and "properties" in current:
-            current = current["properties"]
-        elif part in current:
-            current = current[part]
-            # If this is a nested object, drill into it
-            if isinstance(current, dict) and "properties" in current and i + 1 < len(parts) - 1:
-                continue
+    for segment in segments[:-1]:
+        if isinstance(current, dict) and segment in current:
+            current = current[segment]
         else:
-            return None, ""
-
-    field_name = parts[-1]
-    # If current is a 'properties' dict (we're inside it), return it
-    if isinstance(current, dict):
-        return current, field_name
-    return None, ""
+            return None, segments[-1]
+    return current, segments[-1]
 
 
-def _get_type_for_field(schema: dict[str, Any], path: str) -> str | None:
-    """Get the JSON Schema type of a field at the given path."""
-    props, field_name = _get_property_at_path(schema, path)
-    if props and field_name in props:
-        field_def = props[field_name]
-        if isinstance(field_def, dict):
-            return field_def.get("type")
-    return None
-
-
-def _apply_property_removed(
+def _apply_rule_property_removed(
     schema: dict[str, Any],
     change: BreakingChange,
     old_schema: dict[str, Any],
-) -> MigrationSuggestion | None:
+) -> tuple[dict[str, Any], str] | None:
     """Rule 1: Re-add removed property with deprecated: true."""
-    props, field_name = _get_property_at_path(old_schema, change.path)
-    if not props or field_name not in props:
+    container, field_name = _get_property_at_path(old_schema, change.path)
+    if container is None or field_name not in container:
         return None
 
-    result = copy.deepcopy(schema)
-    target_props, _ = _get_property_at_path(result, change.path)
-    if target_props is None:
-        # Ensure properties dict exists
-        if "properties" not in result:
-            result["properties"] = {}
-        target_props = result["properties"]
+    old_prop_def = copy.deepcopy(container[field_name])
+    old_prop_def["deprecated"] = True
 
-    # Re-add the field with deprecated flag
-    old_field_def = copy.deepcopy(props[field_name])
-    if isinstance(old_field_def, dict):
-        old_field_def["deprecated"] = True
-        desc = old_field_def.get("description", "")
-        if desc:
-            old_field_def["description"] = f"[DEPRECATED] {desc}"
-        else:
-            old_field_def["description"] = (
-                "[DEPRECATED] This field will be removed in a future version."
-            )
-    target_props[field_name] = old_field_def
+    existing_desc = old_prop_def.get("description", "")
+    if existing_desc:
+        old_prop_def["description"] = f"Deprecated: {existing_desc}"
+    else:
+        old_prop_def["description"] = "Deprecated: scheduled for removal in a future version"
 
-    return MigrationSuggestion(
-        strategy="deprecate",
-        description=f"Re-added removed property '{field_name}' with deprecated: true",
-        confidence="high",
-        suggested_schema=result,
-        changes_made=[f"Re-added '{change.path}' with deprecated: true"],
-    )
+    # Insert the property back into the new schema at the same path
+    new_container, _ = _get_property_at_path(schema, change.path)
+    if new_container is None:
+        return None
+
+    new_container[field_name] = old_prop_def
+
+    # If the field was required in the old schema, keep it required
+    parent_path_segments = change.path.split(".")
+    # Walk up to find the object that has "required"
+    obj = schema
+    for seg in parent_path_segments[:-2]:  # skip "properties" and field_name
+        if isinstance(obj, dict) and seg in obj:
+            obj = obj[seg]
+
+    if isinstance(obj, dict) and "required" in obj:
+        old_obj = old_schema
+        for seg in parent_path_segments[:-2]:
+            if isinstance(old_obj, dict) and seg in old_obj:
+                old_obj = old_obj[seg]
+        if isinstance(old_obj, dict) and field_name in old_obj.get("required", []):
+            if field_name not in obj["required"]:
+                obj["required"].append(field_name)
+
+    return schema, f"Re-added '{field_name}' with deprecated: true"
 
 
-def _apply_required_field_added(
+def _apply_rule_required_added(
     schema: dict[str, Any],
     change: BreakingChange,
-) -> MigrationSuggestion | None:
-    """Rule 2: Make new required field optional with type-appropriate default."""
-    result = copy.deepcopy(schema)
+) -> tuple[dict[str, Any], str, str] | None:
+    """Rule 2: Make new required field optional, add default if possible.
 
-    # Extract field name from path (e.g., 'required.email' → 'email')
-    parts = change.path.split(".")
-    field_name = parts[-1] if parts else ""
-    if not field_name:
+    Returns (schema, change_description, confidence).
+    """
+    # The path for REQUIRED_ADDED is like "required.email" — the field name
+    # is the last segment
+    segments = change.path.split(".")
+    field_name = segments[-1]
+
+    # Find the "required" array in the schema
+    # For top-level: required is at schema["required"]
+    # For nested: walk to the parent object
+    obj = schema
+    for seg in segments[:-2]:  # everything before "required.field_name"
+        if isinstance(obj, dict) and seg in obj:
+            obj = obj[seg]
+
+    if not isinstance(obj, dict) or "required" not in obj:
         return None
 
-    # Remove from required list
-    if "required" in result and field_name in result["required"]:
-        result["required"] = [r for r in result["required"] if r != field_name]
-        if not result["required"]:
-            del result["required"]
+    required_list: list[str] = obj["required"]
+    if field_name in required_list:
+        required_list.remove(field_name)
+        if not required_list:
+            del obj["required"]
 
-    # Add a default value based on the field's type
-    field_type = _get_type_for_field(result, f"properties.{field_name}")
-    default_value = _TYPE_DEFAULTS.get(field_type or "string", "")
+    # Try to add a default based on field type
+    confidence = "medium"
+    prop_def = obj.get("properties", {}).get(field_name)
+    if isinstance(prop_def, dict):
+        field_type = prop_def.get("type")
+        if isinstance(field_type, str) and field_type in _TYPE_DEFAULTS:
+            prop_def["default"] = copy.deepcopy(_TYPE_DEFAULTS[field_type])
+            confidence = "high"
 
-    if "properties" in result and field_name in result["properties"]:
-        field_def = result["properties"][field_name]
-        if isinstance(field_def, dict):
-            field_def["default"] = default_value
-
-    confidence = "high" if field_type in _TYPE_DEFAULTS else "medium"
-
-    return MigrationSuggestion(
-        strategy="default",
-        description=f"Made '{field_name}' optional with default value {default_value!r}",
-        confidence=confidence,
-        suggested_schema=result,
-        changes_made=[
-            f"Removed '{field_name}' from required list",
-            f"Added default value {default_value!r} to '{field_name}'",
-        ],
-    )
+    return schema, f"Made '{field_name}' optional with default", confidence
 
 
-def _apply_type_narrowed(
-    schema: dict[str, Any],
-    change: BreakingChange,
-    old_schema: dict[str, Any],
-) -> MigrationSuggestion | None:
-    """Rule 3: Add {field}_v2 with new type, deprecate old field."""
-    props, field_name = _get_property_at_path(schema, change.path)
-    if not props or field_name not in props:
-        return None
-
-    old_props, _ = _get_property_at_path(old_schema, change.path)
-    if not old_props or field_name not in old_props:
-        return None
-
-    result = copy.deepcopy(schema)
-    target_props, _ = _get_property_at_path(result, change.path)
-    if target_props is None:
-        return None
-
-    # Keep old field definition (restore original type)
-    old_field_def = copy.deepcopy(old_props[field_name])
-    if isinstance(old_field_def, dict):
-        old_field_def["deprecated"] = True
-        old_field_def["description"] = (
-            f"[DEPRECATED] Use '{field_name}_v2' instead. {old_field_def.get('description', '')}"
-        ).strip()
-
-    # New field gets the narrowed type under _v2 name
-    new_field_def = copy.deepcopy(props[field_name])
-    if isinstance(new_field_def, dict):
-        new_field_def["description"] = (
-            f"Replacement for deprecated '{field_name}'. {new_field_def.get('description', '')}"
-        ).strip()
-
-    target_props[field_name] = old_field_def
-    target_props[f"{field_name}_v2"] = new_field_def
-
-    # Remove field_name from required and don't add _v2 to required
-    if "required" in result and field_name in result["required"]:
-        result["required"] = [r for r in result["required"] if r != field_name]
-        if not result["required"]:
-            del result["required"]
-
-    return MigrationSuggestion(
-        strategy="additive",
-        description=(f"Added '{field_name}_v2' with new type, deprecated original '{field_name}'"),
-        confidence="medium",
-        suggested_schema=result,
-        changes_made=[
-            f"Restored original type for '{change.path}'",
-            f"Added '{field_name}_v2' with narrowed type",
-            f"Marked '{field_name}' as deprecated",
-        ],
-    )
-
-
-def _apply_enum_values_removed(
+def _apply_rule_type_narrowed(
     schema: dict[str, Any],
     change: BreakingChange,
     old_schema: dict[str, Any],
-) -> MigrationSuggestion | None:
-    """Rule 4: Re-add removed enum values, note deprecated in description."""
-    props, field_name = _get_property_at_path(schema, change.path)
-    if not props or field_name not in props:
+) -> tuple[dict[str, Any], str] | None:
+    """Rule 3: Add {field}_v2 with new type, keep old field."""
+    container, field_name = _get_property_at_path(schema, change.path)
+    if container is None or field_name not in container:
         return None
 
-    old_props, _ = _get_property_at_path(old_schema, change.path)
-    if not old_props or field_name not in old_props:
+    old_container, _ = _get_property_at_path(old_schema, change.path)
+    if old_container is None or field_name not in old_container:
         return None
 
-    result = copy.deepcopy(schema)
-    target_props, _ = _get_property_at_path(result, change.path)
-    if target_props is None:
+    # Restore the old property definition and mark deprecated
+    new_type_def = copy.deepcopy(container[field_name])
+    old_type_def = copy.deepcopy(old_container[field_name])
+    old_type_def["deprecated"] = True
+
+    container[field_name] = old_type_def
+    container[f"{field_name}_v2"] = new_type_def
+
+    return schema, f"Kept '{field_name}' with original type, added '{field_name}_v2' with new type"
+
+
+def _apply_rule_enum_removed(
+    schema: dict[str, Any],
+    change: BreakingChange,
+) -> tuple[dict[str, Any], str] | None:
+    """Rule 4: Re-add removed enum values."""
+    container, field_name = _get_property_at_path(schema, change.path)
+    if container is None or field_name not in container:
         return None
 
-    field_def = target_props[field_name]
-    old_field_def = old_props[field_name]
-
-    if not isinstance(field_def, dict) or not isinstance(old_field_def, dict):
+    prop_def = container[field_name]
+    if not isinstance(prop_def, dict) or "enum" not in prop_def:
         return None
 
-    old_enum = set(old_field_def.get("enum", []))
-    new_enum = set(field_def.get("enum", []))
-    removed_values = old_enum - new_enum
-
-    if not removed_values:
+    current_enum = prop_def["enum"]
+    old_values = change.old_value
+    if not isinstance(old_values, list):
         return None
 
-    # Re-add removed values (preserve original types — JSON Schema enums can be any type)
-    combined_enum = list(field_def.get("enum", [])) + sorted(
-        removed_values, key=lambda v: (type(v).__name__, str(v))
-    )
-    field_def["enum"] = combined_enum
+    # Union old and new values, preserving order (new values first, then re-added)
+    removed = [v for v in old_values if v not in current_enum]
+    if not removed:
+        return None
 
-    deprecated_str = ", ".join(
-        repr(v) for v in sorted(removed_values, key=lambda v: (type(v).__name__, str(v)))
-    )
-    existing_desc = field_def.get("description", "")
-    field_def["description"] = (f"{existing_desc} [Deprecated values: {deprecated_str}]").strip()
+    prop_def["enum"] = current_enum + removed
 
-    return MigrationSuggestion(
-        strategy="deprecate",
-        description=f"Re-added removed enum values ({deprecated_str}) as deprecated",
-        confidence="high",
-        suggested_schema=result,
-        changes_made=[
-            f"Re-added enum values {deprecated_str} to '{change.path}'",
-            "Noted deprecated values in field description",
-        ],
-    )
+    existing_desc = prop_def.get("description", "")
+    deprecated_note = f"Deprecated values: {removed}"
+    if existing_desc:
+        prop_def["description"] = f"{existing_desc}. {deprecated_note}"
+    else:
+        prop_def["description"] = deprecated_note
+
+    return schema, f"Re-added deprecated enum values {removed} to '{field_name}'"
 
 
-def _apply_type_changed(
+def _apply_rule_type_changed(
     schema: dict[str, Any],
     change: BreakingChange,
     old_schema: dict[str, Any],
-) -> MigrationSuggestion | None:
-    """Rule 5: Keep old field, add {field}_v2 with new type."""
-    # Same as type narrowed but for general type changes
-    return _apply_type_narrowed(schema, change, old_schema)
+) -> tuple[dict[str, Any], str] | None:
+    """Rule 5: Add {field}_v2 with new type, keep old field (general type change)."""
+    # Same mechanism as rule 3 — keep old, add _v2 with new
+    return _apply_rule_type_narrowed(schema, change, old_schema)
 
 
-def _apply_constraint_tightened(
+def _apply_rule_constraint_tightened(
     schema: dict[str, Any],
     change: BreakingChange,
     old_schema: dict[str, Any],
-) -> MigrationSuggestion | None:
-    """Rule 6: Keep the old (looser) constraint."""
-    props, field_name = _get_property_at_path(schema, change.path)
-    old_props, old_field_name = _get_property_at_path(old_schema, change.path)
+) -> tuple[dict[str, Any], str] | None:
+    """Rule 6: Keep the old (looser) constraint.
 
-    if not props or not old_props:
+    schema_diff produces paths like "properties.name.maxLength" where the
+    last segment is the specific constraint key. We strip that suffix to
+    navigate to the property definition, then revert only the identified
+    constraint.
+    """
+    # Extract the constraint key from the path's last segment.
+    # schema_diff paths: "properties.name.maxLength" → constraint_key="maxLength",
+    # property path = "properties.name"
+    path_segments = change.path.split(".")
+    constraint_key = path_segments[-1]
+
+    # Recognized JSON Schema constraint keywords
+    constraint_keys = {
+        "minimum",
+        "maximum",
+        "exclusiveMinimum",
+        "exclusiveMaximum",
+        "minLength",
+        "maxLength",
+        "minItems",
+        "maxItems",
+        "minProperties",
+        "maxProperties",
+        "pattern",
+        "multipleOf",
+    }
+
+    # If the last segment is a known constraint, navigate to the property;
+    # otherwise fall back to treating the full path as the property path
+    # (for forward compatibility with callers that pass property-level paths).
+    if constraint_key in constraint_keys:
+        property_path = ".".join(path_segments[:-1])
+    else:
+        property_path = change.path
+        constraint_key = ""
+
+    container, field_name = _get_property_at_path(schema, property_path)
+    if container is None or field_name not in container:
         return None
 
-    result = copy.deepcopy(schema)
-    target_props, target_field = _get_property_at_path(result, change.path)
-    if target_props is None:
+    old_container, _ = _get_property_at_path(old_schema, property_path)
+    if old_container is None or field_name not in old_container:
         return None
 
-    # For constraint changes, the path may point to the constraint itself
-    # e.g., 'properties.name.maxLength'
-    # We need to figure out what changed and restore the old value
-    if field_name in props and old_field_name in old_props:
-        # The path points to a field - look for changed constraints
-        new_field = props[field_name]
-        old_field = old_props[old_field_name]
-        if isinstance(new_field, dict) and isinstance(old_field, dict):
-            constraint_keys = [
-                "maxLength",
-                "minLength",
-                "maximum",
-                "minimum",
-                "exclusiveMaximum",
-                "exclusiveMinimum",
-                "maxItems",
-                "minItems",
-                "pattern",
-                "multipleOf",
-                "maxProperties",
-                "minProperties",
-            ]
-            changes_made = []
-            for key in constraint_keys:
-                if key in old_field and key in new_field and old_field[key] != new_field[key]:
-                    target_props[target_field][key] = old_field[key]
-                    changes_made.append(
-                        f"Restored '{key}' from {new_field[key]} to {old_field[key]}"
-                    )
-                elif key not in old_field and key in new_field:
-                    # New constraint added (tightening)
-                    del target_props[target_field][key]
-                    changes_made.append(f"Removed newly added constraint '{key}'")
+    new_prop = container[field_name]
+    old_prop = old_container[field_name]
 
-            if changes_made:
-                return MigrationSuggestion(
-                    strategy="keep_constraint",
-                    description=f"Kept original (looser) constraints for '{field_name}'",
-                    confidence="high",
-                    suggested_schema=result,
-                    changes_made=changes_made,
-                )
-
-    # Fallback: try to use old_value/new_value from the change itself
-    if change.old_value is not None:
-        return MigrationSuggestion(
-            strategy="keep_constraint",
-            description=f"Kept original constraint value at '{change.path}'",
-            confidence="high",
-            suggested_schema=result,
-            changes_made=[f"Restored constraint at '{change.path}' to original value"],
-        )
-
-    return None
-
-
-# Maps ChangeKind to (handler_function, applies_to_narrowed_only)
-_RULE_DISPATCH: dict[
-    ChangeKind,
-    str,
-] = {
-    ChangeKind.PROPERTY_REMOVED: "property_removed",
-    ChangeKind.REQUIRED_ADDED: "required_added",
-    ChangeKind.TYPE_NARROWED: "type_narrowed",
-    ChangeKind.ENUM_VALUES_REMOVED: "enum_removed",
-    ChangeKind.TYPE_CHANGED: "type_changed",
-    ChangeKind.CONSTRAINT_TIGHTENED: "constraint_tightened",
-}
-
-
-def _apply_rule(
-    schema: dict[str, Any],
-    change: BreakingChange,
-    old_schema: dict[str, Any],
-) -> MigrationSuggestion | None:
-    """Apply the appropriate migration rule for a breaking change."""
-    rule = _RULE_DISPATCH.get(change.kind)
-    if rule is None:
+    if not isinstance(new_prop, dict) or not isinstance(old_prop, dict):
         return None
 
-    if rule == "property_removed":
-        return _apply_property_removed(schema, change, old_schema)
-    elif rule == "required_added":
-        return _apply_required_field_added(schema, change)
-    elif rule == "type_narrowed":
-        return _apply_type_narrowed(schema, change, old_schema)
-    elif rule == "enum_removed":
-        return _apply_enum_values_removed(schema, change, old_schema)
-    elif rule == "type_changed":
-        return _apply_type_changed(schema, change, old_schema)
-    elif rule == "constraint_tightened":
-        return _apply_constraint_tightened(schema, change, old_schema)
-    return None
+    changes_applied: list[str] = []
+
+    if constraint_key:
+        # Revert only the specific tightened constraint
+        if constraint_key in old_prop:
+            new_prop[constraint_key] = old_prop[constraint_key]
+            changes_applied.append(f"restored {constraint_key}={old_prop[constraint_key]}")
+        elif constraint_key in new_prop:
+            # New constraint that didn't exist before — remove it
+            del new_prop[constraint_key]
+            changes_applied.append(f"removed new {constraint_key}")
+    else:
+        # Fallback: no specific constraint identified, revert all differences
+        for key in constraint_keys:
+            if key in old_prop and (key not in new_prop or old_prop[key] != new_prop[key]):
+                new_prop[key] = old_prop[key]
+                changes_applied.append(f"restored {key}={old_prop[key]}")
+            elif key in new_prop and key not in old_prop:
+                del new_prop[key]
+                changes_applied.append(f"removed new {key}")
+
+    if not changes_applied:
+        return None
+
+    return schema, f"Kept original constraints on '{field_name}': {', '.join(changes_applied)}"
 
 
-def _paths_conflict(path_a: str, path_b: str) -> bool:
-    """Check if two change paths conflict (overlap on the same field)."""
-    # Two paths conflict if one is a prefix of the other
-    return path_a.startswith(path_b) or path_b.startswith(path_a)
+def _paths_overlap(path_a: str, path_b: str) -> bool:
+    """Check if two JSON paths target the same or overlapping schema locations."""
+    return path_a == path_b or path_a.startswith(path_b + ".") or path_b.startswith(path_a + ".")
 
 
 def suggest_migrations(
@@ -412,82 +315,165 @@ def suggest_migrations(
     breaking_changes: list[BreakingChange],
     compatibility_mode: CompatibilityMode,
 ) -> list[MigrationSuggestion]:
-    """Generate migration suggestions for breaking schema changes.
+    """Generate non-breaking migration alternatives for breaking schema changes.
 
-    For multiple breaking changes, attempts to compose modifications into a
-    single schema. If modifications conflict (overlapping paths), the
-    conflicting change produces a standalone suggestion instead.
+    Attempts to compose all rule modifications into a single suggested schema.
+    When modifications conflict (overlapping paths), conflicting changes become
+    standalone suggestions.
 
     Args:
-        old_schema: The current published schema.
-        new_schema: The proposed schema with breaking changes.
-        breaking_changes: List of breaking changes detected by schema diff.
+        old_schema: The current (existing) schema.
+        new_schema: The proposed schema that has breaking changes.
+        breaking_changes: List of breaking changes detected by schema_diff.
         compatibility_mode: The compatibility mode in effect.
 
     Returns:
-        List of migration suggestions. The first suggestion (if any) is the
-        composed result; subsequent entries are standalone fallbacks for
-        changes that couldn't be composed.
+        List of MigrationSuggestion, possibly empty if no rules match.
+        The first suggestion (if any) is the composed result; remaining
+        entries are standalone fallbacks for conflicting changes.
     """
-    if not breaking_changes:
-        return []
-
     if compatibility_mode == CompatibilityMode.NONE:
         return []
 
-    # Single change: straightforward
-    if len(breaking_changes) == 1:
-        suggestion = _apply_rule(new_schema, breaking_changes[0], old_schema)
-        return [suggestion] if suggestion else []
+    if not breaking_changes:
+        return []
 
-    # Multiple changes: try to compose
+    # Track which changes we can compose vs. which conflict
     composed_schema = copy.deepcopy(new_schema)
-    composed_changes_made: list[str] = []
-    composed_descriptions: list[str] = []
-    standalone_suggestions: list[MigrationSuggestion] = []
-    applied_paths: list[str] = []
+    composed_changes: list[str] = []
+    composed_kinds: list[ChangeKind] = []
+    composed_paths: list[str] = []
+    standalone: list[MigrationSuggestion] = []
     lowest_confidence = "high"
 
     for change in breaking_changes:
-        # Check for path conflicts with already-applied changes
-        conflicts_with_applied = any(
-            _paths_conflict(change.path, applied) for applied in applied_paths
-        )
+        # Check for path conflicts with already-composed changes
+        has_conflict = any(_paths_overlap(change.path, p) for p in composed_paths)
 
-        if conflicts_with_applied:
-            # Generate standalone suggestion for this change
-            standalone = _apply_rule(new_schema, change, old_schema)
-            if standalone:
-                standalone_suggestions.append(standalone)
+        if has_conflict:
+            # Apply this rule independently as a standalone suggestion
+            result = _apply_single_rule(copy.deepcopy(new_schema), change, old_schema)
+            if result is not None:
+                standalone.append(result)
             continue
 
-        # Try to apply this rule to the composed schema
-        suggestion = _apply_rule(composed_schema, change, old_schema)
-        if suggestion:
-            composed_schema = suggestion.suggested_schema
-            composed_changes_made.extend(suggestion.changes_made)
-            composed_descriptions.append(suggestion.description)
-            applied_paths.append(change.path)
-            if suggestion.confidence == "low" or (
-                suggestion.confidence == "medium" and lowest_confidence == "high"
-            ):
-                lowest_confidence = suggestion.confidence
-        else:
-            # No rule matched — skip (no suggestion for unknown patterns)
-            pass
+        # Try to apply the rule to the composed schema
+        result_tuple = _apply_rule(composed_schema, change, old_schema)
+        if result_tuple is None:
+            continue
 
-    results: list[MigrationSuggestion] = []
+        schema_out, desc, confidence = result_tuple
+        composed_schema = schema_out
+        composed_changes.append(desc)
+        composed_kinds.append(change.kind)
+        composed_paths.append(change.path)
 
-    if composed_changes_made:
-        results.append(
+        if _confidence_rank(confidence) < _confidence_rank(lowest_confidence):
+            lowest_confidence = confidence
+
+    suggestions: list[MigrationSuggestion] = []
+
+    if composed_changes:
+        suggestions.append(
             MigrationSuggestion(
-                strategy="composed",
-                description="; ".join(composed_descriptions),
+                strategy=_pick_composed_strategy_from_kinds(composed_kinds),
+                description="Composed migration: " + "; ".join(composed_changes),
                 confidence=lowest_confidence,
                 suggested_schema=composed_schema,
-                changes_made=composed_changes_made,
+                changes_made=composed_changes,
             )
         )
 
-    results.extend(standalone_suggestions)
-    return results
+    suggestions.extend(standalone)
+    return suggestions
+
+
+def _apply_rule(
+    schema: dict[str, Any],
+    change: BreakingChange,
+    old_schema: dict[str, Any],
+) -> tuple[dict[str, Any], str, str] | None:
+    """Apply the appropriate rule for a breaking change.
+
+    Returns (modified_schema, description, confidence) or None.
+    """
+    if change.kind == ChangeKind.PROPERTY_REMOVED:
+        result = _apply_rule_property_removed(schema, change, old_schema)
+        if result is not None:
+            return result[0], result[1], "high"
+
+    elif change.kind == ChangeKind.REQUIRED_ADDED:
+        return _apply_rule_required_added(schema, change)
+
+    elif change.kind == ChangeKind.TYPE_NARROWED:
+        result = _apply_rule_type_narrowed(schema, change, old_schema)
+        if result is not None:
+            return result[0], result[1], "medium"
+
+    elif change.kind == ChangeKind.ENUM_VALUES_REMOVED:
+        result = _apply_rule_enum_removed(schema, change)
+        if result is not None:
+            return result[0], result[1], "high"
+
+    elif change.kind == ChangeKind.TYPE_CHANGED:
+        result = _apply_rule_type_changed(schema, change, old_schema)
+        if result is not None:
+            return result[0], result[1], "medium"
+
+    elif change.kind == ChangeKind.CONSTRAINT_TIGHTENED:
+        result = _apply_rule_constraint_tightened(schema, change, old_schema)
+        if result is not None:
+            return result[0], result[1], "high"
+
+    return None
+
+
+def _apply_single_rule(
+    schema: dict[str, Any],
+    change: BreakingChange,
+    old_schema: dict[str, Any],
+) -> MigrationSuggestion | None:
+    """Apply a single rule and wrap the result as a standalone MigrationSuggestion."""
+    result = _apply_rule(schema, change, old_schema)
+    if result is None:
+        return None
+
+    schema_out, desc, confidence = result
+    strategy_map = {
+        ChangeKind.PROPERTY_REMOVED: "deprecate",
+        ChangeKind.REQUIRED_ADDED: "default",
+        ChangeKind.TYPE_NARROWED: "additive",
+        ChangeKind.ENUM_VALUES_REMOVED: "deprecate",
+        ChangeKind.TYPE_CHANGED: "additive",
+        ChangeKind.CONSTRAINT_TIGHTENED: "keep_constraint",
+    }
+    return MigrationSuggestion(
+        strategy=strategy_map.get(change.kind, "unknown"),
+        description=desc,
+        confidence=confidence,
+        suggested_schema=schema_out,
+        changes_made=[desc],
+    )
+
+
+def _confidence_rank(confidence: str) -> int:
+    """Rank confidence levels for comparison (higher = more confident)."""
+    return {"high": 3, "medium": 2, "low": 1}.get(confidence, 0)
+
+
+def _pick_composed_strategy_from_kinds(kinds: list[ChangeKind]) -> str:
+    """Pick a strategy name for a composed suggestion based on the actually-applied rules."""
+    strategy_map = {
+        ChangeKind.PROPERTY_REMOVED: "deprecate",
+        ChangeKind.REQUIRED_ADDED: "default",
+        ChangeKind.TYPE_NARROWED: "additive",
+        ChangeKind.ENUM_VALUES_REMOVED: "deprecate",
+        ChangeKind.TYPE_CHANGED: "additive",
+        ChangeKind.CONSTRAINT_TIGHTENED: "keep_constraint",
+    }
+    strategies = [strategy_map[k] for k in kinds if k in strategy_map]
+    if not strategies:
+        return "mixed"
+    if len(set(strategies)) == 1:
+        return strategies[0]
+    return "mixed"

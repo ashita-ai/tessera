@@ -85,10 +85,12 @@ Force-approve is available for emergencies, but it's audit-logged.
 - **Semantic versioning** - Auto, suggest, or enforce modes with pre-release support
 - **Data quality guarantees** - Not-null, unique, accepted_values, freshness, volume checks tracked alongside schemas
 - **Write-Audit-Publish** - Optionally block publishing if data quality audits are failing
+- **Semantic metadata** - Tag assets with free-form labels (e.g., `pii`, `financial`) and annotate individual contract fields with descriptions and tags using JSONPath keys. Metadata carries forward automatically across contract versions for unchanged fields
 - **Team-based ownership** - Assets belong to teams (survives personnel changes), with optional user-level stewardship
 - **Webhooks** - Signed delivery with SSRF protection, retry with backoff, delivery tracking
 - **API keys** - Scoped (read, write, admin), revocable, expiring
-- **Audit log** - Append-only history of every contract publish, proposal, acknowledgment, and force-approve
+- **Preflight checks** - Consumption-time endpoint returns contract metadata, freshness SLAs, and guarantees; every call is audit-logged for utilization tracking
+- **Audit log** - Append-only history of every contract publish, proposal, acknowledgment, force-approve, and consumption event
 - **Web UI** - Browse assets, view contract history, manage teams
 
 ## Configuration
