@@ -209,18 +209,21 @@ def _parse_message(name: str, body: str) -> ProtoMessage:
     for m in _NESTED_MSG_RE.finditer(body_for_msgs):
         msg_name = m.group(1)
         brace_pos = body_for_msgs.index("{", m.start())
-        msg_body, _ = _find_block(body_for_msgs, brace_pos)
+        msg_body, end_idx = _find_block(body_for_msgs, brace_pos)
         nested_messages.append(_parse_message(msg_name, msg_body))
-        end_idx = body_for_msgs.index("}", brace_pos) + 1
         remaining = remaining[: m.start()] + " " * (end_idx - m.start()) + remaining[end_idx:]
 
-    # Flatten oneof blocks — treat their fields as regular optional fields
+    # Flatten oneof blocks — treat their fields as regular optional fields.
+    # Pad with spaces (length-preserving) so positions from finditer stay valid
+    # when there are multiple oneof blocks in the same message.
     oneof_flattened = remaining
     for m in _ONEOF_RE.finditer(remaining):
         brace_pos = remaining.index("{", m.start())
         oneof_body, end = _find_block(remaining, brace_pos)
-        # Replace the oneof wrapper but keep the inner fields
-        oneof_flattened = oneof_flattened[: m.start()] + oneof_body + oneof_flattened[end:]
+        padding = (end - m.start()) - len(oneof_body)
+        oneof_flattened = (
+            oneof_flattened[: m.start()] + oneof_body + " " * padding + oneof_flattened[end:]
+        )
 
     # Parse map fields
     for m in _MAP_FIELD_RE.finditer(oneof_flattened):

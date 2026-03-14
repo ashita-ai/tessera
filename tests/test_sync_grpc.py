@@ -336,6 +336,75 @@ message Timestamp {
         assert len(result.messages) == 1
         assert result.rpc_methods == []
 
+    def test_multiple_oneof_blocks(self) -> None:
+        """Multiple oneof blocks in a single message parse correctly."""
+        proto = """\
+syntax = "proto3";
+package multi_oneof;
+
+service Svc {
+  rpc Do (Req) returns (Resp);
+}
+
+message Req {
+  string id = 1;
+  oneof target {
+    string user_id = 2;
+    string group_id = 3;
+  }
+  oneof action {
+    string command = 4;
+    string query = 5;
+  }
+}
+
+message Resp {
+  string result = 1;
+}
+"""
+        result = parse_proto(proto)
+        assert result.errors == []
+        rpc = result.rpc_methods[0]
+        props = rpc.input_schema["properties"]
+        assert "id" in props
+        assert "user_id" in props
+        assert "group_id" in props
+        assert "command" in props
+        assert "query" in props
+
+    def test_deeply_nested_messages(self) -> None:
+        """Messages nested 3+ levels deep are parsed without field leakage."""
+        proto = """\
+syntax = "proto3";
+package deep;
+
+service Svc {
+  rpc Do (Outer) returns (Resp);
+}
+
+message Outer {
+  string outer_field = 1;
+  message Middle {
+    string middle_field = 1;
+    message Inner {
+      string inner_field = 1;
+    }
+    Inner nested = 2;
+  }
+  Middle mid = 2;
+}
+
+message Resp {
+  string ok = 1;
+}
+"""
+        result = parse_proto(proto)
+        assert result.errors == []
+        rpc = result.rpc_methods[0]
+        outer_props = set(rpc.input_schema["properties"].keys())
+        # Outer should only have its own fields, not Middle's or Inner's
+        assert outer_props == {"outer_field", "mid"}
+
     def test_bytes_field_type(self) -> None:
         proto = """\
 syntax = "proto3";
