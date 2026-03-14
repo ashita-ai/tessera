@@ -50,6 +50,27 @@ from tessera.services.webhooks import send_proposal_created
 logger = logging.getLogger(__name__)
 
 
+def _extract_field_paths(schema: dict[str, Any], prefix: str = "$.properties") -> set[str]:
+    """Extract all field paths from a JSON Schema as JSONPath strings.
+
+    Recurses into nested objects and arrays to discover all leaf field paths.
+    """
+    paths: set[str] = set()
+    if not isinstance(schema, dict):
+        return paths
+
+    properties = schema.get("properties", {})
+    for prop_name, prop_schema in properties.items():
+        path = f"{prefix}.{prop_name}"
+        paths.add(path)
+        if isinstance(prop_schema, dict):
+            if prop_schema.get("type") == "object" and "properties" in prop_schema:
+                paths.update(_extract_field_paths(prop_schema, path + ".properties"))
+            if "items" in prop_schema and isinstance(prop_schema["items"], dict):
+                paths.update(_extract_field_paths(prop_schema["items"], path + ".items.properties"))
+    return paths
+
+
 @dataclass
 class ContractToPublish:
     """A contract to be published in a bulk operation."""
@@ -58,6 +79,8 @@ class ContractToPublish:
     schema_def: dict[str, Any]
     compatibility_mode: CompatibilityMode | None = None
     guarantees: dict[str, Any] | None = None
+    field_descriptions: dict[str, str] = field(default_factory=dict)
+    field_tags: dict[str, list[str]] = field(default_factory=dict)
 
 
 @dataclass
@@ -246,6 +269,8 @@ async def bulk_publish_contracts(
                             schema_def=item.schema_def,
                             compatibility_mode=compat_mode,
                             guarantees=item.guarantees,
+                            field_descriptions=item.field_descriptions,
+                            field_tags=item.field_tags,
                             status=ContractStatus.ACTIVE,
                             published_by=published_by,
                             published_by_user_id=published_by_user_id,
@@ -319,6 +344,15 @@ async def bulk_publish_contracts(
                         # Deprecate old contract
                         current_contract.status = ContractStatus.DEPRECATED
 
+                        # Carry forward field metadata from previous version
+                        new_fields = _extract_field_paths(item.schema_def)
+                        prev_descs = current_contract.field_descriptions or {}
+                        prev_tags = current_contract.field_tags or {}
+                        merged_descs = {p: d for p, d in prev_descs.items() if p in new_fields}
+                        merged_ftags = {p: t for p, t in prev_tags.items() if p in new_fields}
+                        merged_descs.update(item.field_descriptions)
+                        merged_ftags.update(item.field_tags)
+
                         # Publish new contract
                         new_contract = ContractDB(
                             asset_id=item.asset_id,
@@ -326,6 +360,8 @@ async def bulk_publish_contracts(
                             schema_def=item.schema_def,
                             compatibility_mode=compat_mode,
                             guarantees=item.guarantees,
+                            field_descriptions=merged_descs,
+                            field_tags=merged_ftags,
                             status=ContractStatus.ACTIVE,
                             published_by=published_by,
                             published_by_user_id=published_by_user_id,
@@ -567,6 +603,8 @@ class ContractPublishingWorkflow:
         guarantees: dict[str, Any] | None = None,
         force: bool = False,
         audit_warning: str | None = None,
+        field_descriptions: dict[str, str] | None = None,
+        field_tags: dict[str, list[str]] | None = None,
     ):
         self.session = session
         self.asset = asset
@@ -579,6 +617,8 @@ class ContractPublishingWorkflow:
         self.guarantees = guarantees
         self.force = force
         self.audit_warning = audit_warning
+        self.field_descriptions = field_descriptions or {}
+        self.field_tags = field_tags or {}
 
         # Schema handling: convert Avro to JSON Schema for storage
         self.schema_to_store = schema_def
@@ -651,12 +691,44 @@ class ContractPublishingWorkflow:
         )
         return result.scalar_one_or_none()
 
+    def _resolve_field_metadata(self) -> tuple[dict[str, str], dict[str, list[str]]]:
+        """Resolve field metadata by carrying forward from previous version.
+
+        For fields that still exist in the new schema, carry forward descriptions
+        and tags from the previous contract version. Drop metadata for fields that
+        were removed. Explicitly provided metadata takes precedence.
+        """
+        if not self.current_contract:
+            return self.field_descriptions, self.field_tags
+
+        # Determine which field paths exist in the new schema
+        new_fields = _extract_field_paths(self.schema_to_store)
+
+        # Start with previous metadata, filtered to fields that still exist
+        prev_descriptions: dict[str, str] = self.current_contract.field_descriptions or {}
+        prev_tags: dict[str, list[str]] = self.current_contract.field_tags or {}
+
+        merged_descriptions: dict[str, str] = {
+            path: desc for path, desc in prev_descriptions.items() if path in new_fields
+        }
+        merged_tags: dict[str, list[str]] = {
+            path: tags for path, tags in prev_tags.items() if path in new_fields
+        }
+
+        # Explicitly provided metadata overrides carried-forward values
+        merged_descriptions.update(self.field_descriptions)
+        merged_tags.update(self.field_tags)
+
+        return merged_descriptions, merged_tags
+
     async def _publish_contract(self) -> ContractDB:
         """Create and save the new contract.
 
         Handles deprecation of the previous contract within the same savepoint
         and logs both deprecation and guarantee changes to the audit trail.
         """
+        resolved_descriptions, resolved_tags = self._resolve_field_metadata()
+
         async with self.session.begin_nested():
             db_contract = ContractDB(
                 asset_id=self.asset.id,
@@ -665,6 +737,8 @@ class ContractPublishingWorkflow:
                 schema_format=self.schema_format,
                 compatibility_mode=self.compatibility_mode,
                 guarantees=self.guarantees,
+                field_descriptions=resolved_descriptions,
+                field_tags=resolved_tags,
                 published_by=self.published_by,
                 published_by_user_id=self.published_by_user_id,
             )

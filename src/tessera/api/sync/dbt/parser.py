@@ -63,6 +63,51 @@ def extract_tessera_meta(node: dict[str, Any]) -> TesseraMetaConfig:
     )
 
 
+def extract_field_metadata_from_columns(
+    columns: dict[str, Any],
+) -> tuple[dict[str, str], dict[str, list[str]]]:
+    """Extract field descriptions and tags from dbt column definitions.
+
+    Args:
+        columns: dbt columns dict (col_name -> col_info)
+
+    Returns:
+        Tuple of (field_descriptions, field_tags) using JSONPath keys.
+    """
+    field_descriptions: dict[str, str] = {}
+    field_tags: dict[str, list[str]] = {}
+
+    for col_name, col_info in columns.items():
+        path = f"$.properties.{col_name}"
+
+        description = col_info.get("description", "")
+        if description:
+            field_descriptions[path] = description
+
+        # Tags from column meta.tags or meta.tessera.tags
+        meta = col_info.get("meta", {})
+        col_tags = meta.get("tags", [])
+        if not col_tags:
+            tessera_meta = meta.get("tessera", {})
+            col_tags = tessera_meta.get("tags", [])
+        if col_tags:
+            field_tags[path] = col_tags
+
+    return field_descriptions, field_tags
+
+
+def extract_asset_tags_from_node(node: dict[str, Any]) -> list[str]:
+    """Extract asset-level tags from a dbt node.
+
+    Looks at node.tags first, then falls back to meta.tags.
+    """
+    tags: list[str] = node.get("tags", [])
+    if tags:
+        return tags
+    meta: dict[str, Any] = node.get("meta", {})
+    return list(meta.get("tags", []))
+
+
 def extract_guarantees_from_tests(
     node_id: str, node: dict[str, Any], all_nodes: dict[str, Any]
 ) -> dict[str, Any] | None:

@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.api.sync.dbt.mapper import dbt_columns_to_json_schema
+from tessera.api.sync.dbt.parser import extract_field_metadata_from_columns
 from tessera.api.sync.helpers import resolve_team_by_name
 from tessera.db import AssetDB, ContractDB, ProposalDB, RegistrationDB, TeamDB
 from tessera.models.enums import CompatibilityMode, ContractStatus, RegistrationStatus
@@ -77,6 +78,7 @@ async def auto_publish_contracts(
     for asset, columns, asset_guarantees, compat_mode_str in new_assets:
         try:
             schema_def = dbt_columns_to_json_schema(columns)
+            f_descs, f_tags = extract_field_metadata_from_columns(columns)
             compat_mode = _parse_compat_mode(compat_mode_str, asset.fqn, warnings)
             contracts_to_publish.append(
                 ContractToPublish(
@@ -84,6 +86,8 @@ async def auto_publish_contracts(
                     schema_def=schema_def,
                     compatibility_mode=compat_mode,
                     guarantees=asset_guarantees,
+                    field_descriptions=f_descs,
+                    field_tags=f_tags,
                 )
             )
             asset_publishers[asset.id] = (asset.owner_team_id, asset.owner_user_id)
@@ -93,6 +97,7 @@ async def auto_publish_contracts(
     for asset, columns, asset_guarantees, compat_mode_str, _existing in existing_assets:
         try:
             schema_def = dbt_columns_to_json_schema(columns)
+            f_descs, f_tags = extract_field_metadata_from_columns(columns)
             compat_mode = _parse_compat_mode(compat_mode_str, asset.fqn, warnings=None)
             contracts_to_publish.append(
                 ContractToPublish(
@@ -100,6 +105,8 @@ async def auto_publish_contracts(
                     schema_def=schema_def,
                     compatibility_mode=compat_mode,
                     guarantees=asset_guarantees,
+                    field_descriptions=f_descs,
+                    field_tags=f_tags,
                 )
             )
             asset_publishers[asset.id] = (asset.owner_team_id, asset.owner_user_id)

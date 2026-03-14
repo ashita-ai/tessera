@@ -414,6 +414,35 @@ def generate_fqn(api_title: str, path: str, method: str) -> str:
     return f"api.{normalized_title}.{method_lower}_{normalized_path}"
 
 
+def _extract_field_descriptions(
+    schema: dict[str, Any],
+    prefix: str = "$.properties",
+) -> dict[str, str]:
+    """Extract property descriptions from a JSON Schema.
+
+    Recurses into nested objects to discover all field descriptions.
+    """
+    descriptions: dict[str, str] = {}
+    if not isinstance(schema, dict):
+        return descriptions
+
+    properties = schema.get("properties", {})
+    for prop_name, prop_schema in properties.items():
+        path = f"{prefix}.{prop_name}"
+        if isinstance(prop_schema, dict):
+            desc = prop_schema.get("description")
+            if desc:
+                descriptions[path] = desc
+            # Recurse into nested objects
+            if prop_schema.get("type") == "object" and "properties" in prop_schema:
+                descriptions.update(_extract_field_descriptions(prop_schema, path + ".properties"))
+            if "items" in prop_schema and isinstance(prop_schema["items"], dict):
+                descriptions.update(
+                    _extract_field_descriptions(prop_schema["items"], path + ".items.properties")
+                )
+    return descriptions
+
+
 class AssetFromOpenAPI(BaseModel):
     """Asset to be created from an OpenAPI endpoint."""
 
@@ -422,6 +451,9 @@ class AssetFromOpenAPI(BaseModel):
     metadata: dict[str, Any]
     schema_def: dict[str, Any]
     guarantees: dict[str, Any] | None = None
+    field_descriptions: dict[str, str] = {}
+    tags: list[str] = []
+    description: str | None = None
 
 
 def endpoints_to_assets(
@@ -455,6 +487,12 @@ def endpoints_to_assets(
             }
         }
 
+        # Extract field descriptions from the combined schema properties
+        field_descs = _extract_field_descriptions(endpoint.combined_schema)
+
+        # Asset description: prefer summary, fall back to operation description
+        asset_description = endpoint.summary or endpoint.description
+
         assets.append(
             AssetFromOpenAPI(
                 fqn=fqn,
@@ -462,6 +500,9 @@ def endpoints_to_assets(
                 metadata=metadata,
                 schema_def=endpoint.combined_schema,
                 guarantees=endpoint.guarantees,
+                field_descriptions=field_descs,
+                tags=endpoint.tags,
+                description=asset_description,
             )
         )
 

@@ -14,6 +14,7 @@ from tessera.api.sync.dbt.mapper import map_dbt_resource_type
 from tessera.api.sync.dbt.models import DbtManifestUploadRequest
 from tessera.api.sync.dbt.parser import (
     TesseraMetaConfig,
+    extract_asset_tags_from_node,
     extract_guarantees_from_tests,
     extract_tessera_meta,
 )
@@ -302,6 +303,7 @@ async def upload_dbt_manifest(
             existing.resource_type = (
                 ResourceType.SOURCE if is_source else map_dbt_resource_type(resource_type)
             )
+            existing.tags = extract_asset_tags_from_node(node)
             if resolved_user_id:
                 existing.owner_user_id = resolved_user_id
             assets_updated += 1
@@ -341,6 +343,7 @@ async def upload_dbt_manifest(
                     )
                 )
         else:
+            asset_tags = extract_asset_tags_from_node(node)
             new_asset = AssetDB(
                 fqn=fqn,
                 owner_team_id=resolved_team_id,
@@ -349,6 +352,7 @@ async def upload_dbt_manifest(
                     ResourceType.SOURCE if is_source else map_dbt_resource_type(resource_type)
                 ),
                 metadata_=metadata,
+                tags=asset_tags,
             )
             session.add(new_asset)
             assets_created += 1
