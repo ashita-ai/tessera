@@ -8,7 +8,6 @@ proposed schema change were published.
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
@@ -173,15 +172,11 @@ async def compute_impact_preview(
         breaking_changes=[c.to_dict() for c in breaking],
     )
 
-    # Steps 4 & 5: Load registrations and run lineage traversal concurrently
-    registrations_task = _get_registrations(session, contract.id)
-    affected_parties_task = get_affected_parties(
+    # Steps 4 & 5: Load registrations and run lineage traversal sequentially
+    # (AsyncSession is not safe for concurrent use via asyncio.gather)
+    registrations = await _get_registrations(session, contract.id)
+    affected_teams, affected_assets = await get_affected_parties(
         session, asset.id, exclude_team_id=asset.owner_team_id
-    )
-
-    registrations, (affected_teams, affected_assets) = await asyncio.gather(
-        registrations_task,
-        affected_parties_task,
     )
 
     # Build affected consumers list

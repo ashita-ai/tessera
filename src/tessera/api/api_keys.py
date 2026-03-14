@@ -60,6 +60,7 @@ async def create_key(
             action=AuditAction.API_KEY_CREATED,
             actor_id=auth.team_id,
             payload=payload,
+            actor_type=auth.actor_type,
         )
 
         return api_key
@@ -144,6 +145,7 @@ async def revoke_key(
             "name": api_key.name,
             "team_id": str(api_key.team_id),
         },
+        actor_type=auth.actor_type,
     )
 
     return api_key

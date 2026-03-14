@@ -15,11 +15,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.api.auth import Auth, RequireRead
-from tessera.api.errors import BadRequestError, ErrorCode, NotFoundError
+from tessera.api.errors import BadRequestError, ErrorCode, ForbiddenError, NotFoundError
 from tessera.api.rate_limit import limit_expensive, limit_read
 from tessera.db.database import get_session
 from tessera.db.models import AssetDB, ContractDB
-from tessera.models.enums import CompatibilityMode, ContractStatus
+from tessera.models.enums import APIKeyScope, CompatibilityMode, ContractStatus
 from tessera.services.impact_preview import compute_impact_preview
 from tessera.services.schema_validator import validate_json_schema
 
@@ -93,6 +93,13 @@ async def impact_preview(
     if not asset:
         raise NotFoundError(ErrorCode.ASSET_NOT_FOUND, "Asset not found")
 
+    # Authorization: must own the asset or be admin
+    if asset.owner_team_id != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):
+        raise ForbiddenError(
+            "Cannot preview impact for assets owned by other teams",
+            code=ErrorCode.UNAUTHORIZED_TEAM,
+        )
+
     # Load current active contract
     contract_result = await session.execute(
         select(ContractDB)
@@ -107,16 +114,6 @@ async def impact_preview(
             ErrorCode.CONTRACT_NOT_FOUND,
             "Asset has no published contracts",
         )
-
-    # Validate compatibility mode override
-    if body.compatibility_mode_override is not None:
-        try:
-            CompatibilityMode(body.compatibility_mode_override)
-        except ValueError:
-            raise BadRequestError(
-                f"Unknown compatibility_mode_override: {body.compatibility_mode_override}",
-                code=ErrorCode.VALIDATION_ERROR,
-            )
 
     # Compute impact preview
     result = await compute_impact_preview(

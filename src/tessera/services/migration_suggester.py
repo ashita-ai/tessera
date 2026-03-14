@@ -254,11 +254,15 @@ def _apply_enum_values_removed(
     if not removed_values:
         return None
 
-    # Re-add removed values
-    combined_enum = list(field_def.get("enum", [])) + sorted(str(v) for v in removed_values)
+    # Re-add removed values (preserve original types — JSON Schema enums can be any type)
+    combined_enum = list(field_def.get("enum", [])) + sorted(
+        removed_values, key=lambda v: (type(v).__name__, str(v))
+    )
     field_def["enum"] = combined_enum
 
-    deprecated_str = ", ".join(repr(v) for v in sorted(str(v) for v in removed_values))
+    deprecated_str = ", ".join(
+        repr(v) for v in sorted(removed_values, key=lambda v: (type(v).__name__, str(v)))
+    )
     existing_desc = field_def.get("description", "")
     field_def["description"] = (f"{existing_desc} [Deprecated values: {deprecated_str}]").strip()
 
