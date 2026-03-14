@@ -138,12 +138,17 @@ async def preflight_check(
             message=f"No asset found with FQN '{fqn}'",
         )
 
-    # Get active contract (most recent)
+    # Get active contract, falling back to deprecated if no active version exists.
+    # This lets consumers see metadata (with a caveat) instead of a bare 404.
     contract_result = await session.execute(
         select(ContractDB)
         .where(ContractDB.asset_id == asset.id)
-        .where(ContractDB.status == ContractStatus.ACTIVE)
-        .order_by(ContractDB.published_at.desc())
+        .where(ContractDB.status.in_([ContractStatus.ACTIVE, ContractStatus.DEPRECATED]))
+        .order_by(
+            # ACTIVE sorts before DEPRECATED so we always prefer it
+            (ContractDB.status == ContractStatus.DEPRECATED).asc(),
+            ContractDB.published_at.desc(),
+        )
         .limit(1)
     )
     contract = contract_result.scalar_one_or_none()

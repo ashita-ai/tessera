@@ -412,6 +412,90 @@ class TestPreflightAuditEvents:
         assert len(events) == 0
 
 
+class TestPreflightDeprecatedFallback:
+    """Tests for preflight fallback to deprecated contracts."""
+
+    @pytest.mark.asyncio
+    async def test_preflight_returns_deprecated_contract_with_caveat(
+        self,
+        session: AsyncSession,
+        client: AsyncClient,
+        team: TeamDB,
+    ):
+        """When only a deprecated contract exists, return it with a deprecation caveat."""
+        asset = AssetDB(
+            fqn="warehouse.legacy.old_table",
+            owner_team_id=team.id,
+            metadata_={},
+        )
+        session.add(asset)
+        await session.flush()
+
+        contract = ContractDB(
+            asset_id=asset.id,
+            version="1.0.0",
+            schema_def={"type": "object", "properties": {"id": {"type": "string"}}},
+            schema_format=SchemaFormat.JSON_SCHEMA,
+            compatibility_mode=CompatibilityMode.BACKWARD,
+            guarantees=None,
+            status=ContractStatus.DEPRECATED,
+            published_by=team.id,
+        )
+        session.add(contract)
+        await session.flush()
+
+        response = await client.get("/api/v1/assets/warehouse.legacy.old_table/preflight")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["contract_version"] == "1.0.0"
+        assert any("deprecated" in c.lower() for c in data["caveats"])
+
+    @pytest.mark.asyncio
+    async def test_preflight_prefers_active_over_deprecated(
+        self,
+        session: AsyncSession,
+        client: AsyncClient,
+        team: TeamDB,
+    ):
+        """When both active and deprecated contracts exist, return the active one."""
+        asset = AssetDB(
+            fqn="warehouse.mixed.both_statuses",
+            owner_team_id=team.id,
+            metadata_={},
+        )
+        session.add(asset)
+        await session.flush()
+
+        deprecated = ContractDB(
+            asset_id=asset.id,
+            version="1.0.0",
+            schema_def={"type": "object", "properties": {"id": {"type": "string"}}},
+            schema_format=SchemaFormat.JSON_SCHEMA,
+            compatibility_mode=CompatibilityMode.BACKWARD,
+            guarantees=None,
+            status=ContractStatus.DEPRECATED,
+            published_by=team.id,
+        )
+        active = ContractDB(
+            asset_id=asset.id,
+            version="2.0.0",
+            schema_def={"type": "object", "properties": {"id": {"type": "string"}}},
+            schema_format=SchemaFormat.JSON_SCHEMA,
+            compatibility_mode=CompatibilityMode.BACKWARD,
+            guarantees=None,
+            status=ContractStatus.ACTIVE,
+            published_by=team.id,
+        )
+        session.add_all([deprecated, active])
+        await session.flush()
+
+        response = await client.get("/api/v1/assets/warehouse.mixed.both_statuses/preflight")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["contract_version"] == "2.0.0"
+        assert not any("deprecated" in c.lower() for c in data["caveats"])
+
+
 class TestPreflightNoGuarantees:
     """Tests for preflight when contract has no guarantees or freshness SLA."""
 
