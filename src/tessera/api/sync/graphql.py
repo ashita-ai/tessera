@@ -245,6 +245,7 @@ async def import_graphql(
                         schema_def=asset_def.schema_def,
                         compatibility_mode=CompatibilityMode.BACKWARD,
                         guarantees=merged_guarantees,
+                        field_descriptions=asset_def.field_descriptions,
                         published_by=import_req.owner_team_id,
                     )
                     session.add(new_contract)

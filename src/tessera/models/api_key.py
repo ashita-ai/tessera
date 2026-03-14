@@ -23,13 +23,12 @@ class APIKeyCreate(BaseModel):
     agent_name: str | None = Field(
         None,
         max_length=255,
-        description="Human-readable agent name (e.g., 'dbt-codegen-agent'). "
-        "When set, this key is treated as an agent key.",
+        description="Agent name (set to create an agent key, e.g. 'dbt-codegen-agent')",
     )
     agent_framework: str | None = Field(
         None,
         max_length=100,
-        description="Framework identifier (e.g., 'claude-code', 'cursor', 'langchain')",
+        description="Agent framework identifier (e.g. 'claude-code', 'cursor', 'langchain')",
     )
 
     @field_validator("name")
@@ -73,10 +72,11 @@ class APIKeyCreated(BaseModel):
     name: str
     team_id: UUID
     scopes: list[APIKeyScope]
-    created_at: datetime
-    expires_at: datetime | None = None
     agent_name: str | None = None
     agent_framework: str | None = None
+    is_agent: bool = False
+    created_at: datetime
+    expires_at: datetime | None = None
 
 
 class APIKey(BaseModel):
@@ -89,12 +89,13 @@ class APIKey(BaseModel):
     name: str
     team_id: UUID
     scopes: list[APIKeyScope]
+    agent_name: str | None = None
+    agent_framework: str | None = None
+    is_agent: bool = False
     created_at: datetime
     expires_at: datetime | None = None
     last_used_at: datetime | None = None
     revoked_at: datetime | None = None
-    agent_name: str | None = None
-    agent_framework: str | None = None
 
     @property
     def is_active(self) -> bool:
@@ -104,11 +105,6 @@ class APIKey(BaseModel):
         if self.expires_at is not None:
             return datetime.now(self.expires_at.tzinfo) < self.expires_at
         return True
-
-    @property
-    def is_agent(self) -> bool:
-        """Check if this is an agent key (agent_name is set)."""
-        return self.agent_name is not None
 
 
 class APIKeyList(BaseModel):

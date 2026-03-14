@@ -27,7 +27,7 @@ class AuditEventResponse(BaseModel):
     entity_id: UUID
     action: str
     actor_id: UUID | None
-    actor_type: str
+    actor_type: str = "human"
     payload: dict[str, Any]
     occurred_at: datetime
 

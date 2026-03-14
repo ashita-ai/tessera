@@ -116,22 +116,22 @@ class AuthContext:
 
     @property
     def is_agent(self) -> bool:
-        """Whether this request is from an agent key."""
-        return self.api_key.agent_name is not None
+        """Whether the authenticated key is an agent key."""
+        return self.api_key.is_agent
 
     @property
     def agent_name(self) -> str | None:
-        """Agent name from the API key, if this is an agent key."""
+        """The agent name, if this is an agent key."""
         return self.api_key.agent_name
 
     @property
     def agent_framework(self) -> str | None:
-        """Agent framework from the API key, if this is an agent key."""
+        """The agent framework, if this is an agent key."""
         return self.api_key.agent_framework
 
     @property
     def actor_type(self) -> str:
-        """Return 'agent' or 'human' based on the API key."""
+        """'agent' if this is an agent key, 'human' otherwise."""
         return "agent" if self.is_agent else "human"
 
     def has_scope(self, scope: APIKeyScope) -> bool:

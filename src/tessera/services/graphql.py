@@ -385,6 +385,8 @@ class AssetFromGraphQL(BaseModel):
     metadata: dict[str, Any]
     schema_def: dict[str, Any]
     guarantees: dict[str, Any] | None = None
+    field_descriptions: dict[str, str] = {}
+    description: str | None = None
 
 
 def operations_to_assets(
@@ -421,6 +423,14 @@ def operations_to_assets(
             }
         }
 
+        # Extract field descriptions from argument descriptions
+        field_descs: dict[str, str] = {}
+        for arg_info in op.args:
+            arg_name = arg_info.get("name")
+            arg_desc = arg_info.get("description")
+            if arg_name and arg_desc:
+                field_descs[f"$.properties.arguments.properties.{arg_name}"] = arg_desc
+
         assets.append(
             AssetFromGraphQL(
                 fqn=fqn,
@@ -428,6 +438,8 @@ def operations_to_assets(
                 metadata=metadata,
                 schema_def=op.combined_schema,
                 guarantees=op.guarantees,
+                field_descriptions=field_descs,
+                description=op.description,
             )
         )
 

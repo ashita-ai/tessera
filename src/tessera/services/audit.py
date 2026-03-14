@@ -101,7 +101,7 @@ async def log_event(
         action: The action that was performed
         actor_id: ID of the team that performed the action (optional)
         payload: Additional data about the event (optional)
-        actor_type: Whether the actor is "human" or "agent"
+        actor_type: "human" or "agent" — derived from the API key
 
     Returns:
         The created audit event
