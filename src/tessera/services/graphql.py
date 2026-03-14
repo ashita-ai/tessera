@@ -377,29 +377,6 @@ def generate_fqn(schema_name: str, operation_name: str, operation_type: str) -> 
     return f"graphql.{normalized_name}.{operation_type}_{normalized_op}"
 
 
-def _extract_field_descriptions_from_introspection(
-    type_def: dict[str, Any] | None,
-    types_map: dict[str, dict[str, Any]],
-    prefix: str = "$.properties",
-    depth: int = 0,
-) -> dict[str, str]:
-    """Extract field descriptions from GraphQL type introspection."""
-    descriptions: dict[str, str] = {}
-    if not type_def or depth > 5:
-        return descriptions
-
-    fields = type_def.get("fields") or type_def.get("inputFields") or []
-    for field in fields:
-        name = field.get("name")
-        if not name:
-            continue
-        path = f"{prefix}.{name}"
-        desc = field.get("description")
-        if desc:
-            descriptions[path] = desc
-    return descriptions
-
-
 class AssetFromGraphQL(BaseModel):
     """Asset to be created from a GraphQL operation."""
 

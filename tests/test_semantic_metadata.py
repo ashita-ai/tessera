@@ -716,3 +716,112 @@ class TestGraphQLSyncMetadata:
             contract["field_descriptions"]["$.properties.arguments.properties.id"]
             == "The user's unique identifier"
         )
+
+
+@pytest.mark.asyncio
+class TestSemanticMetadataErrorCases:
+    """Test error cases for semantic metadata inputs."""
+
+    async def test_create_asset_with_non_string_tags_rejected(self, client: AsyncClient) -> None:
+        """Tags must be a list of strings."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "err-tag-type-team"})
+        team_id = team_resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/assets",
+            json={
+                "fqn": "db.err.non_string_tags",
+                "owner_team_id": team_id,
+                "tags": [123, True],
+            },
+        )
+        assert resp.status_code == 422
+
+    async def test_create_asset_with_tags_wrong_type(self, client: AsyncClient) -> None:
+        """Tags must be a list, not a string."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "err-tag-str-team"})
+        team_id = team_resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/assets",
+            json={
+                "fqn": "db.err.string_tags",
+                "owner_team_id": team_id,
+                "tags": "not-a-list",
+            },
+        )
+        assert resp.status_code == 422
+
+    async def test_publish_field_descriptions_wrong_type(self, client: AsyncClient) -> None:
+        """field_descriptions must be a dict of str->str, not a list."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "err-desc-team"})
+        team_id = team_resp.json()["id"]
+
+        asset_resp = await client.post(
+            "/api/v1/assets",
+            json={
+                "fqn": "db.err.bad_descs",
+                "owner_team_id": team_id,
+            },
+        )
+        asset_id = asset_resp.json()["id"]
+
+        resp = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts",
+            params={"published_by": team_id},
+            json={
+                "schema": {
+                    "type": "object",
+                    "properties": {"id": {"type": "integer"}},
+                },
+                "field_descriptions": ["not", "a", "dict"],
+            },
+        )
+        assert resp.status_code == 422
+
+    async def test_publish_field_tags_wrong_value_type(self, client: AsyncClient) -> None:
+        """field_tags values must be lists of strings, not bare strings."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "err-ftags-team"})
+        team_id = team_resp.json()["id"]
+
+        asset_resp = await client.post(
+            "/api/v1/assets",
+            json={
+                "fqn": "db.err.bad_field_tags",
+                "owner_team_id": team_id,
+            },
+        )
+        asset_id = asset_resp.json()["id"]
+
+        resp = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts",
+            params={"published_by": team_id},
+            json={
+                "schema": {
+                    "type": "object",
+                    "properties": {"id": {"type": "integer"}},
+                },
+                "field_tags": {"$.properties.id": "not-a-list"},
+            },
+        )
+        assert resp.status_code == 422
+
+    async def test_update_asset_tags_wrong_type(self, client: AsyncClient) -> None:
+        """PATCH with tags as a string should be rejected."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "err-patch-team"})
+        team_id = team_resp.json()["id"]
+
+        asset_resp = await client.post(
+            "/api/v1/assets",
+            json={
+                "fqn": "db.err.patch_bad_tags",
+                "owner_team_id": team_id,
+            },
+        )
+        asset_id = asset_resp.json()["id"]
+
+        resp = await client.patch(
+            f"/api/v1/assets/{asset_id}",
+            json={"tags": "not-a-list"},
+        )
+        assert resp.status_code == 422
