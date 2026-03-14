@@ -144,7 +144,7 @@ def _apply_rule_required_added(
     if isinstance(prop_def, dict):
         field_type = prop_def.get("type")
         if isinstance(field_type, str) and field_type in _TYPE_DEFAULTS:
-            prop_def["default"] = _TYPE_DEFAULTS[field_type]
+            prop_def["default"] = copy.deepcopy(_TYPE_DEFAULTS[field_type])
             confidence = "high"
 
     return schema, f"Made '{field_name}' optional with default", confidence
@@ -225,19 +225,20 @@ def _apply_rule_constraint_tightened(
     change: BreakingChange,
     old_schema: dict[str, Any],
 ) -> tuple[dict[str, Any], str] | None:
-    """Rule 6: Keep the old (looser) constraint."""
-    container, field_name = _get_property_at_path(schema, change.path)
-    if container is None or field_name not in container:
-        return None
+    """Rule 6: Keep the old (looser) constraint.
 
-    old_container, _ = _get_property_at_path(old_schema, change.path)
-    if old_container is None or field_name not in old_container:
-        return None
+    schema_diff produces paths like "properties.name.maxLength" where the
+    last segment is the specific constraint key. We strip that suffix to
+    navigate to the property definition, then revert only the identified
+    constraint.
+    """
+    # Extract the constraint key from the path's last segment.
+    # schema_diff paths: "properties.name.maxLength" → constraint_key="maxLength",
+    # property path = "properties.name"
+    path_segments = change.path.split(".")
+    constraint_key = path_segments[-1]
 
-    new_prop = container[field_name]
-    old_prop = old_container[field_name]
-
-    # Constraint keywords in JSON Schema
+    # Recognized JSON Schema constraint keywords
     constraint_keys = {
         "minimum",
         "maximum",
@@ -253,15 +254,49 @@ def _apply_rule_constraint_tightened(
         "multipleOf",
     }
 
+    # If the last segment is a known constraint, navigate to the property;
+    # otherwise fall back to treating the full path as the property path
+    # (for forward compatibility with callers that pass property-level paths).
+    if constraint_key in constraint_keys:
+        property_path = ".".join(path_segments[:-1])
+    else:
+        property_path = change.path
+        constraint_key = ""
+
+    container, field_name = _get_property_at_path(schema, property_path)
+    if container is None or field_name not in container:
+        return None
+
+    old_container, _ = _get_property_at_path(old_schema, property_path)
+    if old_container is None or field_name not in old_container:
+        return None
+
+    new_prop = container[field_name]
+    old_prop = old_container[field_name]
+
+    if not isinstance(new_prop, dict) or not isinstance(old_prop, dict):
+        return None
+
     changes_applied: list[str] = []
-    for key in constraint_keys:
-        if key in old_prop and (key not in new_prop or old_prop[key] != new_prop[key]):
-            new_prop[key] = old_prop[key]
-            changes_applied.append(f"restored {key}={old_prop[key]}")
-        elif key in new_prop and key not in old_prop:
+
+    if constraint_key:
+        # Revert only the specific tightened constraint
+        if constraint_key in old_prop:
+            new_prop[constraint_key] = old_prop[constraint_key]
+            changes_applied.append(f"restored {constraint_key}={old_prop[constraint_key]}")
+        elif constraint_key in new_prop:
             # New constraint that didn't exist before — remove it
-            del new_prop[key]
-            changes_applied.append(f"removed new {key}")
+            del new_prop[constraint_key]
+            changes_applied.append(f"removed new {constraint_key}")
+    else:
+        # Fallback: no specific constraint identified, revert all differences
+        for key in constraint_keys:
+            if key in old_prop and (key not in new_prop or old_prop[key] != new_prop[key]):
+                new_prop[key] = old_prop[key]
+                changes_applied.append(f"restored {key}={old_prop[key]}")
+            elif key in new_prop and key not in old_prop:
+                del new_prop[key]
+                changes_applied.append(f"removed new {key}")
 
     if not changes_applied:
         return None

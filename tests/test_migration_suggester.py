@@ -294,7 +294,7 @@ class TestConstraintTightened:
         changes = [
             BreakingChange(
                 kind=ChangeKind.CONSTRAINT_TIGHTENED,
-                path="properties.name",
+                path="properties.name.maxLength",
                 message="maxLength reduced from 100 to 50",
                 old_value=100,
                 new_value=50,
@@ -314,7 +314,7 @@ class TestConstraintTightened:
         changes = [
             BreakingChange(
                 kind=ChangeKind.CONSTRAINT_TIGHTENED,
-                path="properties.age",
+                path="properties.age.minimum",
                 message="minimum increased from 0 to 18",
                 old_value=0,
                 new_value=18,
@@ -331,7 +331,7 @@ class TestConstraintTightened:
         changes = [
             BreakingChange(
                 kind=ChangeKind.CONSTRAINT_TIGHTENED,
-                path="properties.name",
+                path="properties.name.maxLength",
                 message="maxLength constraint added",
                 old_value=None,
                 new_value=50,
@@ -340,6 +340,28 @@ class TestConstraintTightened:
 
         result = suggest_migrations(old, new, changes, CompatibilityMode.BACKWARD)
         assert "maxLength" not in result[0].suggested_schema["properties"]["name"]
+
+    def test_only_tightened_constraint_reverted(self) -> None:
+        """Only the specific tightened constraint should be reverted, not others."""
+        old = _obj_schema(name={"type": "string", "minLength": 5, "maxLength": 100})
+        new = _obj_schema(name={"type": "string", "minLength": 3, "maxLength": 50})
+        # Only maxLength tightening is breaking; minLength relaxation is fine
+        changes = [
+            BreakingChange(
+                kind=ChangeKind.CONSTRAINT_TIGHTENED,
+                path="properties.name.maxLength",
+                message="maxLength reduced from 100 to 50",
+                old_value=100,
+                new_value=50,
+            )
+        ]
+
+        result = suggest_migrations(old, new, changes, CompatibilityMode.BACKWARD)
+        suggested_name = result[0].suggested_schema["properties"]["name"]
+        # maxLength should be reverted to old value
+        assert suggested_name["maxLength"] == 100
+        # minLength should remain at the new (relaxed) value, NOT reverted
+        assert suggested_name["minLength"] == 3
 
 
 # ---------------------------------------------------------------------------
@@ -407,7 +429,7 @@ class TestComposition:
             ),
             BreakingChange(
                 kind=ChangeKind.CONSTRAINT_TIGHTENED,
-                path="properties.name",
+                path="properties.name.maxLength",
                 message="maxLength reduced from 100 to 50",
                 old_value=100,
                 new_value=50,
