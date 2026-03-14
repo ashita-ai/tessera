@@ -144,6 +144,7 @@ class AssetDB(Base):
     )
     semver_mode: Mapped[SemverMode] = mapped_column(Enum(SemverMode), default=SemverMode.AUTO)
     metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
+    tags: Mapped[list[str]] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, onupdate=_utcnow
@@ -183,6 +184,8 @@ class ContractDB(Base):
         Enum(CompatibilityMode), default=CompatibilityMode.BACKWARD
     )
     guarantees: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    field_descriptions: Mapped[dict[str, str]] = mapped_column(JSON, default=dict)
+    field_tags: Mapped[dict[str, list[str]]] = mapped_column(JSON, default=dict)
     status: Mapped[ContractStatus] = mapped_column(
         Enum(ContractStatus), default=ContractStatus.ACTIVE, index=True
     )

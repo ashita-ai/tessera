@@ -377,6 +377,29 @@ def generate_fqn(schema_name: str, operation_name: str, operation_type: str) -> 
     return f"graphql.{normalized_name}.{operation_type}_{normalized_op}"
 
 
+def _extract_field_descriptions_from_introspection(
+    type_def: dict[str, Any] | None,
+    types_map: dict[str, dict[str, Any]],
+    prefix: str = "$.properties",
+    depth: int = 0,
+) -> dict[str, str]:
+    """Extract field descriptions from GraphQL type introspection."""
+    descriptions: dict[str, str] = {}
+    if not type_def or depth > 5:
+        return descriptions
+
+    fields = type_def.get("fields") or type_def.get("inputFields") or []
+    for field in fields:
+        name = field.get("name")
+        if not name:
+            continue
+        path = f"{prefix}.{name}"
+        desc = field.get("description")
+        if desc:
+            descriptions[path] = desc
+    return descriptions
+
+
 class AssetFromGraphQL(BaseModel):
     """Asset to be created from a GraphQL operation."""
 
@@ -385,6 +408,8 @@ class AssetFromGraphQL(BaseModel):
     metadata: dict[str, Any]
     schema_def: dict[str, Any]
     guarantees: dict[str, Any] | None = None
+    field_descriptions: dict[str, str] = {}
+    description: str | None = None
 
 
 def operations_to_assets(
@@ -421,6 +446,14 @@ def operations_to_assets(
             }
         }
 
+        # Extract field descriptions from argument descriptions
+        field_descs: dict[str, str] = {}
+        for arg_info in op.args:
+            arg_name = arg_info.get("name")
+            arg_desc = arg_info.get("description")
+            if arg_name and arg_desc:
+                field_descs[f"$.properties.arguments.properties.{arg_name}"] = arg_desc
+
         assets.append(
             AssetFromGraphQL(
                 fqn=fqn,
@@ -428,6 +461,8 @@ def operations_to_assets(
                 metadata=metadata,
                 schema_def=op.combined_schema,
                 guarantees=op.guarantees,
+                field_descriptions=field_descs,
+                description=op.description,
             )
         )
 
