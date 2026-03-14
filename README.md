@@ -79,8 +79,8 @@ Force-approve is available for emergencies, but it's audit-logged.
 - **Write-Audit-Publish** - Optionally block publishing if data quality audits are failing
 - **Team-based ownership** - Assets belong to teams (survives personnel changes), with optional user-level stewardship
 - **Webhooks** - Signed delivery with SSRF protection, retry with backoff, delivery tracking
-- **API keys** - Scoped (read, write, admin), revocable, expiring
-- **Audit log** - Append-only history of every contract publish, proposal, acknowledgment, and force-approve
+- **API keys** - Scoped (read, write, admin), revocable, expiring. Supports agent identity (`agent_name`, `agent_framework`) with separate rate limit tiers for machine clients
+- **Audit log** - Append-only history of every contract publish, proposal, acknowledgment, and force-approve. Tracks whether each action was performed by a human or agent (`actor_type`)
 - **Web UI** - Browse assets, view contract history, manage teams
 
 ## Configuration
