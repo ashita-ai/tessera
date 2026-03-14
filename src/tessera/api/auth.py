@@ -88,6 +88,14 @@ async def _get_session_auth_context(
         return None
 
 
+def _set_agent_request_state(request: Request, auth_context: "AuthContext") -> None:
+    """Attach auth and agent metadata to request state."""
+    request.state.auth = auth_context
+    request.state.is_agent = auth_context.is_agent
+    request.state.agent_name = auth_context.agent_name
+    request.state.agent_framework = auth_context.agent_framework
+
+
 class AuthContext:
     """Authentication context containing the authenticated team and API key."""
 
@@ -105,6 +113,26 @@ class AuthContext:
     def team_id(self) -> UUID:
         """Get the authenticated team ID."""
         return self.team.id
+
+    @property
+    def is_agent(self) -> bool:
+        """Whether this request is from an agent key."""
+        return self.api_key.agent_name is not None
+
+    @property
+    def agent_name(self) -> str | None:
+        """Agent name from the API key, if this is an agent key."""
+        return self.api_key.agent_name
+
+    @property
+    def agent_framework(self) -> str | None:
+        """Agent framework from the API key, if this is an agent key."""
+        return self.api_key.agent_framework
+
+    @property
+    def actor_type(self) -> str:
+        """Return 'agent' or 'human' based on the API key."""
+        return "agent" if self.is_agent else "human"
 
     def has_scope(self, scope: APIKeyScope) -> bool:
         """
@@ -202,7 +230,7 @@ async def get_auth_context(
             api_key=mock_key,
             scopes=list(APIKeyScope),
         )
-        request.state.auth = auth_context
+        _set_agent_request_state(request, auth_context)
         return auth_context
 
     # Check for Authorization header
@@ -210,7 +238,7 @@ async def get_auth_context(
         # Try session-based authentication for web UI
         session_auth = await _get_session_auth_context(request, session)
         if session_auth:
-            request.state.auth = session_auth
+            _set_agent_request_state(request, session_auth)
             return session_auth
 
         raise UnauthorizedError(
@@ -254,7 +282,7 @@ async def get_auth_context(
             api_key=mock_key,
             scopes=list(APIKeyScope),
         )
-        request.state.auth = auth_context
+        _set_agent_request_state(request, auth_context)
         return auth_context
 
     # Validate the API key
@@ -274,7 +302,7 @@ async def get_auth_context(
         api_key=api_key_db,
         scopes=scopes,
     )
-    request.state.auth = auth_context
+    _set_agent_request_state(request, auth_context)
     return auth_context
 
 

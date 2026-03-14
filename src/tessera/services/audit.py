@@ -87,6 +87,7 @@ async def log_event(
     action: AuditAction,
     actor_id: UUID | None = None,
     payload: dict[str, Any] | None = None,
+    actor_type: str = "human",
 ) -> AuditEventDB:
     """Log an audit event.
 
@@ -97,6 +98,7 @@ async def log_event(
         action: The action that was performed
         actor_id: ID of the team that performed the action (optional)
         payload: Additional data about the event (optional)
+        actor_type: Whether the actor is "human" or "agent"
 
     Returns:
         The created audit event
@@ -106,6 +108,7 @@ async def log_event(
         entity_id=entity_id,
         action=str(action),
         actor_id=actor_id,
+        actor_type=actor_type,
         payload=payload or {},
         occurred_at=datetime.now(UTC),
     )

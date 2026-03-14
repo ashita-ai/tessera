@@ -20,6 +20,17 @@ class APIKeyCreate(BaseModel):
         description="Permission scopes for this key",
     )
     expires_at: datetime | None = Field(None, description="Optional expiration time")
+    agent_name: str | None = Field(
+        None,
+        max_length=255,
+        description="Human-readable agent name (e.g., 'dbt-codegen-agent'). "
+        "When set, this key is treated as an agent key.",
+    )
+    agent_framework: str | None = Field(
+        None,
+        max_length=100,
+        description="Framework identifier (e.g., 'claude-code', 'cursor', 'langchain')",
+    )
 
     @field_validator("name")
     @classmethod
@@ -28,6 +39,26 @@ class APIKeyCreate(BaseModel):
         v = v.strip()
         if not v:
             raise ValueError("API key name cannot be empty or whitespace only")
+        return v
+
+    @field_validator("agent_name")
+    @classmethod
+    def validate_agent_name(cls, v: str | None) -> str | None:
+        """Strip whitespace from agent name if provided."""
+        if v is not None:
+            v = v.strip()
+            if not v:
+                return None
+        return v
+
+    @field_validator("agent_framework")
+    @classmethod
+    def validate_agent_framework(cls, v: str | None) -> str | None:
+        """Strip whitespace from agent framework if provided."""
+        if v is not None:
+            v = v.strip()
+            if not v:
+                return None
         return v
 
 
@@ -44,6 +75,8 @@ class APIKeyCreated(BaseModel):
     scopes: list[APIKeyScope]
     created_at: datetime
     expires_at: datetime | None = None
+    agent_name: str | None = None
+    agent_framework: str | None = None
 
 
 class APIKey(BaseModel):
@@ -60,6 +93,8 @@ class APIKey(BaseModel):
     expires_at: datetime | None = None
     last_used_at: datetime | None = None
     revoked_at: datetime | None = None
+    agent_name: str | None = None
+    agent_framework: str | None = None
 
     @property
     def is_active(self) -> bool:
@@ -69,6 +104,11 @@ class APIKey(BaseModel):
         if self.expires_at is not None:
             return datetime.now(self.expires_at.tzinfo) < self.expires_at
         return True
+
+    @property
+    def is_agent(self) -> bool:
+        """Check if this is an agent key (agent_name is set)."""
+        return self.agent_name is not None
 
 
 class APIKeyList(BaseModel):

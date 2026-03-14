@@ -27,6 +27,7 @@ class AuditEventResponse(BaseModel):
     entity_id: UUID
     action: str
     actor_id: UUID | None
+    actor_type: str
     payload: dict[str, Any]
     occurred_at: datetime
 
@@ -48,6 +49,7 @@ def _to_response(event: AuditEventDB) -> AuditEventResponse:
         entity_id=event.entity_id,
         action=event.action,
         actor_id=event.actor_id,
+        actor_type=event.actor_type,
         payload=event.payload,
         occurred_at=event.occurred_at,
     )
@@ -62,6 +64,7 @@ async def list_audit_events(
     entity_id: UUID | None = Query(None, description="Filter by entity ID"),
     action: str | None = Query(None, description="Filter by action"),
     actor_id: UUID | None = Query(None, description="Filter by actor ID"),
+    actor_type: str | None = Query(None, description="Filter by actor type ('human' or 'agent')"),
     from_date: datetime | None = Query(None, alias="from", description="Start datetime"),
     to_date: datetime | None = Query(None, alias="to", description="End datetime"),
     params: PaginationParams = Depends(pagination_params),
@@ -89,6 +92,9 @@ async def list_audit_events(
     if actor_id:
         query = query.where(AuditEventDB.actor_id == actor_id)
         count_query = count_query.where(AuditEventDB.actor_id == actor_id)
+    if actor_type:
+        query = query.where(AuditEventDB.actor_type == actor_type)
+        count_query = count_query.where(AuditEventDB.actor_type == actor_type)
     if from_date:
         query = query.where(AuditEventDB.occurred_at >= from_date)
         count_query = count_query.where(AuditEventDB.occurred_at >= from_date)

@@ -377,6 +377,7 @@ class AuditEventDB(Base):
     entity_id: Mapped[UUID] = mapped_column(Uuid, nullable=False, index=True)
     action: Mapped[str] = mapped_column(String(100), nullable=False)
     actor_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True, index=True)
+    actor_type: Mapped[str] = mapped_column(String(20), nullable=False, server_default="human")
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     occurred_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, index=True
@@ -409,6 +410,8 @@ class APIKeyDB(Base):
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    agent_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    agent_framework: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     # Relationships
     team: Mapped["TeamDB"] = relationship()
