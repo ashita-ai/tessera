@@ -32,7 +32,14 @@ from tessera.db import (
     UserDB,
     get_session,
 )
-from tessera.models import Acknowledgment, AcknowledgmentCreate, Contract, ObjectionCreate, Proposal
+from tessera.models import (
+    Acknowledgment,
+    AcknowledgmentCreate,
+    Contract,
+    ObjectionCreate,
+    PendingProposalsResponse,
+    Proposal,
+)
 from tessera.models.enums import (
     AcknowledgmentResponseType,
     APIKeyScope,
@@ -344,6 +351,207 @@ async def list_proposals(
 
     return {
         "results": proposal_list,
+        "total": total,
+        "limit": params.limit,
+        "offset": params.offset,
+    }
+
+
+@router.get(
+    "/pending/{team_id}",
+    response_model=PendingProposalsResponse,
+    responses={k: _E[k] for k in (401, 403, 404)},
+)
+@limit_read
+async def get_pending_proposals(
+    request: Request,
+    auth: Auth,
+    team_id: UUID,
+    status: ProposalStatus = Query(
+        ProposalStatus.PENDING,
+        description="Proposal status to filter by (default: PENDING)",
+    ),
+    params: PaginationParams = Depends(pagination_params),
+    _: None = RequireRead,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Get proposals awaiting acknowledgment from a specific team.
+
+    Returns proposals where the given team has an active registration on the
+    asset's current contract but has not yet acknowledged the proposal.
+    Expired proposals are excluded.
+
+    Team-scoped: the API key's team must match team_id, or the key must
+    have ADMIN scope.
+
+    Requires read scope.
+    """
+    # Authorization: team-scoped access
+    if auth.team_id != team_id and not auth.has_scope(APIKeyScope.ADMIN):
+        raise ForbiddenError(
+            "API key team does not match the requested team_id",
+            code=ErrorCode.FORBIDDEN,
+        )
+
+    # Verify the team exists
+    team_result = await session.execute(
+        select(TeamDB).where(TeamDB.id == team_id).where(TeamDB.deleted_at.is_(None))
+    )
+    team = team_result.scalar_one_or_none()
+    if not team:
+        raise NotFoundError(ErrorCode.TEAM_NOT_FOUND, "Team not found")
+
+    empty = {
+        "pending_proposals": [],
+        "total": 0,
+        "limit": params.limit,
+        "offset": params.offset,
+    }
+
+    # Step 1: Find active registrations for this team
+    reg_result = await session.execute(
+        select(RegistrationDB.contract_id)
+        .where(RegistrationDB.consumer_team_id == team_id)
+        .where(RegistrationDB.status == RegistrationStatus.ACTIVE)
+        .where(RegistrationDB.deleted_at.is_(None))
+    )
+    registered_contract_ids = [r[0] for r in reg_result.all()]
+    if not registered_contract_ids:
+        return empty
+
+    # Step 2: Find assets that have these contracts as their active contract
+    asset_ids_result = await session.execute(
+        select(ContractDB.asset_id)
+        .where(ContractDB.id.in_(registered_contract_ids))
+        .where(ContractDB.status == ContractStatus.ACTIVE)
+    )
+    relevant_asset_ids = [a[0] for a in asset_ids_result.all()]
+    if not relevant_asset_ids:
+        return empty
+
+    # Step 3: Find proposals for these assets with the given status,
+    # excluding expired proposals
+    now = datetime.now(UTC)
+    proposal_query = (
+        select(ProposalDB.id)
+        .where(ProposalDB.asset_id.in_(relevant_asset_ids))
+        .where(ProposalDB.status == status)
+        .where((ProposalDB.expires_at.is_(None)) | (ProposalDB.expires_at > now))
+    )
+    proposals_result = await session.execute(proposal_query)
+    candidate_ids = [p[0] for p in proposals_result.all()]
+    if not candidate_ids:
+        return empty
+
+    # Step 4: Exclude proposals already acknowledged by this team
+    ack_result = await session.execute(
+        select(AcknowledgmentDB.proposal_id)
+        .where(AcknowledgmentDB.proposal_id.in_(candidate_ids))
+        .where(AcknowledgmentDB.consumer_team_id == team_id)
+    )
+    acknowledged_ids = {a[0] for a in ack_result.all()}
+    pending_ids = [pid for pid in candidate_ids if pid not in acknowledged_ids]
+    if not pending_ids:
+        return empty
+
+    # Count total before pagination
+    total = len(pending_ids)
+
+    # Main query: fetch proposals with asset data, applying pagination
+    main_query = (
+        select(ProposalDB, AssetDB)
+        .join(AssetDB, ProposalDB.asset_id == AssetDB.id)
+        .where(ProposalDB.id.in_(pending_ids))
+        .order_by(ProposalDB.proposed_at.desc())
+        .limit(params.limit)
+        .offset(params.offset)
+    )
+    result = await session.execute(main_query)
+    rows = result.all()
+
+    if not rows:
+        return {
+            "pending_proposals": [],
+            "total": total,
+            "limit": params.limit,
+            "offset": params.offset,
+        }
+
+    # Batch fetch: proposer team names
+    proposer_team_ids = {p.proposed_by for p, _ in rows}
+    proposer_result = await session.execute(
+        select(TeamDB.id, TeamDB.name).where(TeamDB.id.in_(proposer_team_ids))
+    )
+    proposer_names: dict[UUID, str] = {tid: name for tid, name in proposer_result.all()}
+
+    # Batch fetch: acknowledgment counts per proposal
+    row_proposal_ids = [p.id for p, _ in rows]
+    ack_counts_result = await session.execute(
+        select(AcknowledgmentDB.proposal_id, func.count(AcknowledgmentDB.id))
+        .where(AcknowledgmentDB.proposal_id.in_(row_proposal_ids))
+        .group_by(AcknowledgmentDB.proposal_id)
+    )
+    ack_counts: dict[UUID, int] = {pid: cnt for pid, cnt in ack_counts_result.all()}
+
+    # Batch fetch: consumer counts via active contracts
+    row_asset_ids = [a.id for _, a in rows]
+    active_contracts_result = await session.execute(
+        select(ContractDB.id, ContractDB.asset_id, ContractDB.published_at)
+        .where(ContractDB.asset_id.in_(row_asset_ids))
+        .where(ContractDB.status == ContractStatus.ACTIVE)
+        .order_by(ContractDB.published_at.desc())
+    )
+    asset_contract_map: dict[UUID, UUID] = {}
+    for contract_id, asset_id_val, _ in active_contracts_result.all():
+        if asset_id_val not in asset_contract_map:
+            asset_contract_map[asset_id_val] = contract_id
+
+    consumer_counts: dict[UUID, int] = {}
+    contract_ids = list(asset_contract_map.values())
+    if contract_ids:
+        consumer_counts_result = await session.execute(
+            select(RegistrationDB.contract_id, func.count(RegistrationDB.id))
+            .where(RegistrationDB.contract_id.in_(contract_ids))
+            .where(RegistrationDB.status == RegistrationStatus.ACTIVE)
+            .where(RegistrationDB.deleted_at.is_(None))
+            .group_by(RegistrationDB.contract_id)
+        )
+        consumer_counts = {cid: cnt for cid, cnt in consumer_counts_result.all()}
+
+    # Build response
+    pending_proposals = []
+    for proposal, asset in rows:
+        # Build breaking changes summary from stored breaking_changes
+        breaking_summary = []
+        for bc in proposal.breaking_changes:
+            if isinstance(bc, dict):
+                msg = bc.get("message") or bc.get("details", {}).get("message", "")
+                if not msg:
+                    change_type = bc.get("type", "unknown")
+                    column = bc.get("column", "")
+                    msg = f"{change_type}: {column}" if column else change_type
+                breaking_summary.append(str(msg))
+
+        contract_id = asset_contract_map.get(asset.id)
+        consumer_count = consumer_counts.get(contract_id, 0) if contract_id else 0
+
+        pending_proposals.append(
+            {
+                "proposal_id": str(proposal.id),
+                "asset_id": str(proposal.asset_id),
+                "asset_fqn": asset.fqn,
+                "proposed_by_team": proposer_names.get(proposal.proposed_by, "unknown"),
+                "proposed_at": proposal.proposed_at.isoformat(),
+                "expires_at": proposal.expires_at.isoformat() if proposal.expires_at else None,
+                "breaking_changes_summary": breaking_summary,
+                "total_consumers": consumer_count,
+                "acknowledged_count": ack_counts.get(proposal.id, 0),
+                "your_team_status": "AWAITING_RESPONSE",
+            }
+        )
+
+    return {
+        "pending_proposals": pending_proposals,
         "total": total,
         "limit": params.limit,
         "offset": params.offset,
