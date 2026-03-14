@@ -1,5 +1,5 @@
 site_name: Tessera
-site_description: Data contract coordination for data warehouses
+site_description: Data contract coordination for warehouses — and the AI agents that query them
 site_url: https://ashita-ai.github.io/tessera
 repo_url: https://github.com/ashita-ai/tessera
 repo_name: ashita-ai/tessera
@@ -85,6 +85,7 @@ nav:
     - Breaking Changes: concepts/breaking-changes.md
     - Consumer Registration: concepts/consumer-registration.md
   - Guides:
+    - AI Agent Integration: guides/ai-agent-integration.md
     - Python SDK: guides/python-sdk.md
     - dbt Integration: guides/dbt-integration.md
     - Avro Integration: guides/avro-integration.md
