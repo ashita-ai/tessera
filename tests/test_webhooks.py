@@ -511,16 +511,18 @@ class TestRateLimitKey:
 
         request1 = MagicMock()
         request1.headers = {"Authorization": "Bearer tess_live_key1_abc123"}
+        request1.state.is_agent = False
 
         request2 = MagicMock()
         request2.headers = {"Authorization": "Bearer tess_live_key2_xyz789"}
+        request2.state.is_agent = False
 
         key1 = get_rate_limit_key(request1)
         key2 = get_rate_limit_key(request2)
 
         assert key1 != key2
-        assert key1.startswith("key:")
-        assert key2.startswith("key:")
+        assert "key:" in key1
+        assert "key:" in key2
 
     async def test_rate_limit_key_same_key_same_bucket(self):
         """Same API key always gets the same bucket."""
@@ -559,6 +561,119 @@ class TestRateLimitKey:
 
         # Should be different because we hash the full key now
         assert key1 != key2
+
+    async def test_rate_limit_key_agent_prefix(self):
+        """Agent keys get 'agent:' prefix in rate limit key."""
+        from unittest.mock import MagicMock
+
+        from tessera.api.rate_limit import get_rate_limit_key
+
+        request = MagicMock()
+        request.headers = {"Authorization": "Bearer tess_live_agent_key"}
+        request.state.is_agent = True
+
+        key = get_rate_limit_key(request)
+        assert key.startswith("agent:key:")
+
+    async def test_rate_limit_key_human_prefix(self):
+        """Human keys get 'human:' prefix in rate limit key."""
+        from unittest.mock import MagicMock
+
+        from tessera.api.rate_limit import get_rate_limit_key
+
+        request = MagicMock()
+        request.headers = {"Authorization": "Bearer tess_live_human_key"}
+        request.state.is_agent = False
+
+        key = get_rate_limit_key(request)
+        assert key.startswith("human:key:")
+
+    async def test_rate_limit_key_ip_fallback_with_agent_prefix(self):
+        """IP fallback also gets actor prefix."""
+        from unittest.mock import MagicMock
+
+        from tessera.api.rate_limit import get_rate_limit_key
+
+        request = MagicMock()
+        request.headers = {}
+        request.state.is_agent = True
+        request.client.host = "10.0.0.1"
+
+        key = get_rate_limit_key(request)
+        assert key.startswith("agent:")
+        assert "key:" not in key
+
+    async def test_rate_limit_key_missing_state_defaults_human(self):
+        """Missing request.state.is_agent defaults to human prefix."""
+        from unittest.mock import MagicMock
+
+        from tessera.api.rate_limit import get_rate_limit_key
+
+        request = MagicMock(spec=["headers", "client"])
+        request.headers = {"Authorization": "Bearer tess_live_nostate"}
+        # No .state attribute at all
+
+        key = get_rate_limit_key(request)
+        assert key.startswith("human:key:")
+
+
+class TestAgentAwareLimit:
+    """Tests for _agent_aware_limit tier selection."""
+
+    async def test_agent_key_gets_agent_tier(self):
+        """Agent-prefixed keys select the agent rate limit tier."""
+        from tessera.api.rate_limit import _agent_aware_limit
+        from tessera.config import settings
+
+        limit_func = _agent_aware_limit("rate_limit_read", "rate_limit_agent_read")
+
+        original = settings.rate_limit_enabled
+        settings.rate_limit_enabled = True
+        try:
+            result = limit_func("agent:key:abc123")
+            assert result == settings.rate_limit_agent_read
+        finally:
+            settings.rate_limit_enabled = original
+
+    async def test_human_key_gets_human_tier(self):
+        """Human-prefixed keys select the human rate limit tier."""
+        from tessera.api.rate_limit import _agent_aware_limit
+        from tessera.config import settings
+
+        limit_func = _agent_aware_limit("rate_limit_read", "rate_limit_agent_read")
+
+        original = settings.rate_limit_enabled
+        settings.rate_limit_enabled = True
+        try:
+            result = limit_func("human:key:abc123")
+            assert result == settings.rate_limit_read
+        finally:
+            settings.rate_limit_enabled = original
+
+    async def test_disabled_returns_empty(self):
+        """When rate limiting is disabled, returns empty string."""
+        from tessera.api.rate_limit import _agent_aware_limit
+        from tessera.config import settings
+
+        limit_func = _agent_aware_limit("rate_limit_read", "rate_limit_agent_read")
+
+        original = settings.rate_limit_enabled
+        settings.rate_limit_enabled = False
+        try:
+            assert limit_func("agent:key:abc123") == ""
+            assert limit_func("human:key:abc123") == ""
+        finally:
+            settings.rate_limit_enabled = original
+
+    async def test_all_tiers_wired_correctly(self):
+        """Verify read/write/admin tiers each use distinct config values."""
+        from tessera.config import settings
+
+        # Agent tiers should have higher limits than human tiers
+        # (the defaults are 5000 vs 200 for read, 500 vs 50 for write, 250 vs 20 for admin)
+        assert settings.rate_limit_agent_read != settings.rate_limit_read
+        assert settings.rate_limit_agent_write != settings.rate_limit_write
+        assert settings.rate_limit_agent_admin != settings.rate_limit_admin
 
 
 class TestSemverParsing:

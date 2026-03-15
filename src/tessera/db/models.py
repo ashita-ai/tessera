@@ -381,7 +381,7 @@ class AuditEventDB(Base):
     action: Mapped[str] = mapped_column(String(100), nullable=False)
     actor_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True, index=True)
     actor_type: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="human"
+        String(20), nullable=False, server_default="human"
     )  # "human" or "agent"
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     occurred_at: Mapped[datetime] = mapped_column(
