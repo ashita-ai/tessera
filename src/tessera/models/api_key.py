@@ -40,6 +40,26 @@ class APIKeyCreate(BaseModel):
             raise ValueError("API key name cannot be empty or whitespace only")
         return v
 
+    @field_validator("agent_name")
+    @classmethod
+    def validate_agent_name(cls, v: str | None) -> str | None:
+        """Strip whitespace from agent name if provided."""
+        if v is not None:
+            v = v.strip()
+            if not v:
+                return None
+        return v
+
+    @field_validator("agent_framework")
+    @classmethod
+    def validate_agent_framework(cls, v: str | None) -> str | None:
+        """Strip whitespace from agent framework if provided."""
+        if v is not None:
+            v = v.strip()
+            if not v:
+                return None
+        return v
+
 
 class APIKeyCreated(BaseModel):
     """Response model when an API key is created (includes the raw key)."""

@@ -33,21 +33,25 @@ def get_rate_limit_key(request: Request) -> str:
     """Get a unique key for rate limiting.
 
     Uses a hash of the full API key if present in the Authorization header,
-    otherwise falls back to remote IP address.
+    otherwise falls back to remote IP address. Prefixes with actor type
+    (agent/human) so agent-tier rate limits can be applied.
 
     Note: We hash the full key to ensure each API key gets its own rate limit
     bucket, preventing one noisy client from affecting others.
     """
+    is_agent = getattr(getattr(request, "state", None), "is_agent", False)
+    actor_prefix = "agent" if is_agent else "human"
+
     auth_header = request.headers.get("Authorization")
     if auth_header and auth_header.startswith("Bearer "):
         api_key = auth_header[7:]
         # Hash the full API key to create a unique, stable bucket per key
         # Using SHA256 and taking first HASH_KEY_LENGTH chars for a compact but unique key
         key_hash = hashlib.sha256(api_key.encode()).hexdigest()[:HASH_KEY_LENGTH]
-        return f"key:{key_hash}"
+        return f"{actor_prefix}:key:{key_hash}"
 
     # Fallback to IP address
-    return get_remote_address(request)
+    return f"{actor_prefix}:{get_remote_address(request)}"
 
 
 def get_team_rate_limit_key(request: Request) -> str:
@@ -133,10 +137,38 @@ def _get_rate_limit(limit_str: str) -> str:
     return limit_str if settings.rate_limit_enabled else ""
 
 
-# Per-API-key rate limit decorators
-limit_read = limiter.limit(lambda: _get_rate_limit(settings.rate_limit_read))
-limit_write = limiter.limit(lambda: _get_rate_limit(settings.rate_limit_write))
-limit_admin = limiter.limit(lambda: _get_rate_limit(settings.rate_limit_admin))
+def _agent_aware_limit(human_attr: str, agent_attr: str) -> Callable[[str], str]:
+    """Create a limit function that selects agent or human tier based on the key.
+
+    slowapi calls key_func(request) first to produce a key string, then passes
+    that key to this function if it has a ``key`` parameter. Since
+    get_rate_limit_key prefixes the key with "agent:" or "human:", we can
+    inspect the key to pick the right tier without needing the request object.
+    """
+
+    def _limit_func(key: str) -> str:
+        if not settings.rate_limit_enabled:
+            return ""
+        if key.startswith("agent:"):
+            return str(getattr(settings, agent_attr))
+        return str(getattr(settings, human_attr))
+
+    return _limit_func
+
+
+# Per-API-key rate limit decorators with agent tier support
+limit_read = limiter.limit(
+    _agent_aware_limit("rate_limit_read", "rate_limit_agent_read"),
+    key_func=get_rate_limit_key,
+)
+limit_write = limiter.limit(
+    _agent_aware_limit("rate_limit_write", "rate_limit_agent_write"),
+    key_func=get_rate_limit_key,
+)
+limit_admin = limiter.limit(
+    _agent_aware_limit("rate_limit_admin", "rate_limit_agent_admin"),
+    key_func=get_rate_limit_key,
+)
 limit_auth = limiter.limit(lambda: _get_rate_limit(settings.rate_limit_auth))
 
 # Per-team rate limit decorators for expensive operations
