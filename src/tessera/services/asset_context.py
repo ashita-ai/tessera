@@ -200,7 +200,7 @@ async def get_asset_context(session: AsyncSession, asset: AssetDB) -> dict[str, 
         "id": str(asset.id),
         "fqn": asset.fqn,
         "description": asset.metadata_.get("description"),
-        "tags": asset.metadata_.get("tags", []),
+        "tags": asset.tags or [],
         "resource_type": str(asset.resource_type),
         "environment": asset.environment,
         "owner_team_id": str(asset.owner_team_id),
@@ -215,26 +215,12 @@ async def get_asset_context(session: AsyncSession, asset: AssetDB) -> dict[str, 
     if current_contract:
         asset_section["compatibility_mode"] = str(current_contract.compatibility_mode)
 
-        # Extract field-level annotations from schema properties
-        schema = current_contract.schema_def
-        properties = schema.get("properties", {})
-        field_descriptions: dict[str, str] = {}
-        field_tags: dict[str, list[str]] = {}
-        for field_name, field_def in properties.items():
-            if isinstance(field_def, dict):
-                desc = field_def.get("description")
-                if desc:
-                    field_descriptions[field_name] = desc
-                tags = field_def.get("tags")
-                if tags:
-                    field_tags[field_name] = tags
-
         contract_section = {
             "id": str(current_contract.id),
             "version": current_contract.version,
             "schema": current_contract.schema_def,
-            "field_descriptions": field_descriptions,
-            "field_tags": field_tags,
+            "field_descriptions": current_contract.field_descriptions or {},
+            "field_tags": current_contract.field_tags or {},
             "guarantees": current_contract.guarantees,
             "status": str(current_contract.status),
             "published_at": current_contract.published_at.isoformat(),
