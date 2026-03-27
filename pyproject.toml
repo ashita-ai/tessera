@@ -120,3 +120,11 @@ dev = [
     "dbt-duckdb>=1.10.0",
     "pip-audit>=2.10.0",
 ]
+
+[tool.uv]
+# Pin transitive deps to versions that fix known CVEs.
+constraint-dependencies = [
+    "deepdiff>=8.6.2",      # CVE-2026-33155
+    "pyasn1>=0.6.3",        # CVE-2026-30922
+    "requests>=2.33.0",     # CVE-2026-25645
+]
