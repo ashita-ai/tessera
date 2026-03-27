@@ -455,6 +455,8 @@ async def bulk_publish_contracts(
                 schema_def=item.schema_def,
                 compatibility_mode=compat_mode,
                 guarantees=item.guarantees,
+                field_descriptions=item.field_descriptions,
+                field_tags=item.field_tags,
             )
         )
 

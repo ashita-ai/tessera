@@ -238,6 +238,7 @@ async def import_openapi(
                         compatibility_mode=CompatibilityMode.BACKWARD,
                         guarantees=merged_guarantees,
                         field_descriptions=asset_def.field_descriptions,
+                        field_tags=asset_def.field_tags,
                         published_by=import_req.owner_team_id,
                     )
                     session.add(new_contract)

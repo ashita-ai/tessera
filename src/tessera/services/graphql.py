@@ -113,6 +113,10 @@ def _graphql_type_to_json_schema(
             field_schema, is_required = _graphql_type_to_json_schema(
                 field_type, types_map, depth + 1
             )
+            # Preserve field descriptions from GraphQL introspection
+            field_desc = field.get("description")
+            if field_desc:
+                field_schema = {**field_schema, "description": field_desc}
             properties[field_name] = field_schema
             if is_required:
                 required.append(field_name)
@@ -386,6 +390,7 @@ class AssetFromGraphQL(BaseModel):
     schema_def: dict[str, Any]
     guarantees: dict[str, Any] | None = None
     field_descriptions: dict[str, str] = {}
+    field_tags: dict[str, list[str]] = {}
     description: str | None = None
 
 
@@ -430,6 +435,14 @@ def operations_to_assets(
             arg_desc = arg_info.get("description")
             if arg_name and arg_desc:
                 field_descs[f"$.properties.arguments.properties.{arg_name}"] = arg_desc
+
+        # Extract field descriptions from return type fields
+        return_props = op.return_type.get("properties", {})
+        for field_name, field_schema in return_props.items():
+            if isinstance(field_schema, dict):
+                desc = field_schema.get("description")
+                if desc:
+                    field_descs[f"$.properties.response.properties.{field_name}"] = desc
 
         assets.append(
             AssetFromGraphQL(

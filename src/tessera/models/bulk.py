@@ -73,6 +73,7 @@ class BulkAssetItem(BaseModel):
     resource_type: ResourceType = ResourceType.OTHER
     guarantee_mode: GuaranteeMode = GuaranteeMode.NOTIFY
     metadata: dict[str, Any] = Field(default_factory=dict)
+    tags: list[str] = Field(default_factory=list, description="Free-form labels for this asset")
 
     @field_validator("fqn")
     @classmethod
@@ -150,6 +151,12 @@ class BulkContractItem(BaseModel):
         "Uses asset default if not specified.",
     )
     guarantees: dict[str, Any] | None = Field(None, description="Contract guarantees")
+    field_descriptions: dict[str, str] = Field(
+        default_factory=dict, description="Map of JSON path -> human-readable field description"
+    )
+    field_tags: dict[str, list[str]] = Field(
+        default_factory=dict, description="Map of JSON path -> list of tags"
+    )
 
 
 class BulkContractRequest(BaseModel):

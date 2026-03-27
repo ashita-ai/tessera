@@ -608,6 +608,81 @@ class TestOpenAPISyncMetadata:
             == "Unique user identifier"
         )
 
+    async def test_openapi_sync_extracts_field_tags(self, client: AsyncClient) -> None:
+        """OpenAPI sync extracts x-tessera.tags from properties into field_tags."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "openapi-ftags-team"})
+        team_id = team_resp.json()["id"]
+
+        spec = {
+            "openapi": "3.0.0",
+            "info": {"title": "Field Tags API", "version": "1.0.0"},
+            "paths": {
+                "/accounts": {
+                    "get": {
+                        "operationId": "listAccounts",
+                        "summary": "List accounts",
+                        "tags": ["accounts"],
+                        "responses": {
+                            "200": {
+                                "content": {
+                                    "application/json": {
+                                        "schema": {
+                                            "type": "object",
+                                            "properties": {
+                                                "account_id": {
+                                                    "type": "integer",
+                                                    "description": "Account ID",
+                                                    "x-tessera": {
+                                                        "tags": ["join-key", "immutable"],
+                                                    },
+                                                },
+                                                "email": {
+                                                    "type": "string",
+                                                    "x-tessera": {
+                                                        "tags": ["pii", "gdpr"],
+                                                    },
+                                                },
+                                                "status": {
+                                                    "type": "string",
+                                                },
+                                            },
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                    }
+                }
+            },
+        }
+
+        resp = await client.post(
+            "/api/v1/sync/openapi",
+            json={
+                "spec": spec,
+                "owner_team_id": team_id,
+                "auto_publish_contracts": True,
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["assets_created"] >= 1
+
+        asset_id = data["endpoints"][0]["asset_id"]
+
+        contracts_resp = await client.get(f"/api/v1/assets/{asset_id}/contracts")
+        assert contracts_resp.status_code == 200
+        contract = contracts_resp.json()["results"][0]
+
+        # field_tags should contain x-tessera tags
+        assert contract["field_tags"]["$.properties.response.properties.account_id"] == [
+            "join-key",
+            "immutable",
+        ]
+        assert contract["field_tags"]["$.properties.response.properties.email"] == ["pii", "gdpr"]
+        # status has no x-tessera tags
+        assert "$.properties.response.properties.status" not in contract["field_tags"]
+
 
 @pytest.mark.asyncio
 class TestGraphQLSyncMetadata:
@@ -716,6 +791,202 @@ class TestGraphQLSyncMetadata:
             contract["field_descriptions"]["$.properties.arguments.properties.id"]
             == "The user's unique identifier"
         )
+
+    async def test_graphql_sync_extracts_return_field_descriptions(
+        self, client: AsyncClient
+    ) -> None:
+        """GraphQL sync extracts descriptions from return type fields."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "gql-ret-desc-team"})
+        team_id = team_resp.json()["id"]
+
+        introspection = {
+            "__schema": {
+                "queryType": {"name": "Query"},
+                "mutationType": None,
+                "types": [
+                    {
+                        "kind": "OBJECT",
+                        "name": "Query",
+                        "fields": [
+                            {
+                                "name": "product",
+                                "description": "Fetch a product by ID",
+                                "args": [],
+                                "type": {
+                                    "kind": "OBJECT",
+                                    "name": "Product",
+                                    "ofType": None,
+                                },
+                            }
+                        ],
+                    },
+                    {
+                        "kind": "OBJECT",
+                        "name": "Product",
+                        "fields": [
+                            {
+                                "name": "sku",
+                                "description": "Stock keeping unit code",
+                                "type": {
+                                    "kind": "NON_NULL",
+                                    "name": None,
+                                    "ofType": {
+                                        "kind": "SCALAR",
+                                        "name": "String",
+                                        "ofType": None,
+                                    },
+                                },
+                                "args": [],
+                            },
+                            {
+                                "name": "price",
+                                "description": "Current retail price in cents",
+                                "type": {
+                                    "kind": "SCALAR",
+                                    "name": "Int",
+                                    "ofType": None,
+                                },
+                                "args": [],
+                            },
+                            {
+                                "name": "in_stock",
+                                "description": None,
+                                "type": {
+                                    "kind": "SCALAR",
+                                    "name": "Boolean",
+                                    "ofType": None,
+                                },
+                                "args": [],
+                            },
+                        ],
+                    },
+                    {"kind": "SCALAR", "name": "String"},
+                    {"kind": "SCALAR", "name": "Int"},
+                    {"kind": "SCALAR", "name": "Boolean"},
+                ],
+            }
+        }
+
+        resp = await client.post(
+            "/api/v1/sync/graphql",
+            json={
+                "introspection": introspection,
+                "schema_name": "ProductAPI",
+                "owner_team_id": team_id,
+                "auto_publish_contracts": True,
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["assets_created"] >= 1
+
+        asset_id = data["operations"][0]["asset_id"]
+        contracts_resp = await client.get(f"/api/v1/assets/{asset_id}/contracts")
+        assert contracts_resp.status_code == 200
+        contract = contracts_resp.json()["results"][0]
+
+        # Return type field descriptions should be extracted
+        assert (
+            contract["field_descriptions"]["$.properties.response.properties.sku"]
+            == "Stock keeping unit code"
+        )
+        assert (
+            contract["field_descriptions"]["$.properties.response.properties.price"]
+            == "Current retail price in cents"
+        )
+        # Null description should not appear
+        assert "$.properties.response.properties.in_stock" not in contract["field_descriptions"]
+
+
+@pytest.mark.asyncio
+class TestBulkAPISemanticMetadata:
+    """Test bulk API endpoints with semantic metadata fields."""
+
+    async def test_bulk_create_assets_with_tags(self, client: AsyncClient) -> None:
+        """Bulk asset creation supports tags."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "bulk-tags-team"})
+        team_id = team_resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/bulk/assets",
+            json={
+                "assets": [
+                    {
+                        "fqn": "bulk.tagged.table1",
+                        "owner_team_id": team_id,
+                        "tags": ["pii", "tier1"],
+                    },
+                    {
+                        "fqn": "bulk.tagged.table2",
+                        "owner_team_id": team_id,
+                        "tags": ["financial"],
+                    },
+                ]
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["succeeded"] == 2
+
+        # Verify tags were persisted
+        for result in data["results"]:
+            asset_resp = await client.get(f"/api/v1/assets/{result['id']}")
+            assert asset_resp.status_code == 200
+            asset = asset_resp.json()
+            if asset["fqn"] == "bulk.tagged.table1":
+                assert asset["tags"] == ["pii", "tier1"]
+            elif asset["fqn"] == "bulk.tagged.table2":
+                assert asset["tags"] == ["financial"]
+
+    async def test_bulk_publish_contracts_with_field_metadata(self, client: AsyncClient) -> None:
+        """Bulk contract publish supports field_descriptions and field_tags."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "bulk-fmeta-team"})
+        team_id = team_resp.json()["id"]
+
+        asset_resp = await client.post(
+            "/api/v1/assets",
+            json={"fqn": "bulk.fmeta.table", "owner_team_id": team_id},
+        )
+        asset_id = asset_resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/contracts/bulk",
+            params={"dry_run": False},
+            json={
+                "published_by": team_id,
+                "contracts": [
+                    {
+                        "asset_id": asset_id,
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "user_id": {"type": "integer"},
+                                "email": {"type": "string"},
+                            },
+                        },
+                        "field_descriptions": {
+                            "$.properties.user_id": "Primary key",
+                            "$.properties.email": "Contact email",
+                        },
+                        "field_tags": {
+                            "$.properties.user_id": ["join-key"],
+                            "$.properties.email": ["pii"],
+                        },
+                    }
+                ],
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["published"] == 1
+
+        # Verify metadata was persisted on the contract
+        contract_id = data["results"][0]["contract_id"]
+        contract_resp = await client.get(f"/api/v1/contracts/{contract_id}")
+        assert contract_resp.status_code == 200
+        contract = contract_resp.json()
+        assert contract["field_descriptions"]["$.properties.user_id"] == "Primary key"
+        assert contract["field_tags"]["$.properties.email"] == ["pii"]
 
 
 @pytest.mark.asyncio
