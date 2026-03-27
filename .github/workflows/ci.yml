@@ -112,7 +112,8 @@ jobs:
 
       - name: Run pip-audit
         # CVE-2026-0994: protobuf vulnerability with no fix available yet (transitive dep)
-        run: uv run pip-audit --local --strict --ignore-vuln CVE-2026-0994
+        # CVE-2026-4539: pygments vulnerability with no fix available yet (transitive dep)
+        run: uv run pip-audit --local --strict --ignore-vuln CVE-2026-0994 --ignore-vuln CVE-2026-4539
 
   test-sqlite:
     name: Test (SQLite)
