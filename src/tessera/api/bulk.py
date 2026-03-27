@@ -267,6 +267,7 @@ async def bulk_create_assets(
                     resource_type=item.resource_type,
                     guarantee_mode=item.guarantee_mode,
                     metadata_=item.metadata,
+                    tags=item.tags,
                 )
                 session.add(asset)
                 await session.flush()
