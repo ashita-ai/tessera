@@ -1,11 +1,11 @@
 """Tests for batch fetch utilities."""
 
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tessera.db import AssetDB, TeamDB
+from tessera.db import AssetDB, TeamDB, UserDB
 from tessera.services.batch import (
     fetch_asset_counts_by_team,
     fetch_asset_counts_by_user,
@@ -21,6 +21,14 @@ async def _create_team(session: AsyncSession, name: str) -> TeamDB:
     session.add(team)
     await session.flush()
     return team
+
+
+async def _create_user(session: AsyncSession, team_id: UUID, email: str) -> UserDB:
+    """Create a user row to satisfy FK constraints on assets.owner_user_id."""
+    user = UserDB(email=email, name=email.split("@")[0], team_id=team_id)
+    session.add(user)
+    await session.flush()
+    return user
 
 
 async def _create_asset(
@@ -103,25 +111,25 @@ class TestFetchAssetCountsByUser:
     async def test_user_with_assets(self, test_session: AsyncSession) -> None:
         """Correctly counts assets owned by a specific user."""
         team = await _create_team(test_session, "user-team")
-        user_id = uuid4()
-        await _create_asset(test_session, "db.schema.u1", team.id, owner_user_id=user_id)
-        await _create_asset(test_session, "db.schema.u2", team.id, owner_user_id=user_id)
+        user = await _create_user(test_session, team.id, "user1@test.com")
+        await _create_asset(test_session, "db.schema.u1", team.id, owner_user_id=user.id)
+        await _create_asset(test_session, "db.schema.u2", team.id, owner_user_id=user.id)
 
-        result = await fetch_asset_counts_by_user(test_session, [user_id])
-        assert result[user_id] == 2
+        result = await fetch_asset_counts_by_user(test_session, [user.id])
+        assert result[user.id] == 2
 
     async def test_excludes_soft_deleted_assets(self, test_session: AsyncSession) -> None:
         """Soft-deleted assets are not counted for users."""
         from datetime import UTC, datetime
 
         team = await _create_team(test_session, "user-del-team")
-        user_id = uuid4()
-        asset = await _create_asset(test_session, "db.schema.ud1", team.id, owner_user_id=user_id)
+        user = await _create_user(test_session, team.id, "userdel@test.com")
+        asset = await _create_asset(test_session, "db.schema.ud1", team.id, owner_user_id=user.id)
         asset.deleted_at = datetime.now(UTC)
         await test_session.flush()
 
-        result = await fetch_asset_counts_by_user(test_session, [user_id])
-        assert user_id not in result
+        result = await fetch_asset_counts_by_user(test_session, [user.id])
+        assert user.id not in result
 
 
 class TestFetchTeamNames:
