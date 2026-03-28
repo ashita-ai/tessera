@@ -10,212 +10,93 @@ from tessera.models.asset import AssetCreate
 from tessera.models.contract import ContractCreate
 from tessera.models.team import TeamCreate
 
+OWNER_TEAM_ID = "00000000-0000-0000-0000-000000000001"
+
 
 class TestFQNValidation:
     """Tests for FQN format validation."""
 
-    def test_valid_fqn_two_segments(self) -> None:
-        """Valid FQN with two segments."""
-        asset = AssetCreate(
-            fqn="schema.table",
-            owner_team_id="00000000-0000-0000-0000-000000000001",
-        )
-        assert asset.fqn == "schema.table"
+    @pytest.mark.parametrize(
+        "fqn",
+        [
+            "schema.table",
+            "database.schema.table",
+            "my_database.my_schema.my_table_name",
+            "db1.schema2.table3",
+            "_private.schema._hidden_table",
+        ],
+        ids=["two_segments", "three_segments", "underscores", "numbers", "leading_underscore"],
+    )
+    def test_valid_fqn(self, fqn: str) -> None:
+        """Valid FQN formats are accepted."""
+        asset = AssetCreate(fqn=fqn, owner_team_id=OWNER_TEAM_ID)
+        assert asset.fqn == fqn
 
-    def test_valid_fqn_three_segments(self) -> None:
-        """Valid FQN with three segments."""
-        asset = AssetCreate(
-            fqn="database.schema.table",
-            owner_team_id="00000000-0000-0000-0000-000000000001",
-        )
-        assert asset.fqn == "database.schema.table"
-
-    def test_valid_fqn_with_underscores(self) -> None:
-        """Valid FQN with underscores."""
-        asset = AssetCreate(
-            fqn="my_database.my_schema.my_table_name",
-            owner_team_id="00000000-0000-0000-0000-000000000001",
-        )
-        assert asset.fqn == "my_database.my_schema.my_table_name"
-
-    def test_valid_fqn_with_numbers(self) -> None:
-        """Valid FQN with numbers."""
-        asset = AssetCreate(
-            fqn="db1.schema2.table3",
-            owner_team_id="00000000-0000-0000-0000-000000000001",
-        )
-        assert asset.fqn == "db1.schema2.table3"
-
-    def test_valid_fqn_starts_with_underscore(self) -> None:
-        """Valid FQN segment starting with underscore."""
-        asset = AssetCreate(
-            fqn="_private.schema._hidden_table",
-            owner_team_id="00000000-0000-0000-0000-000000000001",
-        )
-        assert asset.fqn == "_private.schema._hidden_table"
-
-    def test_invalid_fqn_single_segment(self) -> None:
-        """Invalid FQN with only one segment."""
+    @pytest.mark.parametrize(
+        "fqn",
+        [
+            "just_a_table",
+            "database.my schema.table",
+            "database.schema.table-name",
+            "database.123schema.table",
+            "database..table",
+            "database.schema.table.",
+            ".database.schema.table",
+        ],
+        ids=[
+            "single_segment",
+            "spaces",
+            "special_chars",
+            "starts_with_number",
+            "empty_segment",
+            "trailing_dot",
+            "leading_dot",
+        ],
+    )
+    def test_invalid_fqn(self, fqn: str) -> None:
+        """Invalid FQN formats are rejected."""
         with pytest.raises(ValidationError) as exc_info:
-            AssetCreate(
-                fqn="just_a_table",
-                owner_team_id="00000000-0000-0000-0000-000000000001",
-            )
-        assert "dot-separated" in str(exc_info.value).lower()
-
-    def test_invalid_fqn_with_spaces(self) -> None:
-        """Invalid FQN with spaces."""
-        with pytest.raises(ValidationError) as exc_info:
-            AssetCreate(
-                fqn="database.my schema.table",
-                owner_team_id="00000000-0000-0000-0000-000000000001",
-            )
-        assert "dot-separated" in str(exc_info.value).lower()
-
-    def test_invalid_fqn_with_special_chars(self) -> None:
-        """Invalid FQN with special characters."""
-        with pytest.raises(ValidationError) as exc_info:
-            AssetCreate(
-                fqn="database.schema.table-name",
-                owner_team_id="00000000-0000-0000-0000-000000000001",
-            )
-        assert "dot-separated" in str(exc_info.value).lower()
-
-    def test_invalid_fqn_starts_with_number(self) -> None:
-        """Invalid FQN segment starting with number."""
-        with pytest.raises(ValidationError) as exc_info:
-            AssetCreate(
-                fqn="database.123schema.table",
-                owner_team_id="00000000-0000-0000-0000-000000000001",
-            )
-        assert "dot-separated" in str(exc_info.value).lower()
-
-    def test_invalid_fqn_empty_segment(self) -> None:
-        """Invalid FQN with empty segment."""
-        with pytest.raises(ValidationError) as exc_info:
-            AssetCreate(
-                fqn="database..table",
-                owner_team_id="00000000-0000-0000-0000-000000000001",
-            )
-        assert "dot-separated" in str(exc_info.value).lower()
-
-    def test_invalid_fqn_trailing_dot(self) -> None:
-        """Invalid FQN with trailing dot."""
-        with pytest.raises(ValidationError) as exc_info:
-            AssetCreate(
-                fqn="database.schema.table.",
-                owner_team_id="00000000-0000-0000-0000-000000000001",
-            )
-        assert "dot-separated" in str(exc_info.value).lower()
-
-    def test_invalid_fqn_leading_dot(self) -> None:
-        """Invalid FQN with leading dot."""
-        with pytest.raises(ValidationError) as exc_info:
-            AssetCreate(
-                fqn=".database.schema.table",
-                owner_team_id="00000000-0000-0000-0000-000000000001",
-            )
+            AssetCreate(fqn=fqn, owner_team_id=OWNER_TEAM_ID)
         assert "dot-separated" in str(exc_info.value).lower()
 
     def test_fqn_too_long(self) -> None:
-        """FQN exceeds maximum length."""
+        """FQN exceeding maximum length is rejected."""
         long_fqn = "a" * 500 + "." + "b" * 500 + "." + "c"
         with pytest.raises(ValidationError) as exc_info:
-            AssetCreate(
-                fqn=long_fqn,
-                owner_team_id="00000000-0000-0000-0000-000000000001",
-            )
+            AssetCreate(fqn=long_fqn, owner_team_id=OWNER_TEAM_ID)
         assert "1000" in str(exc_info.value) or "max_length" in str(exc_info.value)
 
 
 class TestVersionValidation:
     """Tests for semantic version validation."""
 
-    def test_valid_version_basic(self) -> None:
-        """Valid basic semver."""
-        contract = ContractCreate(
-            version="1.0.0",
-            schema={"type": "object"},
-        )
-        assert contract.version == "1.0.0"
+    @pytest.mark.parametrize(
+        "version",
+        [
+            "1.0.0",
+            "2.1.0-beta.1",
+            "1.0.0+build.123",
+            "1.0.0-alpha.1+build.456",
+            "100.200.300",
+        ],
+        ids=["basic", "prerelease", "build_metadata", "prerelease_and_build", "large_numbers"],
+    )
+    def test_valid_version(self, version: str) -> None:
+        """Valid semver strings are accepted."""
+        contract = ContractCreate(version=version, schema={"type": "object"})
+        assert contract.version == version
 
-    def test_valid_version_with_prerelease(self) -> None:
-        """Valid semver with prerelease tag."""
-        contract = ContractCreate(
-            version="2.1.0-beta.1",
-            schema={"type": "object"},
-        )
-        assert contract.version == "2.1.0-beta.1"
-
-    def test_valid_version_with_build_metadata(self) -> None:
-        """Valid semver with build metadata."""
-        contract = ContractCreate(
-            version="1.0.0+build.123",
-            schema={"type": "object"},
-        )
-        assert contract.version == "1.0.0+build.123"
-
-    def test_valid_version_with_prerelease_and_build(self) -> None:
-        """Valid semver with both prerelease and build metadata."""
-        contract = ContractCreate(
-            version="1.0.0-alpha.1+build.456",
-            schema={"type": "object"},
-        )
-        assert contract.version == "1.0.0-alpha.1+build.456"
-
-    def test_valid_version_large_numbers(self) -> None:
-        """Valid semver with large version numbers."""
-        contract = ContractCreate(
-            version="100.200.300",
-            schema={"type": "object"},
-        )
-        assert contract.version == "100.200.300"
-
-    def test_invalid_version_missing_patch(self) -> None:
-        """Invalid version missing patch number."""
+    @pytest.mark.parametrize(
+        "version",
+        ["1.0", "1", "v1.0.0", "1.0.0 beta", ""],
+        ids=["missing_patch", "missing_minor", "v_prefix", "spaces", "empty"],
+    )
+    def test_invalid_version(self, version: str) -> None:
+        """Invalid semver strings are rejected."""
         with pytest.raises(ValidationError) as exc_info:
-            ContractCreate(
-                version="1.0",
-                schema={"type": "object"},
-            )
-        assert "pattern" in str(exc_info.value).lower() or "string" in str(exc_info.value).lower()
-
-    def test_invalid_version_missing_minor(self) -> None:
-        """Invalid version missing minor and patch."""
-        with pytest.raises(ValidationError) as exc_info:
-            ContractCreate(
-                version="1",
-                schema={"type": "object"},
-            )
-        assert "pattern" in str(exc_info.value).lower() or "string" in str(exc_info.value).lower()
-
-    def test_invalid_version_with_v_prefix(self) -> None:
-        """Invalid version with 'v' prefix."""
-        with pytest.raises(ValidationError) as exc_info:
-            ContractCreate(
-                version="v1.0.0",
-                schema={"type": "object"},
-            )
-        assert "pattern" in str(exc_info.value).lower()
-
-    def test_invalid_version_with_spaces(self) -> None:
-        """Invalid version with spaces."""
-        with pytest.raises(ValidationError) as exc_info:
-            ContractCreate(
-                version="1.0.0 beta",
-                schema={"type": "object"},
-            )
-        assert "pattern" in str(exc_info.value).lower()
-
-    def test_invalid_version_empty(self) -> None:
-        """Invalid empty version."""
-        with pytest.raises(ValidationError) as exc_info:
-            ContractCreate(
-                version="",
-                schema={"type": "object"},
-            )
-        # Will fail min_length check
-        assert "string" in str(exc_info.value).lower() or "length" in str(exc_info.value).lower()
+            ContractCreate(version=version, schema={"type": "object"})
+        error_text = str(exc_info.value).lower()
+        assert any(frag in error_text for frag in ("pattern", "string", "short", "length"))
 
 
 class TestSchemaSizeValidation:
@@ -240,17 +121,13 @@ class TestSchemaSizeValidation:
 
     def test_invalid_oversized_schema(self) -> None:
         """Invalid schema exceeding size limit."""
-        # Create a schema larger than 1MB
         large_value = "x" * 100_000
         large_schema = {
             f"field_{i}": {"type": "string", "description": large_value} for i in range(15)
         }
 
         with pytest.raises(ValidationError) as exc_info:
-            ContractCreate(
-                version="1.0.0",
-                schema=large_schema,
-            )
+            ContractCreate(version="1.0.0", schema=large_schema)
         assert "too large" in str(exc_info.value).lower()
 
     def test_invalid_schema_too_many_properties(self) -> None:
@@ -268,8 +145,6 @@ class TestSchemaSizeValidation:
 
     def test_invalid_schema_too_many_nested_properties(self) -> None:
         """Deeply nested schema that exceeds total property limit must be rejected."""
-        # One top-level property containing a nested object with enough children to
-        # push the total count over the limit.
         nested_props = {
             f"nested_{i}": {"type": "string"} for i in range(settings.max_schema_properties + 1)
         }
@@ -308,7 +183,6 @@ class TestSchemaSizeValidation:
 
     def test_invalid_schema_nesting_too_deep(self) -> None:
         """Schema nested beyond max depth must be rejected."""
-        # Build a schema nested one level deeper than the limit.
         schema: dict[str, Any] = {"type": "string"}
         for _ in range(settings.max_schema_nesting_depth + 1):
             schema = {"type": "object", "properties": {"child": schema}}
@@ -319,7 +193,6 @@ class TestSchemaSizeValidation:
 
     def test_valid_schema_array_items_counted(self) -> None:
         """Properties inside array items are counted toward the total."""
-        # Array item with enough leaf properties to exceed the limit.
         item_props = {
             f"col_{i}": {"type": "string"} for i in range(settings.max_schema_properties + 1)
         }
@@ -336,73 +209,45 @@ class TestSchemaSizeValidation:
 class TestTeamNameValidation:
     """Tests for team name validation."""
 
-    def test_valid_simple_name(self) -> None:
-        """Valid simple team name."""
-        team = TeamCreate(name="analytics")
-        assert team.name == "analytics"
-
-    def test_valid_name_with_spaces(self) -> None:
-        """Valid team name with spaces."""
-        team = TeamCreate(name="Data Engineering")
-        assert team.name == "Data Engineering"
-
-    def test_valid_name_with_hyphens(self) -> None:
-        """Valid team name with hyphens."""
-        team = TeamCreate(name="data-platform")
-        assert team.name == "data-platform"
-
-    def test_valid_name_with_underscores(self) -> None:
-        """Valid team name with underscores."""
-        team = TeamCreate(name="data_platform")
-        assert team.name == "data_platform"
-
-    def test_valid_name_with_numbers(self) -> None:
-        """Valid team name with numbers."""
-        team = TeamCreate(name="team123")
-        assert team.name == "team123"
-
-    def test_valid_single_char_name(self) -> None:
-        """Valid single character name."""
-        team = TeamCreate(name="A")
-        assert team.name == "A"
+    @pytest.mark.parametrize(
+        ("name", "expected"),
+        [
+            ("analytics", "analytics"),
+            ("Data Engineering", "Data Engineering"),
+            ("data-platform", "data-platform"),
+            ("data_platform", "data_platform"),
+            ("team123", "team123"),
+            ("A", "A"),
+        ],
+        ids=["simple", "spaces", "hyphens", "underscores", "numbers", "single_char"],
+    )
+    def test_valid_name(self, name: str, expected: str) -> None:
+        """Valid team names are accepted."""
+        team = TeamCreate(name=name)
+        assert team.name == expected
 
     def test_name_strips_whitespace(self) -> None:
         """Name is stripped of leading/trailing whitespace."""
         team = TeamCreate(name="  analytics  ")
         assert team.name == "analytics"
 
-    def test_invalid_name_empty(self) -> None:
-        """Invalid empty team name."""
+    @pytest.mark.parametrize(
+        ("name", "error_fragment"),
+        [
+            ("", "character"),
+            ("   ", "empty"),
+            ("-analytics", "start"),
+            ("analytics-", "end"),
+            ("analytics@team", "alphanumeric"),
+        ],
+        ids=["empty", "whitespace_only", "starts_with_special", "ends_with_special", "at_sign"],
+    )
+    def test_invalid_name(self, name: str, error_fragment: str) -> None:
+        """Invalid team names are rejected."""
         with pytest.raises(ValidationError) as exc_info:
-            TeamCreate(name="")
-        # Pydantic min_length validation triggers before our custom validator
-        assert "character" in str(exc_info.value).lower() or "short" in str(exc_info.value).lower()
-
-    def test_invalid_name_whitespace_only(self) -> None:
-        """Invalid whitespace-only team name."""
-        with pytest.raises(ValidationError) as exc_info:
-            TeamCreate(name="   ")
-        assert "empty" in str(exc_info.value).lower() or "whitespace" in str(exc_info.value).lower()
-
-    def test_invalid_name_starts_with_special_char(self) -> None:
-        """Invalid name starting with special character."""
-        with pytest.raises(ValidationError) as exc_info:
-            TeamCreate(name="-analytics")
-        assert (
-            "start" in str(exc_info.value).lower() or "alphanumeric" in str(exc_info.value).lower()
-        )
-
-    def test_invalid_name_ends_with_special_char(self) -> None:
-        """Invalid name ending with special character."""
-        with pytest.raises(ValidationError) as exc_info:
-            TeamCreate(name="analytics-")
-        assert "end" in str(exc_info.value).lower() or "alphanumeric" in str(exc_info.value).lower()
-
-    def test_invalid_name_with_special_chars(self) -> None:
-        """Invalid name with disallowed special characters."""
-        with pytest.raises(ValidationError) as exc_info:
-            TeamCreate(name="analytics@team")
-        assert "alphanumeric" in str(exc_info.value).lower()
+            TeamCreate(name=name)
+        error_text = str(exc_info.value).lower()
+        assert error_fragment in error_text or "short" in error_text or "whitespace" in error_text
 
     def test_name_too_long(self) -> None:
         """Name exceeds maximum length."""

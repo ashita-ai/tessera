@@ -5,6 +5,41 @@ from httpx import AsyncClient
 
 pytestmark = pytest.mark.asyncio
 
+NONEXISTENT_UUID = "00000000-0000-0000-0000-000000000000"
+
+
+class TestNotFoundEndpoints:
+    """Tests for 404 responses across resource types."""
+
+    @pytest.mark.parametrize(
+        ("method", "path"),
+        [
+            ("GET", f"/api/v1/teams/{NONEXISTENT_UUID}"),
+            ("PATCH", f"/api/v1/teams/{NONEXISTENT_UUID}"),
+            ("GET", f"/api/v1/assets/{NONEXISTENT_UUID}/dependencies"),
+            ("GET", f"/api/v1/proposals/{NONEXISTENT_UUID}/status"),
+            ("POST", f"/api/v1/proposals/{NONEXISTENT_UUID}/withdraw"),
+        ],
+        ids=[
+            "get_team",
+            "update_team",
+            "list_dependencies",
+            "proposal_status",
+            "withdraw_proposal",
+        ],
+    )
+    async def test_nonexistent_resource_returns_404(
+        self, client: AsyncClient, method: str, path: str
+    ) -> None:
+        """Accessing a nonexistent resource returns 404."""
+        if method == "GET":
+            resp = await client.get(path)
+        elif method == "PATCH":
+            resp = await client.patch(path, json={"name": "new-name"})
+        else:
+            resp = await client.post(path)
+        assert resp.status_code == 404
+
 
 class TestContractEdgeCases:
     """Tests for contract publishing edge cases."""
@@ -15,7 +50,7 @@ class TestContractEdgeCases:
         team_id = team_resp.json()["id"]
 
         resp = await client.post(
-            f"/api/v1/assets/00000000-0000-0000-0000-000000000000/contracts?published_by={team_id}",
+            f"/api/v1/assets/{NONEXISTENT_UUID}/contracts?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {"type": "object"},
@@ -35,8 +70,7 @@ class TestContractEdgeCases:
         asset_id = asset_resp.json()["id"]
 
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts"
-            "?published_by=00000000-0000-0000-0000-000000000000",
+            f"/api/v1/assets/{asset_id}/contracts?published_by={NONEXISTENT_UUID}",
             json={
                 "version": "1.0.0",
                 "schema": {"type": "object"},
@@ -173,54 +207,23 @@ class TestProposalEdgeCases:
 
 
 class TestDependencyEdgeCases:
-    """Tests for dependency edge cases."""
+    """Tests for dependency edge cases (detailed tests in test_dependencies.py)."""
 
-    async def test_list_dependencies_asset_not_found(self, client: AsyncClient):
-        """Listing dependencies for nonexistent asset should 404."""
-        resp = await client.get("/api/v1/assets/00000000-0000-0000-0000-000000000000/dependencies")
-        assert resp.status_code == 404
-
-    async def test_create_dependency_with_different_types(self, client: AsyncClient):
-        """Create dependencies with different types."""
-        team_resp = await client.post("/api/v1/teams", json={"name": "dep-types"})
+    async def test_create_dependency_self_reference(self, client: AsyncClient):
+        """An asset cannot depend on itself."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "dep-self"})
         team_id = team_resp.json()["id"]
 
-        downstream_resp = await client.post(
-            "/api/v1/assets", json={"fqn": "deptypes.downstream.table", "owner_team_id": team_id}
+        asset_resp = await client.post(
+            "/api/v1/assets", json={"fqn": "dep.self.table", "owner_team_id": team_id}
         )
-        downstream_id = downstream_resp.json()["id"]
+        asset_id = asset_resp.json()["id"]
 
-        # Test valid dependency types from DependencyType enum
-        for dep_type in ["consumes", "references", "transforms"]:
-            upstream_resp = await client.post(
-                "/api/v1/assets",
-                json={"fqn": f"deptypes.{dep_type}.source", "owner_team_id": team_id},
-            )
-            upstream_id = upstream_resp.json()["id"]
-
-            resp = await client.post(
-                f"/api/v1/assets/{downstream_id}/dependencies",
-                json={"depends_on_asset_id": upstream_id, "dependency_type": dep_type},
-            )
-            assert resp.status_code == 201
-            assert resp.json()["dependency_type"] == dep_type
-
-
-class TestTeamEdgeCases:
-    """Tests for team edge cases."""
-
-    async def test_update_team_not_found(self, client: AsyncClient):
-        """Updating nonexistent team should 404."""
-        resp = await client.patch(
-            "/api/v1/teams/00000000-0000-0000-0000-000000000000",
-            json={"name": "new-name"},
+        resp = await client.post(
+            f"/api/v1/assets/{asset_id}/dependencies",
+            json={"depends_on_asset_id": asset_id, "dependency_type": "consumes"},
         )
-        assert resp.status_code == 404
-
-    async def test_get_team_not_found(self, client: AsyncClient):
-        """Getting nonexistent team should 404."""
-        resp = await client.get("/api/v1/teams/00000000-0000-0000-0000-000000000000")
-        assert resp.status_code == 404
+        assert resp.status_code == 400
 
 
 class TestCompatibilityModes:
