@@ -1,5 +1,6 @@
 """Tests for semantic versioning enforcement (Issue #19)."""
 
+import pytest
 from httpx import AsyncClient
 
 from tests.conftest import make_asset, make_schema, make_team
@@ -463,14 +464,26 @@ class TestVersionSuggestionModel:
 class TestPrereleaseVersions:
     """Test pre-release version handling (Issue #229)."""
 
-    async def test_accepts_alpha_version(self, client: AsyncClient):
-        """1.0.0-alpha should be valid and publishable."""
+    @pytest.mark.parametrize(
+        ("version", "fqn_suffix"),
+        [
+            ("1.0.0-alpha", "alpha"),
+            ("1.0.0-beta.1", "beta"),
+            ("1.0.0-rc.1", "rc"),
+            ("1.0.0+build.123", "build"),
+        ],
+        ids=["alpha", "beta", "rc", "build_metadata"],
+    )
+    async def test_accepts_prerelease_and_build_versions(
+        self, client: AsyncClient, version: str, fqn_suffix: str
+    ):
+        """Pre-release and build metadata versions should be valid and publishable."""
         resp = await client.post("/api/v1/teams", json=make_team("test-team"))
         team_id = resp.json()["id"]
 
         resp = await client.post(
             "/api/v1/assets",
-            json=make_asset("db.schema.alpha_table", team_id),
+            json=make_asset(f"db.schema.{fqn_suffix}_table", team_id),
         )
         asset_id = resp.json()["id"]
 
@@ -478,70 +491,10 @@ class TestPrereleaseVersions:
         resp = await client.post(
             f"/api/v1/assets/{asset_id}/contracts",
             params={"published_by": team_id},
-            json={"schema": schema, "version": "1.0.0-alpha"},
+            json={"schema": schema, "version": version},
         )
         assert resp.status_code == 201
-        assert resp.json()["contract"]["version"] == "1.0.0-alpha"
-
-    async def test_accepts_beta_version(self, client: AsyncClient):
-        """1.0.0-beta.1 should be valid and publishable."""
-        resp = await client.post("/api/v1/teams", json=make_team("test-team"))
-        team_id = resp.json()["id"]
-
-        resp = await client.post(
-            "/api/v1/assets",
-            json=make_asset("db.schema.beta_table", team_id),
-        )
-        asset_id = resp.json()["id"]
-
-        schema = make_schema(id="integer", name="string")
-        resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts",
-            params={"published_by": team_id},
-            json={"schema": schema, "version": "1.0.0-beta.1"},
-        )
-        assert resp.status_code == 201
-        assert resp.json()["contract"]["version"] == "1.0.0-beta.1"
-
-    async def test_accepts_rc_version(self, client: AsyncClient):
-        """1.0.0-rc.1 should be valid and publishable."""
-        resp = await client.post("/api/v1/teams", json=make_team("test-team"))
-        team_id = resp.json()["id"]
-
-        resp = await client.post(
-            "/api/v1/assets",
-            json=make_asset("db.schema.rc_table", team_id),
-        )
-        asset_id = resp.json()["id"]
-
-        schema = make_schema(id="integer", name="string")
-        resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts",
-            params={"published_by": team_id},
-            json={"schema": schema, "version": "1.0.0-rc.1"},
-        )
-        assert resp.status_code == 201
-        assert resp.json()["contract"]["version"] == "1.0.0-rc.1"
-
-    async def test_accepts_build_metadata(self, client: AsyncClient):
-        """1.0.0+build.123 should be valid (build metadata, not prerelease)."""
-        resp = await client.post("/api/v1/teams", json=make_team("test-team"))
-        team_id = resp.json()["id"]
-
-        resp = await client.post(
-            "/api/v1/assets",
-            json=make_asset("db.schema.build_table", team_id),
-        )
-        asset_id = resp.json()["id"]
-
-        schema = make_schema(id="integer", name="string")
-        resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts",
-            params={"published_by": team_id},
-            json={"schema": schema, "version": "1.0.0+build.123"},
-        )
-        assert resp.status_code == 201
-        assert resp.json()["contract"]["version"] == "1.0.0+build.123"
+        assert resp.json()["contract"]["version"] == version
 
     async def test_prerelease_skips_proposal_workflow(self, client: AsyncClient):
         """Breaking changes in prerelease shouldn't require acknowledgment."""
