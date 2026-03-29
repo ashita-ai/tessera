@@ -1,5 +1,7 @@
 """Tests for the consolidated versioning module."""
 
+import logging
+
 import pytest
 
 from tessera.services.versioning import (
@@ -49,6 +51,26 @@ class TestParseSemverLenient:
 
     def test_invalid_returns_default(self) -> None:
         assert parse_semver_lenient("garbage") == (1, 0, 0)
+
+    def test_valid_version_does_not_warn(self, caplog: pytest.LogCaptureFixture) -> None:
+        with caplog.at_level(logging.WARNING, logger="tessera.services.versioning"):
+            parse_semver_lenient("2.0.0")
+        assert caplog.records == []
+
+    def test_malformed_version_logs_warning(self, caplog: pytest.LogCaptureFixture) -> None:
+        with caplog.at_level(logging.WARNING, logger="tessera.services.versioning"):
+            result = parse_semver_lenient("not-a-version")
+        assert result == (1, 0, 0)
+        assert len(caplog.records) == 1
+        assert caplog.records[0].levelno == logging.WARNING
+        assert "not-a-version" in caplog.records[0].message
+
+    def test_empty_string_logs_warning(self, caplog: pytest.LogCaptureFixture) -> None:
+        with caplog.at_level(logging.WARNING, logger="tessera.services.versioning"):
+            result = parse_semver_lenient("")
+        assert result == (1, 0, 0)
+        assert len(caplog.records) == 1
+        assert "''" in caplog.records[0].message
 
 
 class TestIsPrerelease:

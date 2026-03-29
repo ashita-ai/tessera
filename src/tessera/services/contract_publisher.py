@@ -384,6 +384,7 @@ async def bulk_publish_contracts(
                             publisher_id=published_by,
                             version=suggested_version,
                             change_type=str(diff_result.change_type.value),
+                            previous_version=current_contract.version,
                         )
 
                         # Log guarantee changes if guarantees differ
@@ -901,6 +902,7 @@ class ContractPublishingWorkflow:
                 publisher_id=self.published_by,
                 version=contract.version,
                 change_type=str(diff_result.change_type),
+                previous_version=self.current_contract.version,
             )
             await invalidate_asset(str(self.asset.id))
             await cache_contract(str(contract.id), Contract.model_validate(contract).model_dump())
@@ -921,6 +923,7 @@ class ContractPublishingWorkflow:
                 version=contract.version,
                 change_type=str(diff_result.change_type),
                 force=True,
+                previous_version=self.current_contract.version,
             )
             await invalidate_asset(str(self.asset.id))
             await cache_contract(str(contract.id), Contract.model_validate(contract).model_dump())
@@ -943,6 +946,7 @@ class ContractPublishingWorkflow:
                 version=contract.version,
                 change_type=str(diff_result.change_type),
                 prerelease=True,
+                previous_version=self.current_contract.version,
             )
             await invalidate_asset(str(self.asset.id))
             await cache_contract(str(contract.id), Contract.model_validate(contract).model_dump())
@@ -964,6 +968,7 @@ class ContractPublishingWorkflow:
                 publisher_id=self.published_by,
                 version=contract.version,
                 change_type=str(diff_result.change_type),
+                previous_version=self.current_contract.version,
             )
             await invalidate_asset(str(self.asset.id))
             await cache_contract(str(contract.id), Contract.model_validate(contract).model_dump())
