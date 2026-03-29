@@ -25,7 +25,11 @@ from tessera.api.sync.dbt.upload_ops import (
     auto_register_consumers,
     get_active_contract,
 )
-from tessera.api.sync.helpers import resolve_team_by_name, resolve_user_by_email
+from tessera.api.sync.helpers import (
+    deep_merge_metadata,
+    resolve_team_by_name,
+    resolve_user_by_email,
+)
 from tessera.db import AssetDB, ContractDB, TeamDB, UserDB, get_session
 from tessera.models.enums import ResourceType
 from tessera.services import audit
@@ -298,7 +302,10 @@ async def upload_dbt_manifest(
         infer_refs = upload_req.infer_consumers_from_refs and not is_source
 
         if existing:
-            existing.metadata_ = metadata
+            existing.metadata_ = deep_merge_metadata(
+                existing.metadata_ or {},
+                metadata,
+            )
             existing.owner_team_id = resolved_team_id
             existing.resource_type = (
                 ResourceType.SOURCE if is_source else map_dbt_resource_type(resource_type)
