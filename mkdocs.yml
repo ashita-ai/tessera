@@ -104,6 +104,7 @@ nav:
     - Webhooks: api/webhooks.md
     - Audit: api/audit.md
     - Sync: api/sync.md
+  - FAQ: faq.md
   - Contributing: contributing.md
 
 extra:
