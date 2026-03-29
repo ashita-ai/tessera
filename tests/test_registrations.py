@@ -1,7 +1,13 @@
 """Tests for /api/v1/registrations endpoints."""
 
+from uuid import UUID
+
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from tessera.db import AuditEventDB, RegistrationDB
 
 pytestmark = pytest.mark.asyncio
 
@@ -247,3 +253,117 @@ class TestRegistrationsEndpoint:
         # Verify it's gone
         resp = await client.get(f"/api/v1/registrations/{reg_id}")
         assert resp.status_code == 404
+
+    async def test_delete_registration_audit_and_softdelete_same_flush(
+        self, client: AsyncClient, test_session: AsyncSession
+    ):
+        """Verify audit event and soft-delete are flushed together.
+
+        Both the deleted_at mutation and the audit event must be persisted
+        in the same flush. If either fails, neither should be committed.
+        """
+        producer_resp = await client.post("/api/v1/teams", json={"name": "del-audit-prod"})
+        consumer_resp = await client.post("/api/v1/teams", json={"name": "del-audit-cons"})
+        producer_id = producer_resp.json()["id"]
+        consumer_id = consumer_resp.json()["id"]
+
+        asset_resp = await client.post(
+            "/api/v1/assets",
+            json={"fqn": "del.audit.consistency", "owner_team_id": producer_id},
+        )
+        asset_id = asset_resp.json()["id"]
+
+        contract_resp = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            json={
+                "version": "1.0.0",
+                "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
+                "compatibility_mode": "backward",
+            },
+        )
+        contract_id = contract_resp.json()["contract"]["id"]
+
+        reg_resp = await client.post(
+            f"/api/v1/registrations?contract_id={contract_id}",
+            json={"consumer_team_id": consumer_id},
+        )
+        reg_id = UUID(reg_resp.json()["id"])
+
+        # Delete the registration
+        resp = await client.delete(f"/api/v1/registrations/{reg_id}")
+        assert resp.status_code == 204
+
+        # Both soft-delete and audit event must exist in the DB
+        reg_result = await test_session.execute(
+            select(RegistrationDB).where(RegistrationDB.id == reg_id)
+        )
+        registration = reg_result.scalar_one()
+        assert registration.deleted_at is not None, "soft-delete was not persisted"
+
+        audit_result = await test_session.execute(
+            select(AuditEventDB)
+            .where(AuditEventDB.entity_id == reg_id)
+            .where(AuditEventDB.action == "registration.deleted")
+        )
+        audit_event = audit_result.scalar_one_or_none()
+        assert audit_event is not None, "audit event was not persisted"
+        assert audit_event.entity_type == "registration"
+        assert audit_event.payload["contract_id"] == contract_id
+
+    async def test_delete_registration_audit_occurred_after_deleted_at(
+        self, client: AsyncClient, test_session: AsyncSession
+    ):
+        """Verify audit occurred_at is >= deleted_at.
+
+        The mutation (deleted_at) must happen before the audit event is
+        recorded, so the audit timestamp must be equal to or after the
+        soft-delete timestamp.
+        """
+        producer_resp = await client.post("/api/v1/teams", json={"name": "del-order-prod"})
+        consumer_resp = await client.post("/api/v1/teams", json={"name": "del-order-cons"})
+        producer_id = producer_resp.json()["id"]
+        consumer_id = consumer_resp.json()["id"]
+
+        asset_resp = await client.post(
+            "/api/v1/assets",
+            json={"fqn": "del.order.check", "owner_team_id": producer_id},
+        )
+        asset_id = asset_resp.json()["id"]
+
+        contract_resp = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            json={
+                "version": "1.0.0",
+                "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
+                "compatibility_mode": "backward",
+            },
+        )
+        contract_id = contract_resp.json()["contract"]["id"]
+
+        reg_resp = await client.post(
+            f"/api/v1/registrations?contract_id={contract_id}",
+            json={"consumer_team_id": consumer_id},
+        )
+        reg_id = UUID(reg_resp.json()["id"])
+
+        # Delete the registration
+        resp = await client.delete(f"/api/v1/registrations/{reg_id}")
+        assert resp.status_code == 204
+
+        # Fetch both timestamps
+        reg_result = await test_session.execute(
+            select(RegistrationDB).where(RegistrationDB.id == reg_id)
+        )
+        registration = reg_result.scalar_one()
+
+        audit_result = await test_session.execute(
+            select(AuditEventDB)
+            .where(AuditEventDB.entity_id == reg_id)
+            .where(AuditEventDB.action == "registration.deleted")
+        )
+        audit_event = audit_result.scalar_one()
+
+        assert audit_event.occurred_at >= registration.deleted_at, (
+            f"audit occurred_at ({audit_event.occurred_at}) must be >= "
+            f"deleted_at ({registration.deleted_at})"
+        )
