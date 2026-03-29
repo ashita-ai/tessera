@@ -1,7 +1,7 @@
 """Add agent identity columns to API keys and audit events.
 
-Revision ID: 016
-Revises: 015
+Revision ID: 017
+Revises: 016
 Create Date: 2026-03-13
 
 Adds:
@@ -21,8 +21,8 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "016"
-down_revision: str = "015"
+revision: str = "017"
+down_revision: str = "016"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
