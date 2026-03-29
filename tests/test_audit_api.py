@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from tessera.db.models import AuditEventDB, Base
 from tessera.main import app
+from tessera.services.audit import log_contract_published
 
 TEST_DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 _USE_SQLITE = TEST_DATABASE_URL.startswith("sqlite")
@@ -316,7 +317,9 @@ class TestAuditFiltering:
         assert result["entity_type"] == "type1"
         assert result["action"] == "action1"
 
-    async def test_filter_returns_empty_for_no_matches(self, session: AsyncSession, client: AsyncClient):
+    async def test_filter_returns_empty_for_no_matches(
+        self, session: AsyncSession, client: AsyncClient
+    ):
         """Filter returns empty list if no matches."""
         e1 = AuditEventDB(
             entity_type="asset",
@@ -331,3 +334,31 @@ class TestAuditFiltering:
         assert resp.status_code == 200
         assert resp.json()["total"] == 0
         assert resp.json()["results"] == []
+
+
+class TestLogContractPublished:
+    """Tests for the log_contract_published audit helper."""
+
+    async def test_previous_version_included_in_payload(self, session: AsyncSession) -> None:
+        """When previous_version is provided, it appears in the audit payload."""
+        contract_id = uuid4()
+        publisher_id = uuid4()
+        event = await log_contract_published(
+            session=session,
+            contract_id=contract_id,
+            publisher_id=publisher_id,
+            version="2.0.0",
+            previous_version="not-a-version",
+        )
+        assert event.payload["previous_version"] == "not-a-version"
+        assert event.payload["version"] == "2.0.0"
+
+    async def test_previous_version_omitted_when_none(self, session: AsyncSession) -> None:
+        """When previous_version is None, it is not present in the payload."""
+        event = await log_contract_published(
+            session=session,
+            contract_id=uuid4(),
+            publisher_id=uuid4(),
+            version="1.0.0",
+        )
+        assert "previous_version" not in event.payload

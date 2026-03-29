@@ -6,11 +6,14 @@ Other modules import from this module rather than defining their own.
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any, Final
 
 if TYPE_CHECKING:
     from tessera.models import VersionSuggestion
     from tessera.models.enums import ChangeType
+
+logger = logging.getLogger(__name__)
 
 INITIAL_VERSION: Final[str] = "1.0.0"
 """Version assigned to the first contract published for an asset."""
@@ -44,10 +47,17 @@ def parse_semver_lenient(version: str) -> tuple[int, int, int]:
     Use this when you need a best-effort parse that never raises, e.g.
     when handling versions that may have been stored before validation
     was enforced.
+
+    Logs a warning when falling back so malformed versions don't go
+    unnoticed in the audit trail.
     """
     try:
         return parse_semver(version)
     except ValueError:
+        logger.warning(
+            "Malformed version string %r could not be parsed; falling back to (1, 0, 0)",
+            version,
+        )
         return (1, 0, 0)
 
 

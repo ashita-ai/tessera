@@ -128,21 +128,31 @@ async def log_contract_published(
     change_type: str | None = None,
     force: bool = False,
     prerelease: bool = False,
+    previous_version: str | None = None,
 ) -> AuditEventDB:
-    """Log a contract publication event."""
+    """Log a contract publication event.
+
+    Args:
+        previous_version: Raw version string of the contract being superseded.
+            Captured so the audit trail preserves the original value even when
+            lenient parsing normalized it for version-bump computation.
+    """
     action = AuditAction.CONTRACT_FORCE_PUBLISHED if force else AuditAction.CONTRACT_PUBLISHED
+    payload: dict[str, Any] = {
+        "version": version,
+        "change_type": change_type,
+        "force": force,
+        "prerelease": prerelease,
+    }
+    if previous_version is not None:
+        payload["previous_version"] = previous_version
     return await log_event(
         session=session,
         entity_type="contract",
         entity_id=contract_id,
         action=action,
         actor_id=publisher_id,
-        payload={
-            "version": version,
-            "change_type": change_type,
-            "force": force,
-            "prerelease": prerelease,
-        },
+        payload=payload,
     )
 
 
