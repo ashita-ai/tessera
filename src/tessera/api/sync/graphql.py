@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from tessera.api.auth import Auth, RequireAdmin
 from tessera.api.errors import BadRequestError, ErrorCode, NotFoundError
 from tessera.api.rate_limit import limit_admin
+from tessera.api.sync.helpers import deep_merge_metadata
 from tessera.db import AssetDB, ContractDB, TeamDB, get_session
 from tessera.models.enums import CompatibilityMode, ContractStatus, ResourceType
 from tessera.services import audit
@@ -180,10 +181,10 @@ async def import_graphql(
 
             if existing_asset:
                 # Update existing asset metadata
-                existing_asset.metadata_ = {
-                    **existing_asset.metadata_,
-                    **asset_def.metadata,
-                }
+                existing_asset.metadata_ = deep_merge_metadata(
+                    existing_asset.metadata_ or {},
+                    asset_def.metadata,
+                )
                 existing_asset.resource_type = ResourceType.GRAPHQL_QUERY
                 await session.flush()
 
