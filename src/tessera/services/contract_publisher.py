@@ -845,7 +845,7 @@ class ContractPublishingWorkflow:
             is_compat, breaks = check_compatibility(
                 self.current_contract.schema_def,
                 self.schema_to_store,
-                self.current_contract.compatibility_mode,
+                self.compatibility_mode,
             )
             self.version_suggestion = compute_version_suggestion(
                 self.current_contract.version,
@@ -888,7 +888,7 @@ class ContractPublishingWorkflow:
         is_compatible, breaking_changes = check_compatibility(
             self.current_contract.schema_def,
             self.schema_to_store,
-            self.current_contract.compatibility_mode,
+            self.compatibility_mode,
         )
         breaking_changes_list = [bc.to_dict() for bc in breaking_changes]
 

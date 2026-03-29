@@ -422,6 +422,108 @@ class TestContractFiltering:
         assert "1.1.0" not in dep_versions
 
 
+class TestCompatibilityModeUsesNewMode:
+    """Tests for issue #379: compatibility check must use the NEW contract's mode."""
+
+    async def test_tightening_mode_from_none_to_backward_detects_breaks(self, client: AsyncClient):
+        """Publishing v2 with BACKWARD mode should detect breaks even if v1 was NONE."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "tighten-mode"})
+        team_id = team_resp.json()["id"]
+        asset_resp = await client.post(
+            "/api/v1/assets",
+            json={"fqn": "compat.tighten.table", "owner_team_id": team_id},
+        )
+        asset_id = asset_resp.json()["id"]
+
+        # v1 with NONE mode — anything goes
+        resp1 = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            json={
+                "version": "1.0.0",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "integer"},
+                        "email": {"type": "string"},
+                    },
+                    "required": ["id", "email"],
+                },
+                "compatibility_mode": "none",
+            },
+        )
+        assert resp1.status_code == 201
+
+        # v2 tightens to BACKWARD and removes a required field — this is breaking
+        resp2 = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            json={
+                "version": "2.0.0",
+                "schema": {
+                    "type": "object",
+                    "properties": {"id": {"type": "integer"}},
+                    "required": ["id"],
+                },
+                "compatibility_mode": "backward",
+            },
+        )
+        assert resp2.status_code == 201
+        data = resp2.json()
+        # With the fix, the NEW mode (backward) is used → breaking change detected
+        assert (
+            data["action"] == "proposal_created"
+        ), "Tightening compatibility mode to backward should detect the removed field as breaking"
+        assert len(data["breaking_changes"]) > 0
+
+    async def test_relaxing_mode_from_backward_to_none_allows_publish(self, client: AsyncClient):
+        """Relaxing mode from BACKWARD to NONE should allow any change to auto-publish."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "relax-mode"})
+        team_id = team_resp.json()["id"]
+        asset_resp = await client.post(
+            "/api/v1/assets",
+            json={"fqn": "compat.relax.table", "owner_team_id": team_id},
+        )
+        asset_id = asset_resp.json()["id"]
+
+        # v1 with BACKWARD mode
+        resp1 = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            json={
+                "version": "1.0.0",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "integer"},
+                        "email": {"type": "string"},
+                    },
+                    "required": ["id", "email"],
+                },
+                "compatibility_mode": "backward",
+            },
+        )
+        assert resp1.status_code == 201
+
+        # v2 relaxes to NONE and removes a field — should auto-publish
+        resp2 = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            json={
+                "version": "2.0.0",
+                "schema": {
+                    "type": "object",
+                    "properties": {"id": {"type": "integer"}},
+                    "required": ["id"],
+                },
+                "compatibility_mode": "none",
+            },
+        )
+        assert resp2.status_code == 201
+        data = resp2.json()
+        # With NONE mode, no breaking change detection → auto-publish
+        assert data["action"] in (
+            "published",
+            "force_published",
+        ), "Relaxing to NONE mode should allow publishing without proposals"
+
+
 class TestGuaranteesUpdate:
     """Tests for PATCH /api/v1/contracts/{id}/guarantees endpoint."""
 
