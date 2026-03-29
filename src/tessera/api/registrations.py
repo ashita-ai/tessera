@@ -210,7 +210,9 @@ async def delete_registration(
             code=ErrorCode.UNAUTHORIZED_TEAM,
         )
 
-    # Audit log registration deletion
+    # Mutate first, then audit, then flush both together
+    registration.deleted_at = datetime.now(UTC)
+
     await audit.log_event(
         session=session,
         entity_type="registration",
@@ -220,4 +222,4 @@ async def delete_registration(
         payload={"contract_id": str(registration.contract_id)},
     )
 
-    registration.deleted_at = datetime.now(UTC)
+    await session.flush()
