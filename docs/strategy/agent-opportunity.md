@@ -209,50 +209,9 @@ Human teams can negotiate migration paths in meetings. Agents can't. If an agent
 
 ---
 
-## Competitive Positioning
-
-### What No One Else Has
-
-No open-source tool combines:
-1. Schema change detection across multiple formats
-2. Producer-consumer coordination workflow
-3. AI agent identity and accountability
-4. Machine-readable preflight checks
-5. Migration suggestion generation
-
-The closest competitors lack the coordination layer entirely:
-- **DataContract CLI**: Validates and diffs, but has no producer-consumer relationship, no proposals, no agent identity.
-- **Confluent Schema Registry**: Has compatibility modes, but is Kafka-only with no warehouse support, no agent features, no coordination workflow.
-- **Soda**: Has "data contracts" branding, but they're unilateral quality checks with no consumer registration, no dependency tracking.
-- **dbt contracts**: Has `contract: {enforced: true}`, but it's producer-side only, dbt-only, no cross-system support.
-
-### The Moat Question
-
-Features can be copied. The moat has to come from one of:
-
-1. **Ecosystem gravity.** If Tessera becomes the way dbt users handle breaking changes, and the way agents discover schemas, the integration surface becomes the moat. This requires the MCP server and deep dbt integration.
-
-2. **Dependency graph completeness.** The value of the coordination layer scales superlinearly with the completeness of the dependency graph. A tool with 90% coverage is 10x more valuable than one with 50% coverage. Passive discovery is how you get to 90%. First tool to have a comprehensive graph wins, because migrating away means rebuilding the graph.
-
-3. **Standard-setting.** If Tessera's contract format becomes the way people describe data interfaces — the way OpenAPI became the way people describe REST APIs — the standard itself is the moat. This requires community adoption, not just technical superiority.
-
----
-
 ## Risks
 
-### Risk 1: dbt Labs ships native coordination
-
-dbt already has `contract: {enforced: true}`. If dbt Labs adds consumer registration and breaking change proposals to dbt Cloud, Tessera's primary on-ramp closes. **Mitigation:** Tessera works across dbt, OpenAPI, GraphQL, gRPC, Avro. dbt can only coordinate within dbt. Position Tessera as the cross-system coordination layer, with dbt as one input among many.
-
-### Risk 2: Agent frameworks build their own schema discovery
-
-LangChain, CrewAI, or others could build native schema discovery that bypasses Tessera. **Mitigation:** Schema discovery without coordination is read-only. It tells you what exists today but doesn't help you manage change. Tessera's value is the coordination, not just the catalog.
-
-### Risk 3: The agent market isn't ready
-
-Enterprises might not adopt agent-to-data patterns at scale for another 2-3 years. **Mitigation:** The human coordination use case is viable today. Agent features are additive, not a replacement. Building for agents doesn't require abandoning the human use case.
-
-### Risk 4: Registration cold-start kills adoption
+### Risk 1: Registration cold-start kills adoption
 
 If the dependency graph is empty, impact analysis is useless, and the coordination workflow notifies no one. Agents won't register voluntarily. **Mitigation:** Passive discovery (see [Passive Discovery](passive-discovery.md)) and dbt sync (automatic dependency extraction from manifests) are the two paths to bootstrap the graph without requiring manual registration.
 
@@ -283,23 +242,3 @@ If the dependency graph is empty, impact analysis is useless, and the coordinati
 8. **Agent confidence scoring.** Let agent publishers declare confidence in their schemas. Low-confidence triggers additional review.
 
 9. **Schema convention enforcement.** Flag agent-generated schemas that deviate from conventions established by prior versions of the same asset.
-
----
-
-## The Positioning Question
-
-Two viable framings:
-
-**Option A: "Data contracts for data teams, with first-class agent support."**
-- Safer. Addresses the existing buyer (data engineering leads).
-- Agent features are a differentiator, not the pitch.
-- Risk: sounds incremental. Doesn't capture the agent opportunity's full upside.
-
-**Option B: "The schema intelligence layer for AI agents and data teams."**
-- Bolder. Addresses the emerging buyer (platform engineering, AI infrastructure).
-- Positions Tessera at the intersection of data governance and AI safety.
-- Risk: the "AI agent" buyer doesn't have established budgets yet.
-
-**Recommendation: Option A for now, with a migration path to Option B.** Ship the MCP server. Let agent adoption grow organically through the MCP distribution channel. When agent usage hits a meaningful percentage of traffic (visible in audit trail via `actor_type` filtering), pivot the messaging to Option B with data to back it up.
-
-The audit trail is the canary. When `actor_type=agent` events exceed `actor_type=human` events on a deployment, you'll know the pivot is overdue.
