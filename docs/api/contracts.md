@@ -214,6 +214,8 @@ Publish multiple contracts in a single request. Useful for CI/CD pipelines.
 
 ### Response
 
+Returns **200** when all items succeed, or **207 Multi-Status** when any items fail.
+
 ```json
 {
   "results": [

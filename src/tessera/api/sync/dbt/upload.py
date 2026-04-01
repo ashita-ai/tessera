@@ -3,7 +3,7 @@
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -175,6 +175,7 @@ async def upload_dbt_manifest(
     request: Request,
     upload_req: DbtManifestUploadRequest,
     auth: Auth,
+    response: Response,
     _: None = RequireAdmin,
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
@@ -461,8 +462,12 @@ async def upload_dbt_manifest(
         },
     )
 
+    has_failures = bool(contract_warnings or registration_warnings)
+    if has_failures:
+        response.status_code = 207
+
     return {
-        "status": "success",
+        "status": "partial_success" if has_failures else "success",
         "conflict_mode": conflict_mode,
         "assets": {
             "created": assets_created,

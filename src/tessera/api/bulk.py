@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -51,6 +51,7 @@ async def bulk_create_registrations(
     request: Request,
     auth: Auth,
     bulk_request: BulkRegistrationRequest,
+    response: Response,
     _: None = RequireWrite,
     session: AsyncSession = Depends(get_session),
 ) -> BulkRegistrationResponse:
@@ -182,6 +183,9 @@ async def bulk_create_registrations(
             )
             failed += 1
 
+    if failed > 0:
+        response.status_code = 207
+
     return BulkRegistrationResponse(
         total=len(bulk_request.registrations),
         succeeded=succeeded,
@@ -196,6 +200,7 @@ async def bulk_create_assets(
     request: Request,
     auth: Auth,
     bulk_request: BulkAssetRequest,
+    response: Response,
     _: None = RequireWrite,
     session: AsyncSession = Depends(get_session),
 ) -> BulkAssetResponse:
@@ -315,6 +320,9 @@ async def bulk_create_assets(
             )
             failed += 1
 
+    if failed > 0:
+        response.status_code = 207
+
     return BulkAssetResponse(
         total=len(bulk_request.assets),
         succeeded=succeeded,
@@ -372,6 +380,7 @@ async def bulk_acknowledge_proposals(
     request: Request,
     auth: Auth,
     bulk_request: BulkAcknowledgmentRequest,
+    response: Response,
     _: None = RequireWrite,
     session: AsyncSession = Depends(get_session),
 ) -> BulkAcknowledgmentResponse:
@@ -523,6 +532,9 @@ async def bulk_acknowledge_proposals(
             failed += 1
             if not bulk_request.continue_on_error:
                 break
+
+    if failed > 0:
+        response.status_code = 207
 
     return BulkAcknowledgmentResponse(
         total=len(bulk_request.acknowledgments),

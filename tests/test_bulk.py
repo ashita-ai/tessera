@@ -139,7 +139,7 @@ class TestBulkRegistrations:
             json={"registrations": [{"contract_id": contract_id, "consumer_team_id": consumer_id}]},
         )
 
-        # Second bulk create should fail
+        # Second bulk create should fail with 207
         resp = await client.post(
             "/api/v1/bulk/registrations",
             json={
@@ -147,7 +147,7 @@ class TestBulkRegistrations:
                 "skip_duplicates": False,
             },
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 207
         data = resp.json()
         assert data["failed"] == 1
         assert data["results"][0]["success"] is False
@@ -169,7 +169,7 @@ class TestBulkRegistrations:
                 ]
             },
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 207
         data = resp.json()
         assert data["failed"] == 1
         assert "not found" in data["results"][0]["error"]
@@ -236,7 +236,7 @@ class TestBulkAssets:
             json={"assets": [{"fqn": "fail.dup.asset", "owner_team_id": team_id}]},
         )
 
-        # Second create should fail
+        # Second create should fail with 207
         resp = await client.post(
             "/api/v1/bulk/assets",
             json={
@@ -244,7 +244,7 @@ class TestBulkAssets:
                 "skip_duplicates": False,
             },
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 207
         data = resp.json()
         assert data["failed"] == 1
         assert "already exists" in data["results"][0]["error"]
@@ -262,7 +262,7 @@ class TestBulkAssets:
                 ]
             },
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 207
         data = resp.json()
         assert data["failed"] == 1
         # Could fail on authorization or team not found
@@ -518,7 +518,7 @@ class TestBulkAcknowledgments:
                 ]
             },
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 207
         data = resp.json()
         assert data["failed"] == 1
         # Should fail because already acknowledged or proposal not pending
@@ -541,7 +541,7 @@ class TestBulkAcknowledgments:
                 ]
             },
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 207
         data = resp.json()
         assert data["failed"] == 1
         assert "not found" in data["results"][0]["error"]
@@ -605,13 +605,130 @@ class TestBulkAcknowledgments:
                 "continue_on_error": True,
             },
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 207
         data = resp.json()
         assert data["total"] == 2
         assert data["succeeded"] == 1
         assert data["failed"] == 1
         assert data["results"][0]["success"] is False
         assert data["results"][1]["success"] is True
+
+
+class TestBulkMultiStatus:
+    """Tests for HTTP 207 Multi-Status on partial failure (issue #385)."""
+
+    async def test_bulk_assets_partial_failure_returns_207(self, client: AsyncClient) -> None:
+        """Mixed success and failure in bulk assets returns 207."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "multi-status-team"})
+        team_id = team_resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/bulk/assets",
+            json={
+                "assets": [
+                    {"fqn": "ms.good.asset", "owner_team_id": team_id},
+                    {
+                        "fqn": "ms.bad.asset",
+                        "owner_team_id": "00000000-0000-0000-0000-000000000000",
+                    },
+                ]
+            },
+        )
+        assert resp.status_code == 207
+        data = resp.json()
+        assert data["total"] == 2
+        assert data["succeeded"] == 1
+        assert data["failed"] == 1
+        assert data["results"][0]["success"] is True
+        assert data["results"][1]["success"] is False
+
+    async def test_bulk_assets_all_success_returns_200(self, client: AsyncClient) -> None:
+        """All-successful bulk assets returns 200."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "all-success-team"})
+        team_id = team_resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/bulk/assets",
+            json={
+                "assets": [
+                    {"fqn": "ok.one.asset", "owner_team_id": team_id},
+                    {"fqn": "ok.two.asset", "owner_team_id": team_id},
+                ]
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 2
+        assert data["succeeded"] == 2
+        assert data["failed"] == 0
+
+    async def test_bulk_registrations_partial_failure_returns_207(
+        self, client: AsyncClient
+    ) -> None:
+        """Mixed success and failure in bulk registrations returns 207."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "ms-reg-team"})
+        consumer_resp = await client.post("/api/v1/teams", json={"name": "ms-reg-consumer"})
+        team_id = team_resp.json()["id"]
+        consumer_id = consumer_resp.json()["id"]
+
+        asset_resp = await client.post(
+            "/api/v1/assets", json={"fqn": "ms.reg.table", "owner_team_id": team_id}
+        )
+        asset_id = asset_resp.json()["id"]
+
+        contract_resp = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            json={
+                "version": "1.0.0",
+                "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
+                "compatibility_mode": "backward",
+            },
+        )
+        contract_id = contract_resp.json()["contract"]["id"]
+
+        resp = await client.post(
+            "/api/v1/bulk/registrations",
+            json={
+                "registrations": [
+                    {"contract_id": contract_id, "consumer_team_id": consumer_id},
+                    {
+                        "contract_id": "00000000-0000-0000-0000-000000000000",
+                        "consumer_team_id": consumer_id,
+                    },
+                ]
+            },
+        )
+        assert resp.status_code == 207
+        data = resp.json()
+        assert data["succeeded"] == 1
+        assert data["failed"] == 1
+        assert data["results"][0]["success"] is True
+        assert data["results"][1]["success"] is False
+
+    async def test_bulk_all_failed_returns_207(self, client: AsyncClient) -> None:
+        """All-failed bulk operation returns 207 (not 200)."""
+        consumer_resp = await client.post("/api/v1/teams", json={"name": "all-fail-consumer"})
+        consumer_id = consumer_resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/bulk/registrations",
+            json={
+                "registrations": [
+                    {
+                        "contract_id": "00000000-0000-0000-0000-000000000000",
+                        "consumer_team_id": consumer_id,
+                    },
+                    {
+                        "contract_id": "00000000-0000-0000-0000-000000000001",
+                        "consumer_team_id": consumer_id,
+                    },
+                ]
+            },
+        )
+        assert resp.status_code == 207
+        data = resp.json()
+        assert data["succeeded"] == 0
+        assert data["failed"] == 2
 
 
 class TestBulkValidation:
