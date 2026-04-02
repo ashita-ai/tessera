@@ -40,15 +40,24 @@ Full manifest sync with automation options.
 
 #### Response
 
+Returns **200** when all operations succeed, or **207 Multi-Status** when any contract publishes or consumer registrations fail (partial success).
+
 ```json
 {
   "status": "success",
   "assets": { "created": 10, "updated": 5, "skipped": 2, "deleted": 1, "deleted_fqns": ["db.schema.old_model"] },
   "contracts": { "published": 8 },
   "proposals": { "created": 2 },
-  "registrations": { "created": 15 }
+  "registrations": { "created": 15 },
+  "contract_warnings": [],
+  "registration_warnings": []
 }
 ```
+
+| Status | `status` field | Meaning |
+|--------|---------------|---------|
+| 200 | `"success"` | All operations completed successfully |
+| 207 | `"partial_success"` | Some contract publishes or registrations failed; check `contract_warnings` and `registration_warnings` |
 
 ### Legacy Sync
 

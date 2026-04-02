@@ -1128,7 +1128,7 @@ class TestBulkAckEdgeCases:
                 "continue_on_error": True,
             },
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 207
         data = resp.json()
         assert data["succeeded"] == 1
         assert data["failed"] == 1
