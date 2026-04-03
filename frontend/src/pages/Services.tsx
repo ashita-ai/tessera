@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { Service } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
@@ -99,6 +99,38 @@ function ServiceCard({ service }: { service: Service }) {
 }
 
 function RegisterModal({ onClose }: { onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const [name, setName] = useState("");
+  const [repoUrl, setRepoUrl] = useState("");
+  const [specPaths, setSpecPaths] = useState("");
+  const [otelName, setOtelName] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const mutation = useMutation({
+    mutationFn: () =>
+      api.createService({
+        name,
+        repo_url: repoUrl,
+        spec_paths: specPaths.split(",").map((s) => s.trim()).filter(Boolean),
+        otel_service_name: otelName || undefined,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["services"] });
+      onClose();
+    },
+    onError: (err: Error) => setError(err.message),
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    if (!name.trim() || !repoUrl.trim()) {
+      setError("Service name and repository URL are required.");
+      return;
+    }
+    mutation.mutate();
+  };
+
   return (
     <>
       <div className="fixed inset-0 z-40 bg-bg/70 backdrop-blur-sm" onClick={onClose} />
@@ -107,11 +139,13 @@ function RegisterModal({ onClose }: { onClose: () => void }) {
           <p className="text-[13px] font-medium text-t1">Register service</p>
           <p className="mt-1 text-[11px] text-t3">Point Tessera at a git repository containing API specs.</p>
 
-          <form className="mt-4 space-y-3" onSubmit={(e) => e.preventDefault()}>
-            <Field label="Service name" placeholder="e.g., order-service" />
-            <Field label="Git repository URL" placeholder="https://github.com/org/repo" />
-            <Field label="Spec file paths" placeholder="api/openapi.yaml, proto/" hint="Comma-separated paths to OpenAPI, protobuf, or GraphQL specs" />
-            <Field label="OTEL service name" placeholder="order-service" hint="Matches the service.name attribute in your OTEL traces" />
+          <form className="mt-4 space-y-3" onSubmit={handleSubmit}>
+            <Field label="Service name" placeholder="e.g., order-service" value={name} onChange={setName} />
+            <Field label="Git repository URL" placeholder="https://github.com/org/repo" value={repoUrl} onChange={setRepoUrl} />
+            <Field label="Spec file paths" placeholder="api/openapi.yaml, proto/" hint="Comma-separated paths to OpenAPI, protobuf, or GraphQL specs" value={specPaths} onChange={setSpecPaths} />
+            <Field label="OTEL service name" placeholder="order-service" hint="Matches the service.name attribute in your OTEL traces" value={otelName} onChange={setOtelName} />
+
+            {error && <p className="text-[11px] text-red">{error}</p>}
 
             <div className="flex justify-end gap-2 pt-2">
               <button
@@ -123,9 +157,10 @@ function RegisterModal({ onClose }: { onClose: () => void }) {
               </button>
               <button
                 type="submit"
-                className="rounded-md bg-accent/10 px-3 py-1.5 text-[11px] font-medium text-accent transition-colors hover:bg-accent/20"
+                disabled={mutation.isPending}
+                className="rounded-md bg-accent/10 px-3 py-1.5 text-[11px] font-medium text-accent transition-colors hover:bg-accent/20 disabled:opacity-50"
               >
-                Register
+                {mutation.isPending ? "Registering..." : "Register"}
               </button>
             </div>
           </form>
@@ -135,13 +170,15 @@ function RegisterModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-function Field({ label, placeholder, hint }: { label: string; placeholder: string; hint?: string }) {
+function Field({ label, placeholder, hint, value, onChange }: { label: string; placeholder: string; hint?: string; value: string; onChange: (v: string) => void }) {
   return (
     <div>
       <label className="mb-1 block text-[11px] font-medium text-t2">{label}</label>
       <input
         type="text"
         placeholder={placeholder}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
         className="w-full rounded-md border border-line bg-bg-surface px-3 py-1.5 font-mono text-xs text-t1 placeholder:text-t3 focus:border-accent/40 focus:outline-none"
       />
       {hint && <p className="mt-0.5 text-[10px] text-t3">{hint}</p>}

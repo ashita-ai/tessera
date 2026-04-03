@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { Proposal } from "@/lib/api";
 import { formatDate, cn } from "@/lib/utils";
@@ -41,6 +41,15 @@ export function Proposals() {
 }
 
 function ProposalRow({ proposal }: { proposal: Proposal }) {
+  const queryClient = useQueryClient();
+  const ackMutation = useMutation({
+    mutationFn: (response: "APPROVED" | "BLOCKED" | "MIGRATING") =>
+      api.acknowledgeProposal(proposal.id, { response }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["proposals"] });
+    },
+  });
+
   const ackRatio =
     proposal.total_consumers > 0
       ? proposal.acknowledgment_count / proposal.total_consumers
@@ -87,23 +96,27 @@ function ProposalRow({ proposal }: { proposal: Proposal }) {
 
       {proposal.status === "pending" && (
         <div className="ml-3.5 mt-3 flex gap-1.5 border-t border-line/40 pt-2.5">
-          <ActionBtn label="Approve" color="green" />
-          <ActionBtn label="Migrating" color="amber" />
-          <ActionBtn label="Block" color="red" />
+          <ActionBtn label="Approve" color="green" disabled={ackMutation.isPending} onClick={() => ackMutation.mutate("APPROVED")} />
+          <ActionBtn label="Migrating" color="amber" disabled={ackMutation.isPending} onClick={() => ackMutation.mutate("MIGRATING")} />
+          <ActionBtn label="Block" color="red" disabled={ackMutation.isPending} onClick={() => ackMutation.mutate("BLOCKED")} />
         </div>
       )}
     </div>
   );
 }
 
-function ActionBtn({ label, color }: { label: string; color: "green" | "amber" | "red" }) {
+function ActionBtn({ label, color, disabled, onClick }: { label: string; color: "green" | "amber" | "red"; disabled?: boolean; onClick: () => void }) {
   const styles: Record<string, string> = {
     green: "bg-green/8 text-green hover:bg-green/15",
     amber: "bg-amber/8 text-amber hover:bg-amber/15",
     red: "bg-red/8 text-red hover:bg-red/15",
   };
   return (
-    <button className={cn("rounded-md px-2.5 py-1 text-[10px] font-medium transition-colors", styles[color])}>
+    <button
+      disabled={disabled}
+      onClick={onClick}
+      className={cn("rounded-md px-2.5 py-1 text-[10px] font-medium transition-colors disabled:opacity-50", styles[color])}
+    >
       {label}
     </button>
   );

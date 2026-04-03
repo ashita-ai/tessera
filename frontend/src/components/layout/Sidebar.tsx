@@ -13,15 +13,9 @@ const NAV = [
 export function Sidebar() {
   return (
     <aside className="flex w-56 flex-col border-r border-line bg-bg-raised">
-      {/* Mark */}
-      <div className="flex items-center gap-2.5 px-5 py-5">
-        <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
-          <rect x="1" y="1" width="6" height="6" rx="1.5" fill="var(--accent)" opacity="0.9" />
-          <rect x="9" y="1" width="6" height="6" rx="1.5" fill="var(--accent)" opacity="0.4" />
-          <rect x="1" y="9" width="6" height="6" rx="1.5" fill="var(--accent)" opacity="0.4" />
-          <rect x="9" y="9" width="6" height="6" rx="1.5" fill="var(--accent)" opacity="0.15" />
-        </svg>
-        <span className="text-sm font-semibold tracking-tight text-t1">tessera</span>
+      {/* Logo */}
+      <div className="px-5 py-5">
+        <img src="/static/images/logo.png" alt="Tessera" className="h-6 w-auto" />
       </div>
 
       {/* Nav */}

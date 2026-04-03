@@ -176,7 +176,9 @@ export const api = {
       assets: assets.total,
       contracts: contracts.total,
       pending_proposals: proposals.total,
-      services: 0, // TODO: wire up when service endpoints exist
+      services: await request<PaginatedResponse<Service>>("/services", {}, { limit: 1 })
+        .then((r) => r.total)
+        .catch(() => 0),
     };
   },
 

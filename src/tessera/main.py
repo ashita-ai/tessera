@@ -245,7 +245,14 @@ if spa_dist_dir.exists() and (spa_dist_dir / "assets").exists():
 
 # Web UI: auth routes (login/logout) use Jinja2, all other pages serve the React SPA.
 _spa_index = spa_dist_dir / "index.html" if spa_dist_dir.exists() else None
-_spa_html: str | None = _spa_index.read_text() if _spa_index and _spa_index.exists() else None
+
+
+def _read_spa_html() -> str | None:
+    """Read SPA index.html from disk so frontend rebuilds apply without restart."""
+    if _spa_index and _spa_index.exists():
+        return _spa_index.read_text()
+    return None
+
 
 # Register only login/logout/session routes from the web module
 _auth_router = APIRouter(tags=["web-auth"])
@@ -305,8 +312,9 @@ def _register_spa_catchall() -> None:
         full_path = f"/{path}"
         if any(full_path.startswith(p) for p in _non_spa_prefixes):
             raise HTTPException(status_code=404, detail="Not found")
-        if _spa_html:
-            return HTMLResponse(_spa_html)
+        spa_html = _read_spa_html()
+        if spa_html:
+            return HTMLResponse(spa_html)
         raise HTTPException(status_code=404, detail="Not found")
 
 

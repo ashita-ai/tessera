@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useState } from "react";
+import { useEffect, useRef, useCallback, useMemo, useState } from "react";
 import * as d3 from "d3";
 import type { SimulationNodeDatum, SimulationLinkDatum } from "d3";
 
@@ -44,7 +44,7 @@ export function DependencyGraph({ nodes, links, onNodeClick, className }: Props)
   const wrapRef = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<GraphNode | null>(null);
 
-  const groups = [...new Set(nodes.map((n) => n.group))];
+  const groups = useMemo(() => [...new Set(nodes.map((n) => n.group))], [nodes]);
 
   const build = useCallback(() => {
     const svg = d3.select(svgRef.current);
@@ -172,8 +172,11 @@ export function DependencyGraph({ nodes, links, onNodeClick, className }: Props)
   }, [nodes, links, groups, onNodeClick]);
 
   useEffect(() => {
-    const cleanup = build();
-    const obs = new ResizeObserver(() => build());
+    let cleanup = build();
+    const obs = new ResizeObserver(() => {
+      cleanup?.();
+      cleanup = build();
+    });
     if (wrapRef.current) obs.observe(wrapRef.current);
     return () => { cleanup?.(); obs.disconnect(); };
   }, [build]);

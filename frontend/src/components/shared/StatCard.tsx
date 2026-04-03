@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -8,17 +9,15 @@ interface Props {
 }
 
 export function StatCard({ label, value, alert, href }: Props) {
-  const Tag = href ? "a" : "div";
-  return (
-    <Tag
-      {...(href ? { href } : {})}
-      className={cn(
-        "rounded-lg border px-4 py-3 transition-colors",
-        alert
-          ? "border-red/20 bg-red-dim"
-          : "border-line bg-bg-raised hover:border-line-strong",
-      )}
-    >
+  const classes = cn(
+    "rounded-lg border px-4 py-3 transition-colors",
+    alert
+      ? "border-red/20 bg-red-dim"
+      : "border-line bg-bg-raised hover:border-line-strong",
+  );
+
+  const content = (
+    <>
       <p className="text-[11px] font-medium uppercase tracking-widest text-t3">{label}</p>
       <p className={cn(
         "mt-1 font-mono text-xl font-semibold",
@@ -26,6 +25,11 @@ export function StatCard({ label, value, alert, href }: Props) {
       )}>
         {value}
       </p>
-    </Tag>
+    </>
   );
+
+  if (href) {
+    return <Link to={href} className={classes}>{content}</Link>;
+  }
+  return <div className={classes}>{content}</div>;
 }
