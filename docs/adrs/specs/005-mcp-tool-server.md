@@ -1,8 +1,8 @@
 # Spec 005: MCP Tool Server
 
-**ADR**: 001-ai-enablement
-**Priority**: 5 (depends on specs 001-004)
-**Status**: Draft
+**ADR**: 001-ai-enablement, 014-service-contract-pivot
+**Priority**: Phase 3 (depends on specs 001, 003, 004, 006, 007)
+**Status**: Draft (updated 2026-04-02 for service contract pivot)
 
 ## Overview
 
@@ -374,3 +374,181 @@ Agents configure in their MCP settings (e.g., Claude Desktop `claude_desktop_con
 | Auth error | Clear error message about API key |
 | Server down | Graceful error, no crash |
 | Rate limited | Returns retry-after information |
+
+---
+
+## Service Contract Pivot Additions (ADR-014)
+
+The following tools are added for the service-first workflow. Existing tools remain unchanged — they work for both data warehouse and service contract use cases.
+
+### tessera_register_repo
+
+Register a git repository for Tessera to monitor.
+
+```typescript
+{
+  name: "tessera_register_repo",
+  description: "Register a git repo in Tessera. Points Tessera at a repo containing API specs (OpenAPI, protobuf, GraphQL). Tessera will monitor the repo for changes, discover services within it, and automatically detect breaking changes. Use this when onboarding a new codebase.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      name: { type: "string", description: "Repo name (e.g., 'order-service' or 'platform-monorepo')" },
+      git_url: { type: "string", description: "Git repository URL" },
+      spec_paths: { type: "array", items: { type: "string" }, description: "Paths to API specs in the repo (e.g., ['api/openapi.yaml', 'proto/'])" },
+      owner_team_name: { type: "string", description: "Owning team name" },
+      default_branch: { type: "string", description: "Branch to track (default: main)" }
+    },
+    required: ["name", "git_url", "spec_paths", "owner_team_name"]
+  }
+}
+```
+
+Maps to: `POST /api/v1/repos`
+
+### tessera_register_service
+
+Register a service within a repo.
+
+```typescript
+{
+  name: "tessera_register_service",
+  description: "Register a service within a repo. A service is a deployable unit — in a single-service repo this is the whole repo, in a monorepo it's one service directory. Tessera auto-discovers services during sync, but you can also register them explicitly.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      name: { type: "string", description: "Service name (e.g., 'order-service')" },
+      repo_name: { type: "string", description: "Parent repo name" },
+      root_path: { type: "string", description: "Path within repo (e.g., 'services/orders/' or '/')" },
+      otel_service_name: { type: "string", description: "OTEL service.name for auto-dependency discovery (optional)" }
+    },
+    required: ["name", "repo_name"]
+  }
+}
+```
+
+Maps to: `POST /api/v1/services`
+
+### tessera_sync_repo
+
+Trigger an immediate sync of a repo's API specs.
+
+```typescript
+{
+  name: "tessera_sync_repo",
+  description: "Trigger an immediate sync of a repo's API specs from git. Tessera will clone/pull the repo, discover services, parse specs, and detect any schema changes since the last sync. Use this after pushing API spec changes.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      repo_name: { type: "string", description: "Repo name (resolved to repo ID)" },
+      repo_id: { type: "string", description: "Repo UUID (alternative to repo_name)" }
+    }
+  }
+}
+```
+
+Maps to: `POST /api/v1/repos/{id}/sync`
+
+### tessera_discover_dependencies
+
+Trigger an OTEL-based dependency scan to auto-discover which services call which.
+
+```typescript
+{
+  name: "tessera_discover_dependencies",
+  description: "Trigger dependency discovery from OTEL traces. Queries the configured trace backend (Jaeger/Tempo) to find service-to-service call edges. Creates dependency records with confidence scores. Use this to populate the dependency graph from real traffic data.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      config_name: { type: "string", description: "OTEL config name (e.g., 'production-jaeger')" },
+      config_id: { type: "string", description: "OTEL config UUID (alternative)" }
+    }
+  }
+}
+```
+
+Maps to: `POST /api/v1/otel/configs/{id}/sync`
+
+### tessera_check_api_compat
+
+Check compatibility of a local API spec against the current contract without publishing.
+
+```typescript
+{
+  name: "tessera_check_api_compat",
+  description: "Check if a local API spec is compatible with the current contract in Tessera. Use this before committing API changes to verify they won't break consumers. Pass the spec content directly — Tessera will parse it (OpenAPI, protobuf, or GraphQL) and diff against the active contract.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      service_name: { type: "string", description: "Service name" },
+      asset_fqn: { type: "string", description: "Asset FQN to check against" },
+      spec_content: { type: "string", description: "The API spec content (YAML, JSON, proto, or GraphQL SDL)" },
+      spec_format: { type: "string", enum: ["openapi", "protobuf", "graphql"], description: "Spec format" }
+    },
+    required: ["spec_content", "spec_format"]
+  }
+}
+```
+
+Maps to: parse spec → extract schema → `POST /api/v1/assets/{asset_id}/impact-preview`
+
+### tessera_get_dependency_graph
+
+Get the service dependency graph for understanding the system topology.
+
+```typescript
+{
+  name: "tessera_get_dependency_graph",
+  description: "Get the service-to-service dependency graph. Shows which services depend on which, with dependency types and confidence scores. Use this to understand the blast radius of a change before making it.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      team_name: { type: "string", description: "Filter to a team's services and their neighbors (optional)" },
+      min_confidence: { type: "number", description: "Minimum confidence for OTEL-discovered edges (0.0-1.0, default 0.5)" }
+    }
+  }
+}
+```
+
+Maps to: `GET /api/v1/graph/services`
+
+### tessera_reconcile_dependencies
+
+Compare declared vs observed dependencies to find gaps.
+
+```typescript
+{
+  name: "tessera_reconcile_dependencies",
+  description: "Compare manually declared dependencies against OTEL-observed traffic. Shows undeclared dependencies (services calling each other without registration), stale dependencies (declared but not observed), and confirmed dependencies. Use this to audit dependency completeness.",
+  inputSchema: {
+    type: "object",
+    properties: {}
+  }
+}
+```
+
+Maps to: `GET /api/v1/dependencies/reconciliation`
+
+## Updated Tool Count
+
+Original tools: 9 (search, context, impact, publish, register asset, register consumer, pending proposals, get proposal, acknowledge)
+
+Added tools: 7 (register repo, register service, sync repo, discover dependencies, check API compat, dependency graph, reconcile dependencies)
+
+Total: 16 tools
+
+## Updated Testing
+
+Additional test cases for new tools:
+
+| Test case | Assertion |
+|-----------|-----------|
+| Register repo | Creates repo, returns repo ID and name |
+| Register repo (invalid git URL) | Clear error about URL format |
+| Register service | Creates service within repo, returns service ID |
+| Sync repo | Returns sync result with service/asset counts |
+| Sync repo (not found) | Clear error about repo name |
+| Discover dependencies | Returns discovered edge count |
+| Check API compat (compatible) | Returns is_breaking=false |
+| Check API compat (breaking) | Returns breaking changes list with migration suggestions |
+| Dependency graph | Returns nodes and edges in graph format |
+| Reconcile dependencies | Returns declared_only, observed_only, and confirmed lists |
