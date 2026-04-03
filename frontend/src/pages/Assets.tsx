@@ -3,13 +3,13 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
 
-const TYPE_BADGES: Record<string, { bg: string; text: string; label: string }> = {
-  api_endpoint: { bg: "bg-blue-500/10", text: "text-blue-400", label: "api" },
-  grpc_service: { bg: "bg-violet-500/10", text: "text-violet-400", label: "grpc" },
-  graphql_query: { bg: "bg-purple-500/10", text: "text-purple-400", label: "graphql" },
-  kafka_topic: { bg: "bg-rose-500/10", text: "text-rose-400", label: "kafka" },
-  model: { bg: "bg-sky-500/10", text: "text-sky-400", label: "model" },
-  source: { bg: "bg-amber-500/10", text: "text-amber-400", label: "source" },
+const TYPE_LABEL: Record<string, string> = {
+  api_endpoint: "api",
+  grpc_service: "grpc",
+  graphql_query: "graphql",
+  kafka_topic: "kafka",
+  model: "model",
+  source: "source",
 };
 
 export function Assets() {
@@ -30,27 +30,22 @@ export function Assets() {
   const total = assetsQuery.data?.total ?? 0;
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="font-display text-xl font-bold text-text-primary">Assets</h1>
-        <p className="mt-1 text-sm text-text-secondary">
-          API endpoints, gRPC services, GraphQL operations, and other contract-bearing resources
-        </p>
-      </div>
+    <div className="animate-enter space-y-5">
+      <h1 className="text-sm font-medium text-t2">Assets</h1>
 
       {/* Filters */}
-      <div className="flex gap-3">
+      <div className="flex gap-2">
         <input
           type="text"
           placeholder="Search by FQN..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="flex-1 rounded-lg border border-border bg-surface-1 px-3 py-2 font-mono text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none"
+          className="flex-1 rounded-md border border-line bg-bg-raised px-3 py-1.5 font-mono text-xs text-t1 placeholder:text-t3 focus:border-accent/40 focus:outline-none"
         />
         <select
           value={typeFilter}
           onChange={(e) => setTypeFilter(e.target.value)}
-          className="rounded-lg border border-border bg-surface-1 px-3 py-2 text-sm text-text-secondary focus:border-accent focus:outline-none"
+          className="rounded-md border border-line bg-bg-raised px-3 py-1.5 text-xs text-t2 focus:border-accent/40 focus:outline-none"
         >
           <option value="">All types</option>
           <option value="api_endpoint">API Endpoint</option>
@@ -62,70 +57,56 @@ export function Assets() {
         </select>
       </div>
 
-      {/* Results */}
-      <div className="overflow-hidden rounded-xl border border-border bg-surface-1">
-        <table className="w-full text-sm">
+      {/* Table */}
+      <div className="overflow-hidden rounded-lg border border-line bg-bg-raised">
+        <table className="w-full text-xs">
           <thead>
-            <tr className="border-b border-border text-left text-xs font-medium uppercase tracking-wider text-text-muted">
-              <th className="px-5 py-3">FQN</th>
-              <th className="px-5 py-3">Type</th>
-              <th className="px-5 py-3">Team</th>
-              <th className="px-5 py-3">Contract</th>
-              <th className="px-5 py-3">Updated</th>
+            <tr className="border-b border-line text-left">
+              <th className="px-4 py-2.5 text-[10px] font-medium uppercase tracking-widest text-t3">FQN</th>
+              <th className="px-4 py-2.5 text-[10px] font-medium uppercase tracking-widest text-t3">Type</th>
+              <th className="px-4 py-2.5 text-[10px] font-medium uppercase tracking-widest text-t3">Team</th>
+              <th className="px-4 py-2.5 text-[10px] font-medium uppercase tracking-widest text-t3">Contract</th>
+              <th className="px-4 py-2.5 text-[10px] font-medium uppercase tracking-widest text-t3">Updated</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-border/50">
-            {assets.map((asset) => {
-              const badge = TYPE_BADGES[asset.resource_type] ?? {
-                bg: "bg-slate-500/10",
-                text: "text-slate-400",
-                label: asset.resource_type,
-              };
-              return (
-                <tr
-                  key={asset.id}
-                  className="transition-colors hover:bg-surface-2"
-                >
-                  <td className="px-5 py-3">
-                    <span className="font-mono text-xs font-medium text-text-primary">
-                      {asset.fqn}
-                    </span>
-                  </td>
-                  <td className="px-5 py-3">
-                    <span
-                      className={`inline-block rounded-md px-2 py-0.5 text-2xs font-medium ${badge.bg} ${badge.text}`}
-                    >
-                      {badge.label}
-                    </span>
-                  </td>
-                  <td className="px-5 py-3 text-xs text-text-secondary">
-                    {asset.owner_team_name ?? "\u2014"}
-                  </td>
-                  <td className="px-5 py-3">
-                    {asset.active_contract_version ? (
-                      <span className="font-mono text-xs text-accent">
-                        v{asset.active_contract_version}
-                      </span>
-                    ) : (
-                      <span className="text-2xs text-text-muted">none</span>
-                    )}
-                  </td>
-                  <td className="px-5 py-3 text-xs text-text-muted">
-                    {formatDate(asset.created_at)}
-                  </td>
-                </tr>
-              );
-            })}
+          <tbody className="divide-y divide-line/40">
+            {assets.map((asset) => (
+              <tr key={asset.id} className="transition-colors hover:bg-bg-hover">
+                <td className="px-4 py-2.5">
+                  <span className="font-mono text-[11px] font-medium text-t1">{asset.fqn}</span>
+                </td>
+                <td className="px-4 py-2.5">
+                  <span className="rounded bg-bg-surface px-1.5 py-0.5 font-mono text-[10px] text-t2">
+                    {TYPE_LABEL[asset.resource_type] ?? asset.resource_type}
+                  </span>
+                </td>
+                <td className="px-4 py-2.5 text-[11px] text-t3">
+                  {asset.owner_team_name ?? "\u2014"}
+                </td>
+                <td className="px-4 py-2.5">
+                  {asset.active_contract_version ? (
+                    <span className="font-mono text-[11px] text-accent">v{asset.active_contract_version}</span>
+                  ) : (
+                    <span className="text-[10px] text-t3">none</span>
+                  )}
+                </td>
+                <td className="px-4 py-2.5 text-[11px] text-t3">
+                  {formatDate(asset.created_at)}
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
+
         {assets.length === 0 && (
-          <div className="py-12 text-center text-sm text-text-muted">
+          <div className="py-12 text-center text-[11px] text-t3">
             {assetsQuery.isLoading ? "Loading..." : "No assets found"}
           </div>
         )}
+
         {total > 0 && (
-          <div className="border-t border-border px-5 py-2.5 text-xs text-text-muted">
-            Showing {assets.length} of {total}
+          <div className="border-t border-line px-4 py-2 text-[10px] text-t3">
+            {assets.length} of {total}
           </div>
         )}
       </div>

@@ -3,12 +3,12 @@ import { api } from "@/lib/api";
 import type { Proposal } from "@/lib/api";
 import { formatDate, cn } from "@/lib/utils";
 
-const STATUS_STYLES: Record<string, { bg: string; text: string }> = {
-  pending: { bg: "bg-warning/10", text: "text-warning" },
-  approved: { bg: "bg-success/10", text: "text-success" },
-  rejected: { bg: "bg-danger/10", text: "text-danger" },
-  expired: { bg: "bg-slate-500/10", text: "text-slate-400" },
-  withdrawn: { bg: "bg-slate-500/10", text: "text-slate-400" },
+const STATUS_DOT: Record<string, string> = {
+  pending: "bg-amber",
+  approved: "bg-green",
+  rejected: "bg-red",
+  expired: "bg-t3",
+  withdrawn: "bg-t3",
 };
 
 export function Proposals() {
@@ -20,110 +20,91 @@ export function Proposals() {
   const proposals = proposalsQuery.data?.results ?? [];
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="font-display text-xl font-bold text-text-primary">
-          Proposals
-        </h1>
-        <p className="mt-1 text-sm text-text-secondary">
-          Breaking change proposals awaiting consumer acknowledgment
-        </p>
-      </div>
+    <div className="animate-enter space-y-5">
+      <h1 className="text-sm font-medium text-t2">Proposals</h1>
 
-      <div className="space-y-3">
-        {proposalsQuery.isLoading ? (
-          <div className="py-12 text-center text-sm text-text-muted">Loading...</div>
-        ) : proposals.length === 0 ? (
-          <div className="rounded-xl border border-border bg-surface-1 p-8 text-center text-sm text-text-muted">
-            No proposals found
-          </div>
-        ) : (
-          proposals.map((p) => <ProposalCard key={p.id} proposal={p} />)
-        )}
-      </div>
+      {proposalsQuery.isLoading ? (
+        <div className="py-16 text-center text-[11px] text-t3">Loading...</div>
+      ) : proposals.length === 0 ? (
+        <div className="rounded-lg border border-line bg-bg-raised px-6 py-10 text-center text-[11px] text-t3">
+          No proposals
+        </div>
+      ) : (
+        <div className="stagger space-y-2">
+          {proposals.map((p) => (
+            <ProposalRow key={p.id} proposal={p} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
-function ProposalCard({ proposal }: { proposal: Proposal }) {
-  const style = STATUS_STYLES[proposal.status] ?? STATUS_STYLES.pending;
+function ProposalRow({ proposal }: { proposal: Proposal }) {
   const ackRatio =
     proposal.total_consumers > 0
       ? proposal.acknowledgment_count / proposal.total_consumers
       : 0;
 
   return (
-    <div className="rounded-xl border border-border bg-surface-1 p-5 transition-all hover:border-border-strong">
-      <div className="flex items-start justify-between">
+    <div className="rounded-lg border border-line bg-bg-raised p-4 transition-colors hover:border-line-strong">
+      <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <div className="flex items-center gap-3">
-            <h3 className="truncate font-mono text-sm font-semibold text-text-primary">
+          <div className="flex items-center gap-2">
+            <div className={cn("mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full", STATUS_DOT[proposal.status] ?? "bg-t3")} />
+            <p className="truncate font-mono text-[11px] font-medium text-t1">
               {proposal.asset_fqn ?? proposal.asset_id}
-            </h3>
-            <span
-              className={cn(
-                "shrink-0 rounded-full px-2 py-0.5 text-2xs font-medium",
-                style.bg,
-                style.text,
-              )}
-            >
-              {proposal.status}
-            </span>
+            </p>
+            <span className="shrink-0 text-[10px] text-t3">{proposal.status}</span>
           </div>
-          <p className="mt-1 text-xs text-text-muted">
-            {proposal.breaking_changes_count} breaking change
-            {proposal.breaking_changes_count !== 1 ? "s" : ""}
-            <span className="mx-1.5">&middot;</span>
-            proposed version{" "}
-            <span className="font-mono text-text-secondary">
-              {proposal.proposed_version}
-            </span>
-            <span className="mx-1.5">&middot;</span>
+          <p className="ml-3.5 mt-0.5 text-[10px] text-t3">
+            {proposal.breaking_changes_count} breaking
+            {" \u00b7 "}
+            <span className="font-mono">{proposal.proposed_version}</span>
+            {" \u00b7 "}
             {formatDate(proposal.proposed_at)}
           </p>
         </div>
 
-        {/* Ack progress */}
         {proposal.total_consumers > 0 && (
-          <div className="ml-4 shrink-0 text-right">
-            <div className="flex items-center gap-2">
-              <div className="h-2 w-20 overflow-hidden rounded-full bg-surface-3">
-                <div
-                  className="h-full rounded-full transition-all"
-                  style={{
-                    width: `${ackRatio * 100}%`,
-                    background:
-                      ackRatio >= 1
-                        ? "var(--success)"
-                        : ackRatio > 0
-                          ? "var(--warning)"
-                          : "var(--danger)",
-                  }}
-                />
-              </div>
-              <span className="font-mono text-xs text-text-muted">
-                {proposal.acknowledgment_count}/{proposal.total_consumers}
-              </span>
+          <div className="flex shrink-0 items-center gap-2">
+            <div className="h-1 w-10 overflow-hidden rounded-full bg-bg-hover">
+              <div
+                className="h-full rounded-full"
+                style={{
+                  width: `${ackRatio * 100}%`,
+                  background:
+                    ackRatio >= 1 ? "var(--green)" : ackRatio > 0 ? "var(--amber)" : "var(--red)",
+                }}
+              />
             </div>
-            <p className="mt-0.5 text-2xs text-text-muted">acknowledged</p>
+            <span className="font-mono text-[10px] text-t3">
+              {proposal.acknowledgment_count}/{proposal.total_consumers}
+            </span>
           </div>
         )}
       </div>
 
-      {/* Action buttons for pending proposals */}
       {proposal.status === "pending" && (
-        <div className="mt-4 flex gap-2 border-t border-border/50 pt-3">
-          <button className="rounded-lg bg-success/10 px-3 py-1.5 text-xs font-medium text-success transition-colors hover:bg-success/20">
-            Approve
-          </button>
-          <button className="rounded-lg bg-warning/10 px-3 py-1.5 text-xs font-medium text-warning transition-colors hover:bg-warning/20">
-            Migrating
-          </button>
-          <button className="rounded-lg bg-danger/10 px-3 py-1.5 text-xs font-medium text-danger transition-colors hover:bg-danger/20">
-            Block
-          </button>
+        <div className="ml-3.5 mt-3 flex gap-1.5 border-t border-line/40 pt-2.5">
+          <ActionBtn label="Approve" color="green" />
+          <ActionBtn label="Migrating" color="amber" />
+          <ActionBtn label="Block" color="red" />
         </div>
       )}
     </div>
+  );
+}
+
+function ActionBtn({ label, color }: { label: string; color: "green" | "amber" | "red" }) {
+  const styles: Record<string, string> = {
+    green: "bg-green/8 text-green hover:bg-green/15",
+    amber: "bg-amber/8 text-amber hover:bg-amber/15",
+    red: "bg-red/8 text-red hover:bg-red/15",
+  };
+  return (
+    <button className={cn("rounded-md px-2.5 py-1 text-[10px] font-medium transition-colors", styles[color])}>
+      {label}
+    </button>
   );
 }

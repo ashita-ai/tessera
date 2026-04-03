@@ -11,58 +11,33 @@ export interface ActivityItem {
   severity?: "info" | "warning" | "danger";
 }
 
-interface Props {
-  items: ActivityItem[];
-  className?: string;
-}
-
-const SEVERITY_DOT: Record<string, string> = {
+const DOT: Record<string, string> = {
   info: "bg-accent",
-  warning: "bg-warning",
-  danger: "bg-danger",
+  warning: "bg-amber",
+  danger: "bg-red",
 };
 
-export function ActivityFeed({ items, className }: Props) {
-  if (items.length === 0) {
-    return (
-      <div className={cn("py-8 text-center text-sm text-text-muted", className)}>
-        No recent activity
-      </div>
-    );
+export function ActivityFeed({ items, className }: { items: ActivityItem[]; className?: string }) {
+  if (!items.length) {
+    return <p className={cn("py-6 text-center text-xs text-t3", className)}>No recent activity</p>;
   }
 
   return (
     <div className={cn("space-y-0", className)}>
-      {items.map((item, i) => (
-        <div
-          key={item.id}
-          className="group flex items-start gap-3 border-b border-border/50 px-1 py-3 last:border-0"
-          style={{ animationDelay: `${i * 60}ms` }}
-        >
-          {/* Timeline dot */}
-          <div className="mt-1.5 flex flex-col items-center">
-            <div
-              className={cn(
-                "h-2 w-2 rounded-full",
-                SEVERITY_DOT[item.severity ?? "info"],
-              )}
-            />
-          </div>
-
-          {/* Content */}
-          <div className="min-w-0 flex-1">
-            <p className="text-sm text-text-primary">
-              <span className="font-medium">{item.action}</span>{" "}
+      {items.map((item) => (
+        <div key={item.id} className="flex items-start gap-3 py-2.5">
+          <div className={cn("mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full", DOT[item.severity ?? "info"])} />
+          <div className="min-w-0">
+            <p className="text-[13px] text-t2">
+              {item.action}{" "}
               <span className="font-mono text-xs text-accent">{item.entity}</span>
             </p>
-            <p className="mt-0.5 text-2xs text-text-muted">
+            <p className="mt-0.5 text-[11px] text-t3">
               {item.actor}
               {item.actorType === "agent" && (
-                <span className="ml-1 rounded-sm bg-accent/10 px-1 py-px text-accent">
-                  agent
-                </span>
+                <span className="ml-1 rounded-sm bg-accent-dim px-1 py-px font-mono text-[10px] text-accent">bot</span>
               )}
-              <span className="mx-1">&middot;</span>
+              {" \u00b7 "}
               {formatDate(item.timestamp)}
             </p>
           </div>

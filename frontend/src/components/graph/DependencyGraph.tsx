@@ -5,7 +5,7 @@ import type { SimulationNodeDatum, SimulationLinkDatum } from "d3";
 export interface GraphNode extends SimulationNodeDatum {
   id: string;
   label: string;
-  group: string; // team name — used for coloring
+  group: string;
   assetCount: number;
   hasBreakingProposal: boolean;
 }
@@ -24,306 +24,184 @@ interface Props {
   className?: string;
 }
 
-const EDGE_COLORS: Record<string, string> = {
-  CONSUMES: "var(--accent)",
-  REFERENCES: "var(--warning)",
-  TRANSFORMS: "var(--success)",
+const EDGE_STYLES: Record<string, { color: string; dash?: string }> = {
+  CONSUMES: { color: "rgba(94,234,212,0.25)" },
+  REFERENCES: { color: "rgba(251,191,36,0.2)", dash: "4,3" },
+  TRANSFORMS: { color: "rgba(74,222,128,0.2)", dash: "2,2" },
 };
 
-const GROUP_COLORS = [
-  "#06b6d4", "#8b5cf6", "#f59e0b", "#10b981", "#ef4444",
-  "#ec4899", "#6366f1", "#14b8a6", "#f97316", "#84cc16",
+const GROUP_PALETTE = [
+  "#5eead4", "#a78bfa", "#fbbf24", "#4ade80", "#f87171",
+  "#f472b6", "#818cf8", "#2dd4bf",
 ];
 
-function colorForGroup(group: string, groups: string[]): string {
-  const idx = groups.indexOf(group);
-  return GROUP_COLORS[idx % GROUP_COLORS.length];
+function groupColor(group: string, groups: string[]): string {
+  return GROUP_PALETTE[groups.indexOf(group) % GROUP_PALETTE.length];
 }
 
 export function DependencyGraph({ nodes, links, onNodeClick, className }: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [tooltip, setTooltip] = useState<{
-    x: number;
-    y: number;
-    node: GraphNode;
-  } | null>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [hover, setHover] = useState<GraphNode | null>(null);
 
   const groups = [...new Set(nodes.map((n) => n.group))];
 
-  const buildGraph = useCallback(() => {
+  const build = useCallback(() => {
     const svg = d3.select(svgRef.current);
-    const container = containerRef.current;
-    if (!svg.node() || !container) return;
+    const wrap = wrapRef.current;
+    if (!svg.node() || !wrap) return;
 
-    const width = container.clientWidth;
-    const height = container.clientHeight;
-
-    svg.attr("viewBox", `0 0 ${width} ${height}`);
+    const w = wrap.clientWidth;
+    const h = wrap.clientHeight;
+    svg.attr("viewBox", `0 0 ${w} ${h}`);
     svg.selectAll("*").remove();
 
-    // Defs: arrow markers, glow filter
     const defs = svg.append("defs");
 
-    // Glow filter for active nodes
-    const filter = defs.append("filter").attr("id", "glow");
-    filter
-      .append("feGaussianBlur")
-      .attr("stdDeviation", "3")
-      .attr("result", "coloredBlur");
-    const feMerge = filter.append("feMerge");
-    feMerge.append("feMergeNode").attr("in", "coloredBlur");
-    feMerge.append("feMergeNode").attr("in", "SourceGraphic");
+    // Subtle glow for breaking nodes
+    const glow = defs.append("filter").attr("id", "glow").attr("x", "-50%").attr("y", "-50%").attr("width", "200%").attr("height", "200%");
+    glow.append("feGaussianBlur").attr("stdDeviation", "4").attr("result", "blur");
+    const merge = glow.append("feMerge");
+    merge.append("feMergeNode").attr("in", "blur");
+    merge.append("feMergeNode").attr("in", "SourceGraphic");
 
-    // Arrow markers per edge type
-    for (const [type, color] of Object.entries(EDGE_COLORS)) {
-      defs
-        .append("marker")
-        .attr("id", `arrow-${type}`)
-        .attr("viewBox", "0 -4 8 8")
-        .attr("refX", 20)
-        .attr("refY", 0)
-        .attr("markerWidth", 6)
-        .attr("markerHeight", 6)
+    // Arrow markers
+    for (const [type, style] of Object.entries(EDGE_STYLES)) {
+      defs.append("marker")
+        .attr("id", `arr-${type}`).attr("viewBox", "0 -3 6 6")
+        .attr("refX", 18).attr("refY", 0)
+        .attr("markerWidth", 5).attr("markerHeight", 5)
         .attr("orient", "auto")
-        .append("path")
-        .attr("d", "M0,-4L8,0L0,4Z")
-        .attr("fill", color)
-        .attr("opacity", 0.6);
+        .append("path").attr("d", "M0,-3L6,0L0,3Z")
+        .attr("fill", style.color);
     }
 
     const g = svg.append("g");
 
-    // Zoom
-    const zoom = d3
-      .zoom<SVGSVGElement, unknown>()
-      .scaleExtent([0.3, 3])
-      .on("zoom", (event) => {
-        g.attr("transform", event.transform);
-      });
-    svg.call(zoom);
+    (svg as unknown as d3.Selection<SVGSVGElement, unknown, null, undefined>).call(
+      d3.zoom<SVGSVGElement, unknown>()
+        .scaleExtent([0.3, 3])
+        .on("zoom", (e) => g.attr("transform", e.transform)),
+    );
 
-    // Force simulation
-    const simulation = d3
-      .forceSimulation<GraphNode>(nodes)
-      .force(
-        "link",
-        d3
-          .forceLink<GraphNode, GraphLink>(links)
-          .id((d) => d.id)
-          .distance(120),
-      )
-      .force("charge", d3.forceManyBody().strength(-400))
-      .force("center", d3.forceCenter(width / 2, height / 2))
-      .force("collision", d3.forceCollide().radius(30));
+    const sim = d3.forceSimulation<GraphNode>(nodes)
+      .force("link", d3.forceLink<GraphNode, GraphLink>(links).id((d) => d.id).distance(140))
+      .force("charge", d3.forceManyBody().strength(-500))
+      .force("center", d3.forceCenter(w / 2, h / 2))
+      .force("collide", d3.forceCollide().radius(35));
 
-    // Links
-    const link = g
-      .append("g")
-      .selectAll("line")
-      .data(links)
-      .join("line")
-      .attr("stroke", (d) => {
-        const type = typeof d.type === "string" ? d.type : "CONSUMES";
-        return EDGE_COLORS[type] ?? "var(--border-strong)";
-      })
-      .attr("stroke-opacity", (d) => (d.confidence ?? 1) * 0.4)
-      .attr("stroke-width", 1.5)
-      .attr("marker-end", (d) => {
-        const type = typeof d.type === "string" ? d.type : "CONSUMES";
-        return `url(#arrow-${type})`;
-      });
+    // Edges
+    const edge = g.append("g").selectAll("line").data(links).join("line")
+      .attr("stroke", (d) => EDGE_STYLES[d.type]?.color ?? "rgba(255,255,255,0.06)")
+      .attr("stroke-width", 1)
+      .attr("stroke-dasharray", (d) => EDGE_STYLES[d.type]?.dash ?? "")
+      .attr("marker-end", (d) => `url(#arr-${d.type})`);
 
     // Node groups
-    const node = g
-      .append("g")
-      .selectAll<SVGGElement, GraphNode>("g")
-      .data(nodes)
-      .join("g")
+    const node = g.append("g").selectAll<SVGGElement, GraphNode>("g").data(nodes).join("g")
       .style("cursor", "pointer")
       .call(
-        d3
-          .drag<SVGGElement, GraphNode>()
-          .on("start", (event, d) => {
-            if (!event.active) simulation.alphaTarget(0.3).restart();
-            d.fx = d.x;
-            d.fy = d.y;
-          })
-          .on("drag", (event, d) => {
-            d.fx = event.x;
-            d.fy = event.y;
-          })
-          .on("end", (event, d) => {
-            if (!event.active) simulation.alphaTarget(0);
-            d.fx = null;
-            d.fy = null;
-          }),
+        d3.drag<SVGGElement, GraphNode>()
+          .on("start", (e, d) => { if (!e.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+          .on("drag", (e, d) => { d.fx = e.x; d.fy = e.y; })
+          .on("end", (e, d) => { if (!e.active) sim.alphaTarget(0); d.fx = null; d.fy = null; }),
       );
 
-    // Pulse ring for nodes with breaking proposals
-    node
-      .filter((d) => d.hasBreakingProposal)
-      .append("circle")
-      .attr("r", 14)
-      .attr("fill", "none")
-      .attr("stroke", "var(--danger)")
-      .attr("stroke-width", 1.5)
-      .attr("opacity", 0.4)
-      .attr("class", "node-pulse");
+    // Breaking pulse
+    node.filter((d) => d.hasBreakingProposal)
+      .append("circle").attr("r", 16)
+      .attr("fill", "none").attr("stroke", "var(--red)").attr("stroke-width", 1)
+      .attr("opacity", 0.4).attr("class", "node-pulse");
 
-    // Node circles
-    node
-      .append("circle")
-      .attr("r", (d) => 8 + Math.min(d.assetCount, 10))
-      .attr("fill", (d) => colorForGroup(d.group, groups))
-      .attr("fill-opacity", 0.15)
-      .attr("stroke", (d) => colorForGroup(d.group, groups))
-      .attr("stroke-width", 1.5)
-      .attr("filter", (d) => (d.hasBreakingProposal ? "url(#glow)" : ""));
+    // Outer ring
+    node.append("circle")
+      .attr("r", (d) => 7 + Math.min(d.assetCount * 0.6, 8))
+      .attr("fill", (d) => groupColor(d.group, groups))
+      .attr("fill-opacity", 0.06)
+      .attr("stroke", (d) => groupColor(d.group, groups))
+      .attr("stroke-width", 1)
+      .attr("stroke-opacity", 0.4)
+      .attr("filter", (d) => d.hasBreakingProposal ? "url(#glow)" : "");
 
-    // Inner dot
-    node
-      .append("circle")
-      .attr("r", 3)
-      .attr("fill", (d) => colorForGroup(d.group, groups));
+    // Center dot
+    node.append("circle").attr("r", 2.5)
+      .attr("fill", (d) => groupColor(d.group, groups))
+      .attr("fill-opacity", 0.8);
 
-    // Labels
-    node
-      .append("text")
+    // Label
+    node.append("text")
       .text((d) => d.label)
-      .attr("dy", (d) => -(12 + Math.min(d.assetCount, 10)))
+      .attr("dy", (d) => -(10 + Math.min(d.assetCount * 0.6, 8)))
       .attr("text-anchor", "middle")
-      .attr("fill", "var(--text-secondary)")
-      .attr("font-size", "11px")
-      .attr("font-family", "Outfit, system-ui, sans-serif")
-      .attr("font-weight", "500");
+      .attr("fill", "var(--text-2)")
+      .attr("font-size", "10px")
+      .attr("font-family", "'IBM Plex Mono', monospace")
+      .attr("font-weight", "500")
+      .attr("letter-spacing", "-0.02em");
 
-    // Interactions
+    // Hover interactions
     node
-      .on("mouseenter", (event, d) => {
-        const rect = container.getBoundingClientRect();
-        setTooltip({
-          x: event.clientX - rect.left,
-          y: event.clientY - rect.top,
-          node: d,
-        });
-
-        // Highlight connected edges
-        link
-          .attr("stroke-opacity", (l) => {
-            const src = typeof l.source === "object" ? l.source.id : l.source;
-            const tgt = typeof l.target === "object" ? l.target.id : l.target;
-            return src === d.id || tgt === d.id ? 0.9 : 0.08;
-          })
-          .attr("stroke-width", (l) => {
-            const src = typeof l.source === "object" ? l.source.id : l.source;
-            const tgt = typeof l.target === "object" ? l.target.id : l.target;
-            return src === d.id || tgt === d.id ? 2.5 : 1;
-          });
-
-        node.select("circle:nth-child(2)").attr("fill-opacity", (n) => {
-          const isConnected = links.some((l) => {
-            const src = typeof l.source === "object" ? l.source.id : l.source;
-            const tgt = typeof l.target === "object" ? l.target.id : l.target;
-            return (
-              (src === d.id && tgt === n.id) ||
-              (tgt === d.id && src === n.id) ||
-              n.id === d.id
-            );
-          });
-          return isConnected ? 0.25 : 0.05;
+      .on("mouseenter", (_, d) => {
+        setHover(d);
+        edge.attr("stroke-opacity", (l) => {
+          const s = typeof l.source === "object" ? l.source.id : l.source;
+          const t = typeof l.target === "object" ? l.target.id : l.target;
+          return s === d.id || t === d.id ? 1 : 0.1;
+        }).attr("stroke-width", (l) => {
+          const s = typeof l.source === "object" ? l.source.id : l.source;
+          const t = typeof l.target === "object" ? l.target.id : l.target;
+          return s === d.id || t === d.id ? 1.5 : 0.5;
         });
       })
       .on("mouseleave", () => {
-        setTooltip(null);
-        link
-          .attr("stroke-opacity", (d) => (d.confidence ?? 1) * 0.4)
-          .attr("stroke-width", 1.5);
-        node.select("circle:nth-child(2)").attr("fill-opacity", 0.15);
+        setHover(null);
+        edge.attr("stroke-opacity", 1).attr("stroke-width", 1);
       })
-      .on("click", (_event, d) => {
-        onNodeClick?.(d);
-      });
+      .on("click", (_, d) => onNodeClick?.(d));
 
-    // Tick
-    simulation.on("tick", () => {
-      link
+    sim.on("tick", () => {
+      edge
         .attr("x1", (d) => (d.source as GraphNode).x!)
         .attr("y1", (d) => (d.source as GraphNode).y!)
         .attr("x2", (d) => (d.target as GraphNode).x!)
         .attr("y2", (d) => (d.target as GraphNode).y!);
-
       node.attr("transform", (d) => `translate(${d.x},${d.y})`);
     });
 
-    // Center on load
-    svg.call(zoom.transform, d3.zoomIdentity);
-
-    return () => {
-      simulation.stop();
-    };
+    return () => sim.stop();
   }, [nodes, links, groups, onNodeClick]);
 
   useEffect(() => {
-    const cleanup = buildGraph();
-
-    const observer = new ResizeObserver(() => {
-      buildGraph();
-    });
-    if (containerRef.current) {
-      observer.observe(containerRef.current);
-    }
-
-    return () => {
-      cleanup?.();
-      observer.disconnect();
-    };
-  }, [buildGraph]);
+    const cleanup = build();
+    const obs = new ResizeObserver(() => build());
+    if (wrapRef.current) obs.observe(wrapRef.current);
+    return () => { cleanup?.(); obs.disconnect(); };
+  }, [build]);
 
   return (
-    <div ref={containerRef} className={`relative overflow-hidden ${className ?? ""}`}>
-      <svg
-        ref={svgRef}
-        className="h-full w-full"
-        style={{ background: "transparent" }}
-      />
+    <div ref={wrapRef} className={`relative ${className ?? ""}`}>
+      <svg ref={svgRef} className="h-full w-full" />
 
-      {/* Tooltip */}
-      {tooltip && (
-        <div
-          className="pointer-events-none absolute z-10 rounded-lg border border-border bg-surface-2 px-3 py-2 shadow-lg"
-          style={{
-            left: tooltip.x + 12,
-            top: tooltip.y - 8,
-          }}
-        >
-          <p className="font-mono text-xs font-semibold text-accent">
-            {tooltip.node.label}
+      {/* Hover tooltip */}
+      {hover && (
+        <div className="pointer-events-none absolute left-4 top-4 rounded-md border border-line bg-bg-raised/90 px-3 py-2 backdrop-blur-sm">
+          <p className="font-mono text-xs font-medium text-accent">{hover.label}</p>
+          <p className="mt-0.5 text-[11px] text-t3">
+            {hover.group} &middot; {hover.assetCount} assets
           </p>
-          <p className="mt-0.5 text-2xs text-text-muted">
-            {tooltip.node.group} &middot; {tooltip.node.assetCount} asset
-            {tooltip.node.assetCount !== 1 ? "s" : ""}
-          </p>
-          {tooltip.node.hasBreakingProposal && (
-            <p className="mt-1 text-2xs font-medium text-danger">
-              Breaking change pending
-            </p>
+          {hover.hasBreakingProposal && (
+            <p className="mt-1 text-[11px] font-medium text-red">breaking change</p>
           )}
         </div>
       )}
 
-      {/* Legend */}
-      <div className="absolute bottom-3 left-3 flex gap-4 rounded-md border border-border bg-surface-1/80 px-3 py-1.5 backdrop-blur-sm">
-        {Object.entries(EDGE_COLORS).map(([type, color]) => (
-          <div key={type} className="flex items-center gap-1.5">
-            <div
-              className="h-0.5 w-4 rounded-full"
-              style={{ background: color }}
-            />
-            <span className="font-mono text-2xs text-text-muted">
-              {type.toLowerCase()}
-            </span>
-          </div>
+      {/* Minimal legend */}
+      <div className="absolute bottom-3 right-3 flex gap-4 font-mono text-[10px] text-t3">
+        {Object.entries(EDGE_STYLES).map(([type, s]) => (
+          <span key={type} className="flex items-center gap-1.5">
+            <span className="inline-block h-px w-3" style={{ background: s.color.replace(/[\d.]+\)$/, "0.6)") }} />
+            {type.toLowerCase()}
+          </span>
         ))}
       </div>
     </div>

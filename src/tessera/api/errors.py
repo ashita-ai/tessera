@@ -240,6 +240,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
                 "img-src 'self' data:; "
                 "font-src 'self' https://fonts.gstatic.com; "
+                "connect-src 'self'; "
                 "frame-ancestors 'none'"
             )
         else:

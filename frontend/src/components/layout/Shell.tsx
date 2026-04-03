@@ -6,9 +6,9 @@ export function Shell() {
   return (
     <div className="flex h-screen overflow-hidden">
       <Sidebar />
-      <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="flex min-w-0 flex-1 flex-col">
         <Header />
-        <main className="flex-1 overflow-y-auto bg-surface-0 p-6">
+        <main className="flex-1 overflow-auto p-6">
           <Outlet />
         </main>
       </div>

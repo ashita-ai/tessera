@@ -2,42 +2,30 @@ import { cn } from "@/lib/utils";
 
 interface Props {
   label: string;
-  value: number | string;
-  accent?: boolean;
+  value: string | number;
   alert?: boolean;
   href?: string;
 }
 
-export function StatCard({ label, value, accent, alert, href }: Props) {
+export function StatCard({ label, value, alert, href }: Props) {
   const Tag = href ? "a" : "div";
   return (
     <Tag
       {...(href ? { href } : {})}
       className={cn(
-        "group relative flex flex-col gap-1 overflow-hidden rounded-xl border border-border bg-surface-1 px-5 py-4 transition-all duration-200",
-        href && "cursor-pointer hover:border-border-strong hover:bg-surface-2",
-        alert && "border-danger/30 hover:border-danger/50",
+        "rounded-lg border px-4 py-3 transition-colors",
+        alert
+          ? "border-red/20 bg-red-dim"
+          : "border-line bg-bg-raised hover:border-line-strong",
       )}
     >
-      {/* Subtle corner glow */}
-      {accent && (
-        <div className="pointer-events-none absolute -right-6 -top-6 h-16 w-16 rounded-full bg-accent/10 blur-xl" />
-      )}
-      {alert && (
-        <div className="pointer-events-none absolute -right-6 -top-6 h-16 w-16 rounded-full bg-danger/10 blur-xl" />
-      )}
-
-      <span
-        className={cn(
-          "font-display text-2xl font-bold tabular-nums tracking-tight",
-          alert ? "text-danger" : accent ? "text-accent" : "text-text-primary",
-        )}
-      >
+      <p className="text-[11px] font-medium uppercase tracking-widest text-t3">{label}</p>
+      <p className={cn(
+        "mt-1 font-mono text-xl font-semibold",
+        alert ? "text-red" : "text-t1",
+      )}>
         {value}
-      </span>
-      <span className="text-xs font-medium uppercase tracking-wider text-text-muted">
-        {label}
-      </span>
+      </p>
     </Tag>
   );
 }

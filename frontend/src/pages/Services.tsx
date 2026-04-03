@@ -15,59 +15,43 @@ export function Services() {
 
   const services = servicesQuery.data?.results ?? [];
   const isLoading = servicesQuery.isLoading;
-  const isServiceEndpointMissing = servicesQuery.isError;
+  const isError = servicesQuery.isError;
 
   return (
-    <div className="space-y-6">
+    <div className="animate-enter space-y-5">
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="font-display text-xl font-bold text-text-primary">
-            Services
-          </h1>
-          <p className="mt-1 text-sm text-text-secondary">
-            Registered services and their API specs
-          </p>
-        </div>
+        <h1 className="text-sm font-medium text-t2">Services</h1>
         <button
           onClick={() => setShowRegister(true)}
-          className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-surface-0 transition-colors hover:bg-accent-glow"
+          className="rounded-md bg-accent/10 px-3 py-1.5 font-mono text-[11px] font-medium text-accent transition-colors hover:bg-accent/20"
         >
-          Register Service
+          Register
         </button>
       </div>
 
-      {isServiceEndpointMissing ? (
-        <div className="rounded-xl border border-border bg-surface-1 p-8 text-center">
-          <p className="font-display text-lg font-semibold text-text-primary">
-            Service endpoints not yet available
-          </p>
-          <p className="mt-2 text-sm text-text-muted">
-            The service registry API (Spec-006) has not been implemented yet.
-            <br />
-            This page will populate once{" "}
-            <span className="font-mono text-accent">POST /api/v1/services</span> is
-            available.
+      {isError ? (
+        <div className="rounded-lg border border-line bg-bg-raised px-6 py-10 text-center">
+          <p className="text-[13px] text-t2">Service registry not available</p>
+          <p className="mt-1.5 text-[11px] text-t3">
+            <span className="font-mono text-accent">POST /api/v1/services</span> endpoint has not been implemented yet.
           </p>
         </div>
       ) : isLoading ? (
-        <div className="py-12 text-center text-sm text-text-muted">Loading...</div>
+        <div className="py-16 text-center text-[11px] text-t3">Loading...</div>
       ) : services.length === 0 ? (
-        <div className="rounded-xl border border-border bg-surface-1 p-8 text-center">
-          <p className="text-sm text-text-muted">
-            No services registered. Register your first service to get started.
-          </p>
+        <div className="rounded-lg border border-line bg-bg-raised px-6 py-10 text-center">
+          <p className="text-[11px] text-t3">No services registered</p>
         </div>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="stagger grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {services.map((svc) => (
             <ServiceCard key={svc.id} service={svc} />
           ))}
         </div>
       )}
 
-      {/* Register modal */}
       {showRegister && (
-        <RegisterServiceModal onClose={() => setShowRegister(false)} />
+        <RegisterModal onClose={() => setShowRegister(false)} />
       )}
     </div>
   );
@@ -75,126 +59,71 @@ export function Services() {
 
 function ServiceCard({ service }: { service: Service }) {
   return (
-    <div className="group rounded-xl border border-border bg-surface-1 p-5 transition-all hover:border-border-strong hover:bg-surface-2">
+    <div className="group rounded-lg border border-line bg-bg-raised p-4 transition-colors hover:border-line-strong">
       <div className="flex items-start justify-between">
-        <div>
-          <h3 className="font-mono text-sm font-semibold text-text-primary">
-            {service.name}
-          </h3>
-          <p className="mt-0.5 text-2xs text-text-muted">
-            {service.owner_team_name}
-          </p>
-        </div>
+        <p className="font-mono text-xs font-medium text-t1">{service.name}</p>
         {service.last_synced_at && (
-          <span className="rounded-full bg-success/10 px-2 py-0.5 text-2xs font-medium text-success">
+          <span className="rounded-full bg-green/10 px-1.5 py-px text-[10px] font-medium text-green">
             synced
           </span>
         )}
       </div>
+      {service.owner_team_name && (
+        <p className="mt-0.5 text-[10px] text-t3">{service.owner_team_name}</p>
+      )}
 
-      <div className="mt-3 space-y-1.5 text-xs text-text-secondary">
+      <div className="mt-3 space-y-1 text-[11px]">
         <div className="flex items-center gap-2">
-          <span className="text-text-muted">repo</span>
-          <span className="truncate font-mono text-2xs">{service.repo_url}</span>
+          <span className="w-8 shrink-0 text-t3">repo</span>
+          <span className="truncate font-mono text-[10px] text-t2">{service.repo_url}</span>
         </div>
         {service.otel_service_name && (
           <div className="flex items-center gap-2">
-            <span className="text-text-muted">otel</span>
-            <span className="font-mono text-2xs text-accent">
-              {service.otel_service_name}
-            </span>
+            <span className="w-8 shrink-0 text-t3">otel</span>
+            <span className="font-mono text-[10px] text-accent">{service.otel_service_name}</span>
           </div>
         )}
         <div className="flex items-center gap-2">
-          <span className="text-text-muted">assets</span>
-          <span>{service.asset_count ?? 0}</span>
+          <span className="w-8 shrink-0 text-t3">assets</span>
+          <span className="text-t2">{service.asset_count ?? 0}</span>
         </div>
       </div>
 
       {service.last_synced_at && (
-        <p className="mt-3 text-2xs text-text-muted">
-          Last synced {formatDate(service.last_synced_at)}
+        <p className="mt-3 border-t border-line/50 pt-2 text-[10px] text-t3">
+          Synced {formatDate(service.last_synced_at)}
         </p>
       )}
     </div>
   );
 }
 
-function RegisterServiceModal({ onClose }: { onClose: () => void }) {
+function RegisterModal({ onClose }: { onClose: () => void }) {
   return (
     <>
-      <div
-        className="fixed inset-0 z-40 bg-surface-0/60 backdrop-blur-sm"
-        onClick={onClose}
-      />
+      <div className="fixed inset-0 z-40 bg-bg/70 backdrop-blur-sm" onClick={onClose} />
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <div className="w-full max-w-lg rounded-xl border border-border bg-surface-1 p-6 shadow-2xl">
-          <h2 className="font-display text-lg font-bold text-text-primary">
-            Register Service
-          </h2>
-          <p className="mt-1 text-sm text-text-muted">
-            Point Tessera at a git repository containing API specs.
-          </p>
+        <div className="w-full max-w-md rounded-lg border border-line bg-bg-raised p-5 shadow-2xl">
+          <p className="text-[13px] font-medium text-t1">Register service</p>
+          <p className="mt-1 text-[11px] text-t3">Point Tessera at a git repository containing API specs.</p>
 
-          <form className="mt-5 space-y-4" onSubmit={(e) => e.preventDefault()}>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-text-secondary">
-                Service Name
-              </label>
-              <input
-                type="text"
-                placeholder="e.g., order-service"
-                className="w-full rounded-lg border border-border bg-surface-2 px-3 py-2 font-mono text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-text-secondary">
-                Git Repository URL
-              </label>
-              <input
-                type="text"
-                placeholder="https://github.com/org/repo"
-                className="w-full rounded-lg border border-border bg-surface-2 px-3 py-2 font-mono text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-text-secondary">
-                Spec File Paths
-              </label>
-              <input
-                type="text"
-                placeholder="api/openapi.yaml, proto/"
-                className="w-full rounded-lg border border-border bg-surface-2 px-3 py-2 font-mono text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none"
-              />
-              <p className="mt-1 text-2xs text-text-muted">
-                Comma-separated paths to OpenAPI, protobuf, or GraphQL specs
-              </p>
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-text-secondary">
-                OTEL Service Name (optional)
-              </label>
-              <input
-                type="text"
-                placeholder="order-service"
-                className="w-full rounded-lg border border-border bg-surface-2 px-3 py-2 font-mono text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none"
-              />
-              <p className="mt-1 text-2xs text-text-muted">
-                Matches the service.name attribute in your OTEL traces
-              </p>
-            </div>
+          <form className="mt-4 space-y-3" onSubmit={(e) => e.preventDefault()}>
+            <Field label="Service name" placeholder="e.g., order-service" />
+            <Field label="Git repository URL" placeholder="https://github.com/org/repo" />
+            <Field label="Spec file paths" placeholder="api/openapi.yaml, proto/" hint="Comma-separated paths to OpenAPI, protobuf, or GraphQL specs" />
+            <Field label="OTEL service name" placeholder="order-service" hint="Matches the service.name attribute in your OTEL traces" />
 
-            <div className="flex justify-end gap-3 pt-2">
+            <div className="flex justify-end gap-2 pt-2">
               <button
                 type="button"
                 onClick={onClose}
-                className="rounded-lg border border-border px-4 py-2 text-sm text-text-secondary hover:bg-surface-2"
+                className="rounded-md border border-line px-3 py-1.5 text-[11px] text-t3 transition-colors hover:bg-bg-hover hover:text-t2"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-surface-0 hover:bg-accent-glow"
+                className="rounded-md bg-accent/10 px-3 py-1.5 text-[11px] font-medium text-accent transition-colors hover:bg-accent/20"
               >
                 Register
               </button>
@@ -203,5 +132,19 @@ function RegisterServiceModal({ onClose }: { onClose: () => void }) {
         </div>
       </div>
     </>
+  );
+}
+
+function Field({ label, placeholder, hint }: { label: string; placeholder: string; hint?: string }) {
+  return (
+    <div>
+      <label className="mb-1 block text-[11px] font-medium text-t2">{label}</label>
+      <input
+        type="text"
+        placeholder={placeholder}
+        className="w-full rounded-md border border-line bg-bg-surface px-3 py-1.5 font-mono text-xs text-t1 placeholder:text-t3 focus:border-accent/40 focus:outline-none"
+      />
+      {hint && <p className="mt-0.5 text-[10px] text-t3">{hint}</p>}
+    </div>
   );
 }

@@ -11,50 +11,34 @@ export function Teams() {
   const teams = teamsQuery.data?.results ?? [];
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="font-display text-xl font-bold text-text-primary">Teams</h1>
-        <p className="mt-1 text-sm text-text-secondary">
-          Teams own services and assets, and acknowledge proposals
-        </p>
-      </div>
+    <div className="animate-enter space-y-5">
+      <h1 className="text-sm font-medium text-t2">Teams</h1>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {teams.map((team) => (
-          <div
-            key={team.id}
-            className="group rounded-xl border border-border bg-surface-1 p-5 transition-all hover:border-border-strong hover:bg-surface-2"
-          >
-            <h3 className="font-mono text-sm font-semibold text-text-primary">
-              {team.name}
-            </h3>
-            <div className="mt-3 flex gap-4 text-xs text-text-muted">
-              <span>
-                <span className="font-medium text-text-secondary">
-                  {team.asset_count ?? 0}
-                </span>{" "}
-                assets
-              </span>
-              <span>
-                <span className="font-medium text-text-secondary">
-                  {team.member_count ?? 0}
-                </span>{" "}
-                members
-              </span>
-            </div>
-            <p className="mt-2 text-2xs text-text-muted">
-              Created {formatDate(team.created_at)}
-            </p>
-          </div>
-        ))}
-      </div>
-
-      {teamsQuery.isLoading && (
-        <div className="py-12 text-center text-sm text-text-muted">Loading...</div>
-      )}
-      {!teamsQuery.isLoading && teams.length === 0 && (
-        <div className="rounded-xl border border-border bg-surface-1 p-8 text-center text-sm text-text-muted">
+      {teamsQuery.isLoading ? (
+        <div className="py-16 text-center text-[11px] text-t3">Loading...</div>
+      ) : teams.length === 0 ? (
+        <div className="rounded-lg border border-line bg-bg-raised px-6 py-10 text-center text-[11px] text-t3">
           No teams found
+        </div>
+      ) : (
+        <div className="stagger grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {teams.map((team) => (
+            <div
+              key={team.id}
+              className="rounded-lg border border-line bg-bg-raised p-4 transition-colors hover:border-line-strong"
+            >
+              <p className="font-mono text-xs font-medium text-t1">{team.name}</p>
+              <div className="mt-2 flex gap-4 text-[11px] text-t3">
+                <span>
+                  <span className="font-medium text-t2">{team.asset_count ?? 0}</span> assets
+                </span>
+                <span>
+                  <span className="font-medium text-t2">{team.member_count ?? 0}</span> members
+                </span>
+              </div>
+              <p className="mt-2 text-[10px] text-t3">Created {formatDate(team.created_at)}</p>
+            </div>
+          ))}
         </div>
       )}
     </div>

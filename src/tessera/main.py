@@ -8,9 +8,9 @@ from pathlib import Path
 from typing import Any
 
 import redis
-from fastapi import APIRouter, Depends, FastAPI
+from fastapi import APIRouter, Depends, FastAPI, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 from slowapi.errors import RateLimitExceeded
@@ -57,7 +57,6 @@ from tessera.db import get_session, init_db
 from tessera.db.database import dispose_engine
 from tessera.logging import configure_logging
 from tessera.services.metrics import MetricsMiddleware, get_metrics, update_gauge_metrics
-from tessera.web import router as web_router
 from tessera.web.routes import register_login_required_handler
 
 # Track application start time for uptime calculation
@@ -235,11 +234,63 @@ app.include_router(api_v1)
 
 # Static files and Web UI
 static_dir = Path(__file__).parent / "static"
+spa_dist_dir = static_dir / "dist"
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
-# Web UI routes (must be added after API routes to avoid conflicts)
-app.include_router(web_router)
+# Mount Vite build assets at /assets so the React SPA's JS/CSS loads correctly.
+# Vite outputs to static/dist/assets/ with paths like /assets/index-*.js.
+if spa_dist_dir.exists() and (spa_dist_dir / "assets").exists():
+    app.mount("/assets", StaticFiles(directory=str(spa_dist_dir / "assets")), name="spa-assets")
+
+# Web UI: auth routes (login/logout) use Jinja2, all other pages serve the React SPA.
+_spa_index = spa_dist_dir / "index.html" if spa_dist_dir.exists() else None
+_spa_html: str | None = _spa_index.read_text() if _spa_index and _spa_index.exists() else None
+
+# Register only login/logout/session routes from the web module
+_auth_router = APIRouter(tags=["web-auth"])
+
+
+@_auth_router.get("/login", response_class=HTMLResponse, response_model=None)
+async def login_page_proxy(request: Request, session: AsyncSession = Depends(get_session)) -> Any:
+    """Proxy to Jinja2 login page."""
+    from tessera.web.routes import login_page
+
+    return await login_page(request, session)
+
+
+@_auth_router.post("/login")
+async def login_submit_proxy(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    session: AsyncSession = Depends(get_session),
+) -> Any:
+    """Proxy to Jinja2 login handler."""
+    from tessera.web.routes import login_submit
+
+    return await login_submit(request, username, password, session)
+
+
+@_auth_router.get("/logout")
+async def logout_proxy(request: Request) -> Any:
+    """Proxy to logout handler."""
+    from tessera.web.routes import logout
+
+    return await logout(request)
+
+
+app.include_router(_auth_router)
+
+
+# SPA catch-all: serves React index.html for all unmatched routes.
+# React Router handles client-side routing for /, /services, /assets, etc.
+@app.get("/{path:path}", response_class=HTMLResponse, include_in_schema=False)
+async def spa_catchall(path: str) -> HTMLResponse:
+    """Serve the React SPA for all non-API routes."""
+    if _spa_html:
+        return HTMLResponse(_spa_html)
+    raise HTTPException(status_code=404, detail="Not found")
 
 
 @app.get("/metrics")
