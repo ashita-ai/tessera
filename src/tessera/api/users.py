@@ -11,12 +11,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing_extensions import TypedDict
 
 from tessera.api.auth import Auth, RequireAdmin, RequireRead
-from tessera.api.errors import DuplicateError, ErrorCode, NotFoundError
+from tessera.api.errors import BadRequestError, DuplicateError, ErrorCode, NotFoundError
 from tessera.api.pagination import PaginationParams, pagination_params
 from tessera.api.rate_limit import limit_read, limit_write
 from tessera.api.types import PaginatedResponse
 from tessera.db import TeamDB, UserDB, get_session
 from tessera.models import User, UserCreate, UserUpdate, UserWithTeam
+from tessera.models.enums import UserType
 from tessera.services import audit
 from tessera.services.audit import AuditAction
 from tessera.services.batch import fetch_asset_counts_by_user, fetch_team_names
@@ -26,8 +27,10 @@ class UserWithTeamAndAssets(TypedDict, total=False):
     """User with team name and asset count for list responses."""
 
     id: UUID
-    email: str
+    username: str
+    email: str | None
     name: str
+    user_type: str
     team_id: UUID | None
     role: str
     created_at: datetime
@@ -65,9 +68,9 @@ async def create_user(
     _: None = RequireAdmin,
     session: AsyncSession = Depends(get_session),
 ) -> UserDB:
-    """Create a new user.
+    """Create a new user (human or bot).
 
-    Requires admin scope.
+    Requires admin scope. Bot users cannot have passwords.
     """
     # Verify team exists if provided
     if user.team_id:
@@ -77,7 +80,7 @@ async def create_user(
         if not team_result.scalar_one_or_none():
             raise NotFoundError(ErrorCode.TEAM_NOT_FOUND, "Team not found")
 
-    normalized_email = user.email.lower().strip()
+    normalized_email = user.email.lower().strip() if user.email else None
 
     # Hash password if provided
     password_hash = None
@@ -85,8 +88,10 @@ async def create_user(
         password_hash = _hasher.hash(user.password)
 
     db_user = UserDB(
+        username=user.username,
         email=normalized_email,
         name=user.name,
+        user_type=user.user_type,
         team_id=user.team_id,
         password_hash=password_hash,
         role=user.role,
@@ -99,7 +104,7 @@ async def create_user(
         await session.rollback()
         raise DuplicateError(
             ErrorCode.DUPLICATE_USER,
-            f"User with email '{normalized_email}' already exists",
+            f"User with username '{user.username}' already exists",
         )
     await session.refresh(db_user)
 
@@ -110,7 +115,8 @@ async def create_user(
         entity_id=db_user.id,
         action=AuditAction.USER_CREATED,
         payload={
-            "email": user.email,
+            "username": user.username,
+            "user_type": user.user_type.value,
             "name": user.name,
             "team_id": str(user.team_id) if user.team_id else None,
         },
@@ -125,8 +131,10 @@ async def list_users(
     request: Request,
     auth: Auth,
     team_id: UUID | None = Query(None, description="Filter by team ID"),
+    username: str | None = Query(None, description="Filter by username pattern (case-insensitive)"),
     email: str | None = Query(None, description="Filter by email pattern (case-insensitive)"),
     name: str | None = Query(None, description="Filter by name pattern (case-insensitive)"),
+    user_type: UserType | None = Query(None, description="Filter by user type (human or bot)"),
     include_deactivated: bool = Query(False, description="Include deactivated users"),
     params: PaginationParams = Depends(pagination_params),
     _: None = RequireRead,
@@ -142,10 +150,14 @@ async def list_users(
         base_query = base_query.where(UserDB.deactivated_at.is_(None))
     if team_id:
         base_query = base_query.where(UserDB.team_id == team_id)
+    if username:
+        base_query = base_query.where(UserDB.username.ilike(f"%{username}%"))
     if email:
         base_query = base_query.where(UserDB.email.ilike(f"%{email}%"))
     if name:
         base_query = base_query.where(UserDB.name.ilike(f"%{name}%"))
+    if user_type:
+        base_query = base_query.where(UserDB.user_type == user_type)
 
     # Get total count
     count_query = select(func.count()).select_from(base_query.subquery())
@@ -253,15 +265,23 @@ async def update_user(
         if not team_result.scalar_one_or_none():
             raise NotFoundError(ErrorCode.TEAM_NOT_FOUND, "Team not found")
 
-    normalized_update_email = None
+    if update.username is not None:
+        user.username = update.username  # already normalized by validator
     if update.email is not None:
-        normalized_update_email = update.email.lower().strip()
-        user.email = normalized_update_email
+        user.email = update.email.lower().strip()
     if update.name is not None:
         user.name = update.name
+    if update.user_type is not None:
+        # Enforce bot invariant: clear password_hash when switching to bot
+        if update.user_type == UserType.BOT and user.password_hash is not None:
+            user.password_hash = None
+        user.user_type = update.user_type
     if update.team_id is not None:
         user.team_id = update.team_id
     if update.password is not None:
+        effective_type = update.user_type if update.user_type is not None else user.user_type
+        if effective_type == UserType.BOT:
+            raise BadRequestError("Bot users cannot have passwords", ErrorCode.VALIDATION_ERROR)
         user.password_hash = _hasher.hash(update.password)
     if update.role is not None:
         user.role = update.role
@@ -270,13 +290,15 @@ async def update_user(
     if update.metadata is not None:
         user.metadata_ = update.metadata
 
+    # Capture before flush — ORM object expires after rollback
+    effective_username = update.username if update.username is not None else user.username
     try:
         await session.flush()
     except IntegrityError:
         await session.rollback()
         raise DuplicateError(
             ErrorCode.DUPLICATE_USER,
-            f"User with email '{normalized_update_email}' already exists",
+            f"User with username '{effective_username}' already exists",
         )
     await session.refresh(user)
 
@@ -287,10 +309,12 @@ async def update_user(
         entity_id=user_id,
         action=AuditAction.USER_UPDATED,
         payload={
+            "username_changed": update.username is not None,
             "email_changed": update.email is not None,
             "name_changed": update.name is not None,
             "team_changed": update.team_id is not None,
             "role_changed": update.role is not None,
+            "user_type_changed": update.user_type is not None,
         },
     )
 
@@ -330,7 +354,7 @@ async def deactivate_user(
         entity_type="user",
         entity_id=user_id,
         action=AuditAction.USER_DELETED,
-        payload={"email": user.email, "name": user.name},
+        payload={"username": user.username, "name": user.name},
     )
 
 
@@ -370,7 +394,7 @@ async def reactivate_user(
         entity_id=user_id,
         action=AuditAction.USER_REACTIVATED,
         actor_id=auth.team_id,
-        payload={"email": user.email, "name": user.name},
+        payload={"username": user.username, "name": user.name},
     )
 
     return user

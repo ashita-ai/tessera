@@ -15,6 +15,9 @@ class APIKeyCreate(BaseModel):
         ..., min_length=1, max_length=255, description="Human-readable name for the key"
     )
     team_id: UUID = Field(..., description="Team this key belongs to")
+    user_id: UUID | None = Field(
+        None, description="Optional user this key is assigned to (human or bot)"
+    )
     scopes: list[APIKeyScope] = Field(
         default=[APIKeyScope.READ, APIKeyScope.WRITE],
         description="Permission scopes for this key",
@@ -71,6 +74,7 @@ class APIKeyCreated(BaseModel):
     key_prefix: str = Field(..., description="Key prefix for identification")
     name: str
     team_id: UUID
+    user_id: UUID | None = None
     scopes: list[APIKeyScope]
     agent_name: str | None = None
     agent_framework: str | None = None
@@ -88,6 +92,7 @@ class APIKey(BaseModel):
     key_prefix: str
     name: str
     team_id: UUID
+    user_id: UUID | None = None
     scopes: list[APIKeyScope]
     agent_name: str | None = None
     agent_framework: str | None = None

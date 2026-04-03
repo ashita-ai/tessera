@@ -86,7 +86,7 @@ class TestRestoreAuditEvents:
         user_resp = await client.post(
             "/api/v1/users",
             json={
-                "email": "audit-reactivate@test.com",
+                "username": "auditreactivate",
                 "name": "Audit Reactivate",
                 "team_id": team_id,
             },
@@ -103,7 +103,7 @@ class TestRestoreAuditEvents:
         events = await _get_audit_events(test_session, "user.reactivated", user_id)
         assert len(events) == 1
         assert events[0].entity_type == "user"
-        assert events[0].payload["email"] == "audit-reactivate@test.com"
+        assert events[0].payload["username"] == "auditreactivate"
         assert events[0].payload["name"] == "Audit Reactivate"
 
 
@@ -308,7 +308,7 @@ class TestBulkAuditEvents:
 
         user_resp = await client.post(
             "/api/v1/users",
-            json={"email": "audit-bulk@test.com", "name": "Bulk Owner", "team_id": team_id},
+            json={"username": "auditbulk", "name": "Bulk Owner", "team_id": team_id},
         )
         user_id = user_resp.json()["id"]
 

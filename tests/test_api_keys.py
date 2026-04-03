@@ -44,6 +44,70 @@ class TestAPIKeyCreate:
         )
         assert resp.status_code == 404
 
+    async def test_create_api_key_with_user_id(self, client: AsyncClient):
+        """Create an API key assigned to a specific user."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "user-key-team"})
+        team_id = team_resp.json()["id"]
+
+        user_resp = await client.post(
+            "/api/v1/users",
+            json={"username": "keyowner", "name": "Key Owner", "team_id": team_id},
+        )
+        user_id = user_resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/api-keys",
+            json={
+                "name": "user-key",
+                "team_id": team_id,
+                "scopes": ["read"],
+                "user_id": user_id,
+            },
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["user_id"] == user_id
+
+    async def test_create_api_key_user_not_found(self, client: AsyncClient):
+        """Create API key for nonexistent user fails."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "nouser-key-team"})
+        team_id = team_resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/api-keys",
+            json={
+                "name": "orphan-user-key",
+                "team_id": team_id,
+                "scopes": ["read"],
+                "user_id": "00000000-0000-0000-0000-000000000000",
+            },
+        )
+        assert resp.status_code in (400, 404)
+
+    async def test_create_api_key_user_wrong_team(self, client: AsyncClient):
+        """Create API key with user from different team fails."""
+        team1_resp = await client.post("/api/v1/teams", json={"name": "key-team-a"})
+        team1_id = team1_resp.json()["id"]
+        team2_resp = await client.post("/api/v1/teams", json={"name": "key-team-b"})
+        team2_id = team2_resp.json()["id"]
+
+        user_resp = await client.post(
+            "/api/v1/users",
+            json={"username": "wrongteamuser", "name": "Wrong Team", "team_id": team1_id},
+        )
+        user_id = user_resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/api-keys",
+            json={
+                "name": "wrong-team-key",
+                "team_id": team2_id,
+                "scopes": ["read"],
+                "user_id": user_id,
+            },
+        )
+        assert resp.status_code in (400, 404)
+
 
 class TestAPIKeyList:
     """Tests for GET /api/v1/api-keys."""

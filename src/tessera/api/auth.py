@@ -73,7 +73,7 @@ async def _get_session_auth_context(
         mock_key = APIKeyDB(
             key_hash="session",
             key_prefix="session",
-            name=f"Session: {user.email}",
+            name=f"Session: {user.username}",
             team_id=team.id,
             scopes=[s.value for s in scopes],
         )

@@ -9,7 +9,7 @@ from argon2.exceptions import VerifyMismatchError
 from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tessera.db.models import APIKeyDB, TeamDB
+from tessera.db.models import APIKeyDB, TeamDB, UserDB
 from tessera.models.api_key import APIKey, APIKeyCreate, APIKeyCreated
 from tessera.models.enums import APIKeyScope
 
@@ -60,6 +60,7 @@ def _db_to_api_key(api_key_db: APIKeyDB) -> APIKey:
         key_prefix=api_key_db.key_prefix,
         name=api_key_db.name,
         team_id=api_key_db.team_id,
+        user_id=api_key_db.user_id,
         scopes=[APIKeyScope(s) for s in api_key_db.scopes],
         agent_name=api_key_db.agent_name,
         agent_framework=api_key_db.agent_framework,
@@ -92,6 +93,19 @@ async def create_api_key(
     if not team:
         raise ValueError(f"Team {key_data.team_id} not found")
 
+    # Verify user exists and belongs to the team (if specified)
+    if key_data.user_id:
+        user_result = await session.execute(
+            select(UserDB)
+            .where(UserDB.id == key_data.user_id)
+            .where(UserDB.deactivated_at.is_(None))
+        )
+        user = user_result.scalar_one_or_none()
+        if not user:
+            raise ValueError(f"User {key_data.user_id} not found")
+        if user.team_id != key_data.team_id:
+            raise ValueError(f"User {key_data.user_id} does not belong to team {key_data.team_id}")
+
     # Generate the key
     full_key, key_hash, key_prefix = generate_api_key(environment)
 
@@ -101,6 +115,7 @@ async def create_api_key(
         key_prefix=key_prefix,
         name=key_data.name,
         team_id=key_data.team_id,
+        user_id=key_data.user_id,
         scopes=[scope.value for scope in key_data.scopes],
         agent_name=key_data.agent_name,
         agent_framework=key_data.agent_framework,
@@ -115,6 +130,7 @@ async def create_api_key(
         key_prefix=key_prefix,
         name=api_key_db.name,
         team_id=api_key_db.team_id,
+        user_id=api_key_db.user_id,
         scopes=[APIKeyScope(s) for s in api_key_db.scopes],
         agent_name=api_key_db.agent_name,
         agent_framework=api_key_db.agent_framework,

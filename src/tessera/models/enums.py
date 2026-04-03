@@ -107,6 +107,13 @@ class GuaranteeChangeSeverity(StrEnum):
     BREAKING = "breaking"  # In strict mode, blocks like schema changes
 
 
+class UserType(StrEnum):
+    """Whether a user is a human or a bot."""
+
+    HUMAN = "human"  # Interactive user who logs in via web UI
+    BOT = "bot"  # Automated agent that authenticates via API key only
+
+
 class UserRole(StrEnum):
     """User role for access control."""
 
