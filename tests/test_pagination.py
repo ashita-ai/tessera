@@ -29,7 +29,7 @@ class TestPaginationEdgeCases:
         for i in range(5):
             await client.post(
                 "/api/v1/users",
-                json={"email": f"user{i}@example.com", "name": VALID_NAMES[i]},
+                json={"username": f"user{i}", "name": VALID_NAMES[i]},
             )
 
         # Request with offset beyond total
@@ -43,11 +43,10 @@ class TestPaginationEdgeCases:
 
     async def test_maximum_limit_works(self, client: AsyncClient):
         """Maximum limit (100) is accepted and works correctly."""
-        # Create more than 100 users would be slow, so create 10 and test max limit
         for i in range(10):
             await client.post(
                 "/api/v1/users",
-                json={"email": f"user{i}@example.com", "name": VALID_NAMES[i]},
+                json={"username": f"user{i}", "name": VALID_NAMES[i]},
             )
 
         resp = await client.get("/api/v1/users?limit=100")
@@ -79,17 +78,17 @@ class TestPaginationEdgeCases:
     async def test_pagination_consistency_users(self, client: AsyncClient):
         """Paginated results are consistent and complete."""
         # Create 10 users
-        created_emails = []
+        created_usernames = []
         for i in range(10):
-            email = f"page{i}@example.com"
-            created_emails.append(email)
+            username = f"page{i}"
+            created_usernames.append(username)
             await client.post(
                 "/api/v1/users",
-                json={"email": email, "name": VALID_NAMES[i]},
+                json={"username": username, "name": VALID_NAMES[i]},
             )
 
         # Fetch all via pagination (3 + 3 + 3 + 1)
-        all_emails = []
+        all_usernames: list[str] = []
         offset = 0
         limit = 3
         while True:
@@ -102,12 +101,12 @@ class TestPaginationEdgeCases:
             if not data["results"]:
                 break
 
-            all_emails.extend([u["email"] for u in data["results"]])
+            all_usernames.extend([u["username"] for u in data["results"]])
             offset += limit
 
         # Verify all users retrieved
-        assert len(all_emails) == 10
-        assert set(all_emails) == set(created_emails)
+        assert len(all_usernames) == 10
+        assert set(all_usernames) == set(created_usernames)
 
     async def test_pagination_consistency_teams(self, client: AsyncClient):
         """Pagination consistency for teams list endpoint."""
@@ -119,7 +118,7 @@ class TestPaginationEdgeCases:
             await client.post("/api/v1/teams", json={"name": name})
 
         # Fetch all via pagination (5 + 3)
-        all_names = []
+        all_names: list[str] = []
         offset = 0
         limit = 5
         while True:
@@ -143,7 +142,7 @@ class TestPaginationEdgeCases:
         for i in range(7):
             await client.post(
                 "/api/v1/users",
-                json={"email": f"count{i}@example.com", "name": VALID_NAMES[i]},
+                json={"username": f"count{i}", "name": VALID_NAMES[i]},
             )
 
         # Different pagination params should all report total=7
@@ -177,7 +176,7 @@ class TestPaginationEdgeCases:
         """Pagination works with exactly one result."""
         await client.post(
             "/api/v1/users",
-            json={"email": "single@example.com", "name": "Single User"},
+            json={"username": "single", "name": "Single User"},
         )
 
         resp = await client.get("/api/v1/users?limit=10&offset=0")
@@ -206,12 +205,12 @@ class TestPaginationWithFilters:
         for i in range(6):
             await client.post(
                 "/api/v1/users",
-                json={"email": f"in{i}@team.com", "name": VALID_NAMES[i], "team_id": team_id},
+                json={"username": f"in{i}", "name": VALID_NAMES[i], "team_id": team_id},
             )
         for i in range(4):
             await client.post(
                 "/api/v1/users",
-                json={"email": f"out{i}@other.com", "name": VALID_NAMES[i + 6]},
+                json={"username": f"out{i}", "name": VALID_NAMES[i + 6]},
             )
 
         # Paginate filtered results

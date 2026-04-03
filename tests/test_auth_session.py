@@ -144,6 +144,7 @@ class TestGetSessionAuthContext:
         # Create a mock user with team_id = None
         mock_user = MagicMock()
         mock_user.id = user_id
+        mock_user.username = "testuser"
         mock_user.email = "test@example.com"
         mock_user.name = "Test User"
         mock_user.role = UserRole.USER
@@ -198,6 +199,7 @@ class TestGetSessionAuthContext:
         # Create mock user with admin role
         mock_user = MagicMock()
         mock_user.id = user_id
+        mock_user.username = "admin"
         mock_user.email = "admin@example.com"
         mock_user.name = "Admin User"
         mock_user.role = UserRole.ADMIN
@@ -232,6 +234,7 @@ class TestGetSessionAuthContext:
         # Create mock user with team admin role
         mock_user = MagicMock()
         mock_user.id = user_id
+        mock_user.username = "teamadmin"
         mock_user.email = "teamadmin@example.com"
         mock_user.name = "Team Admin"
         mock_user.role = UserRole.TEAM_ADMIN
@@ -265,6 +268,7 @@ class TestGetSessionAuthContext:
         # Create mock user
         mock_user = MagicMock()
         mock_user.id = user_id
+        mock_user.username = "member"
         mock_user.email = "member@example.com"
         mock_user.name = "Regular Member"
         mock_user.role = UserRole.USER

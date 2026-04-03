@@ -12,16 +12,28 @@ class TestCreateUser:
         """Create a user with minimal required fields."""
         resp = await client.post(
             "/api/v1/users",
-            json={"email": "test@example.com", "name": "Test User"},
+            json={"username": "testuser", "name": "Test User"},
         )
 
         assert resp.status_code == 201, f"Create failed: {resp.json()}"
         data = resp.json()
-        assert data["email"] == "test@example.com"
+        assert data["username"] == "testuser"
         assert data["name"] == "Test User"
         assert data["team_id"] is None
         assert data["role"] == "user"  # Default role is "user"
+        assert data["user_type"] == "human"  # Default type is "human"
         assert "id" in data
+
+    async def test_create_user_with_email(self, client: AsyncClient):
+        """Create a user with optional email."""
+        resp = await client.post(
+            "/api/v1/users",
+            json={"username": "emailuser", "email": "test@example.com", "name": "Test User"},
+        )
+
+        assert resp.status_code == 201
+        assert resp.json()["email"] == "test@example.com"
+        assert resp.json()["username"] == "emailuser"
 
     async def test_create_user_with_team(self, client: AsyncClient):
         """Create a user assigned to a team."""
@@ -30,7 +42,7 @@ class TestCreateUser:
 
         resp = await client.post(
             "/api/v1/users",
-            json={"email": "teamuser@example.com", "name": "Team User", "team_id": team_id},
+            json={"username": "teamuser", "name": "Team User", "team_id": team_id},
         )
 
         assert resp.status_code == 201
@@ -41,7 +53,7 @@ class TestCreateUser:
         resp = await client.post(
             "/api/v1/users",
             json={
-                "email": "loginuser@example.com",
+                "username": "loginuser",
                 "name": "Login User",
                 "password": "securepassword123",
             },
@@ -56,7 +68,7 @@ class TestCreateUser:
         """Create a user with specific role."""
         resp = await client.post(
             "/api/v1/users",
-            json={"email": "admin@example.com", "name": "Admin User", "role": "admin"},
+            json={"username": "adminuser", "name": "Admin User", "role": "admin"},
         )
 
         assert resp.status_code == 201
@@ -67,7 +79,7 @@ class TestCreateUser:
         resp = await client.post(
             "/api/v1/users",
             json={
-                "email": "meta@example.com",
+                "username": "metauser",
                 "name": "Meta User",
                 "metadata": {"department": "Engineering", "slack_id": "@meta"},
             },
@@ -76,24 +88,53 @@ class TestCreateUser:
         assert resp.status_code == 201
         assert resp.json()["metadata"]["department"] == "Engineering"
 
-    async def test_create_user_duplicate_email(self, client: AsyncClient):
-        """Cannot create user with duplicate email."""
+    async def test_create_bot_user(self, client: AsyncClient):
+        """Create a bot user without password."""
+        resp = await client.post(
+            "/api/v1/users",
+            json={
+                "username": "dbt-sync-bot",
+                "name": "dbt Sync Bot",
+                "user_type": "bot",
+            },
+        )
+
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["user_type"] == "bot"
+        assert data["username"] == "dbt-sync-bot"
+
+    async def test_create_bot_user_with_password_fails(self, client: AsyncClient):
+        """Bot users cannot have passwords."""
+        resp = await client.post(
+            "/api/v1/users",
+            json={
+                "username": "bad-bot",
+                "name": "Bad Bot",
+                "user_type": "bot",
+                "password": "shouldfail123",
+            },
+        )
+
+        assert resp.status_code == 422
+
+    async def test_create_user_duplicate_username(self, client: AsyncClient):
+        """Cannot create user with duplicate username."""
         first_resp = await client.post(
             "/api/v1/users",
-            json={"email": "dupe@example.com", "name": "First User"},
+            json={"username": "dupeuser", "name": "First User"},
         )
         assert first_resp.status_code == 201, f"First user creation failed: {first_resp.json()}"
 
         resp = await client.post(
             "/api/v1/users",
-            json={"email": "dupe@example.com", "name": "Second User"},
+            json={"username": "dupeuser", "name": "Second User"},
         )
 
         assert resp.status_code == 409, f"Expected 409, got {resp.status_code}: {resp.json()}"
-        # Verify error response contains relevant info
         resp_data = resp.json()
         error_text = str(resp_data)
-        assert "dupe@example.com" in error_text or "already exists" in error_text.lower()
+        assert "dupeuser" in error_text or "already exists" in error_text.lower()
         assert (
             resp_data["error"]["code"] == "DUPLICATE_USER"
         ), f"Expected DUPLICATE_USER, got {resp_data['error'].get('code')}"
@@ -104,14 +145,13 @@ class TestCreateUser:
         resp = await client.post(
             "/api/v1/users",
             json={
-                "email": "orphan@example.com",
+                "username": "orphanuser",
                 "name": "Orphan User",
                 "team_id": fake_team_id,
             },
         )
 
         assert resp.status_code == 404
-        # Check for error in response
         resp_data = resp.json()
         error_text = resp_data.get("detail", resp_data.get("message", ""))
         assert "team" in str(error_text).lower() or resp.status_code == 404
@@ -134,7 +174,7 @@ class TestListUsers:
         for i, name in enumerate(names):
             create_resp = await client.post(
                 "/api/v1/users",
-                json={"email": f"user{i}@example.com", "name": name},
+                json={"username": f"user{i}", "name": name},
             )
             assert create_resp.status_code == 201, f"Create failed: {create_resp.json()}"
 
@@ -153,17 +193,17 @@ class TestListUsers:
 
         r1 = await client.post(
             "/api/v1/users",
-            json={"email": "t1u1@example.com", "name": "Team One Alice", "team_id": team1_id},
+            json={"username": "t1u1", "name": "Team One Alice", "team_id": team1_id},
         )
         assert r1.status_code == 201, f"Create failed: {r1.json()}"
         r2 = await client.post(
             "/api/v1/users",
-            json={"email": "t1u2@example.com", "name": "Team One Bob", "team_id": team1_id},
+            json={"username": "t1u2", "name": "Team One Bob", "team_id": team1_id},
         )
         assert r2.status_code == 201, f"Create failed: {r2.json()}"
         r3 = await client.post(
             "/api/v1/users",
-            json={"email": "t2u1@example.com", "name": "Team Two Carol", "team_id": team2_id},
+            json={"username": "t2u1", "name": "Team Two Carol", "team_id": team2_id},
         )
         assert r3.status_code == 201, f"Create failed: {r3.json()}"
 
@@ -177,15 +217,15 @@ class TestListUsers:
         """Filter users by email pattern."""
         await client.post(
             "/api/v1/users",
-            json={"email": "alice@example.com", "name": "Alice"},
+            json={"username": "alice", "email": "alice@example.com", "name": "Alice"},
         )
         await client.post(
             "/api/v1/users",
-            json={"email": "bob@company.com", "name": "Bob"},
+            json={"username": "bob", "email": "bob@company.com", "name": "Bob"},
         )
         await client.post(
             "/api/v1/users",
-            json={"email": "charlie@example.com", "name": "Charlie"},
+            json={"username": "charlie", "email": "charlie@example.com", "name": "Charlie"},
         )
 
         resp = await client.get("/api/v1/users?email=example.com")
@@ -197,15 +237,15 @@ class TestListUsers:
         """Filter users by name pattern."""
         await client.post(
             "/api/v1/users",
-            json={"email": "e1@example.com", "name": "John Smith"},
+            json={"username": "e1", "name": "John Smith"},
         )
         await client.post(
             "/api/v1/users",
-            json={"email": "e2@example.com", "name": "Jane Doe"},
+            json={"username": "e2", "name": "Jane Doe"},
         )
         await client.post(
             "/api/v1/users",
-            json={"email": "e3@example.com", "name": "Smith Johnson"},
+            json={"username": "e3", "name": "Smith Johnson"},
         )
 
         resp = await client.get("/api/v1/users?name=Smith")
@@ -213,15 +253,36 @@ class TestListUsers:
         assert resp.status_code == 200
         assert resp.json()["total"] == 2
 
+    async def test_list_users_filter_by_user_type(self, client: AsyncClient):
+        """Filter users by type (human/bot)."""
+        await client.post(
+            "/api/v1/users",
+            json={"username": "humanuser", "name": "Human User"},
+        )
+        await client.post(
+            "/api/v1/users",
+            json={"username": "botuser", "name": "Bot User", "user_type": "bot"},
+        )
+
+        resp = await client.get("/api/v1/users?user_type=bot")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 1
+        assert resp.json()["results"][0]["user_type"] == "bot"
+
+        resp = await client.get("/api/v1/users?user_type=human")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 1
+        assert resp.json()["results"][0]["user_type"] == "human"
+
     async def test_list_users_excludes_deactivated(self, client: AsyncClient):
         """Deactivated users not listed by default."""
         await client.post(
             "/api/v1/users",
-            json={"email": "active@example.com", "name": "Active User"},
+            json={"username": "activeuser", "name": "Active User"},
         )
         resp2 = await client.post(
             "/api/v1/users",
-            json={"email": "inactive@example.com", "name": "Inactive User"},
+            json={"username": "inactiveuser", "name": "Inactive User"},
         )
         user_id = resp2.json()["id"]
 
@@ -242,7 +303,7 @@ class TestListUsers:
 
         await client.post(
             "/api/v1/users",
-            json={"email": "teamie@example.com", "name": "Teamie", "team_id": team_id},
+            json={"username": "teamie", "name": "Teamie", "team_id": team_id},
         )
 
         resp = await client.get("/api/v1/users")
@@ -256,7 +317,7 @@ class TestListUsers:
         for i, name in enumerate(names):
             r = await client.post(
                 "/api/v1/users",
-                json={"email": f"page{i}@example.com", "name": name},
+                json={"username": f"page{i}", "name": name},
             )
             assert r.status_code == 201, f"Create failed: {r.json()}"
 
@@ -273,24 +334,22 @@ class TestUserFiltering:
 
     async def test_filter_by_team_id(self, client: AsyncClient):
         """Users filtered by team_id only returns users from that team."""
-        # Setup teams
         t1 = await client.post("/api/v1/teams", json={"name": "filter-t1"})
         t1_id = t1.json()["id"]
         t2 = await client.post("/api/v1/teams", json={"name": "filter-t2"})
         t2_id = t2.json()["id"]
 
-        # Setup users
         await client.post(
             "/api/v1/users",
-            json={"email": "u1@t1.com", "name": "User One", "team_id": t1_id},
+            json={"username": "u1t1", "name": "User One", "team_id": t1_id},
         )
         await client.post(
             "/api/v1/users",
-            json={"email": "u2@t1.com", "name": "User Two", "team_id": t1_id},
+            json={"username": "u2t1", "name": "User Two", "team_id": t1_id},
         )
         await client.post(
             "/api/v1/users",
-            json={"email": "others@t2.com", "name": "Other Team", "team_id": t2_id},
+            json={"username": "otherst2", "name": "Other Team", "team_id": t2_id},
         )
 
         resp = await client.get(f"/api/v1/users?team_id={t1_id}")
@@ -303,14 +362,13 @@ class TestUserFiltering:
         """Email filter is case-insensitive and partial match."""
         await client.post(
             "/api/v1/users",
-            json={"email": "FindMe@Example.com", "name": "Target"},
+            json={"username": "findme", "email": "FindMe@Example.com", "name": "Target"},
         )
         await client.post(
             "/api/v1/users",
-            json={"email": "ignore@other.com", "name": "Ignore"},
+            json={"username": "ignoreme", "email": "ignore@other.com", "name": "Ignore"},
         )
 
-        # Partial match, different case
         resp = await client.get("/api/v1/users?email=findme")
         assert resp.status_code == 200
         assert resp.json()["total"] == 1
@@ -320,14 +378,13 @@ class TestUserFiltering:
         """Name filter is case-insensitive and partial match."""
         await client.post(
             "/api/v1/users",
-            json={"email": "n1@test.com", "name": "Special Target User"},
+            json={"username": "n1", "name": "Special Target User"},
         )
         await client.post(
             "/api/v1/users",
-            json={"email": "n2@test.com", "name": "Regular Person"},
+            json={"username": "n2", "name": "Regular Person"},
         )
 
-        # Partial match "target"
         resp = await client.get("/api/v1/users?name=target")
         assert resp.status_code == 200
         assert resp.json()["total"] == 1
@@ -338,32 +395,29 @@ class TestUserFiltering:
         t1 = await client.post("/api/v1/teams", json={"name": "combo-team"})
         t1_id = t1.json()["id"]
 
-        # Match team AND name
         await client.post(
             "/api/v1/users",
-            json={"email": "combo1@test.com", "name": "Match Name", "team_id": t1_id},
+            json={"username": "combo1", "name": "Match Name", "team_id": t1_id},
         )
-        # Match team but NOT name
         await client.post(
             "/api/v1/users",
-            json={"email": "combo2@test.com", "name": "Wrong Name", "team_id": t1_id},
+            json={"username": "combo2", "name": "Wrong Name", "team_id": t1_id},
         )
-        # Match name but NOT team
         await client.post(
             "/api/v1/users",
-            json={"email": "combo3@test.com", "name": "Match Name"},
+            json={"username": "combo3", "name": "Match Name"},
         )
 
         resp = await client.get(f"/api/v1/users?team_id={t1_id}&name=match")
         assert resp.status_code == 200
         assert resp.json()["total"] == 1
-        assert resp.json()["results"][0]["email"] == "combo1@test.com"
+        assert resp.json()["results"][0]["username"] == "combo1"
 
     async def test_filter_returns_empty_for_no_matches(self, client: AsyncClient):
         """Filters that match nothing return empty results, not error."""
         await client.post(
             "/api/v1/users",
-            json={"email": "exist@test.com", "name": "Existing User"},
+            json={"username": "existuser", "name": "Existing User"},
         )
 
         resp = await client.get("/api/v1/users?name=nonexistentxyz")
@@ -375,20 +429,18 @@ class TestUserFiltering:
         """Email filter should be case-insensitive and match partial strings."""
         await client.post(
             "/api/v1/users",
-            json={"email": "TestUser@EXAMPLE.com", "name": "Test User"},
+            json={"username": "testuser2", "email": "TestUser@EXAMPLE.com", "name": "Test User"},
         )
         await client.post(
             "/api/v1/users",
-            json={"email": "another@domain.org", "name": "Another User"},
+            json={"username": "another2", "email": "another@domain.org", "name": "Another User"},
         )
 
-        # Test partial match with different case
         resp = await client.get("/api/v1/users?email=TESTUSER")
         assert resp.status_code == 200
         assert resp.json()["total"] == 1
         assert "testuser@example.com" in resp.json()["results"][0]["email"].lower()
 
-        # Test domain partial match
         resp = await client.get("/api/v1/users?email=example")
         assert resp.status_code == 200
         assert resp.json()["total"] == 1
@@ -397,14 +449,13 @@ class TestUserFiltering:
         """Name filter should be case-insensitive and match partial strings."""
         await client.post(
             "/api/v1/users",
-            json={"email": "n1@test.com", "name": "John Smith Engineer"},
+            json={"username": "n1b", "name": "John Smith Engineer"},
         )
         await client.post(
             "/api/v1/users",
-            json={"email": "n2@test.com", "name": "Jane Doe Manager"},
+            json={"username": "n2b", "name": "Jane Doe Manager"},
         )
 
-        # Test partial match with different case
         resp = await client.get("/api/v1/users?name=SMITH")
         assert resp.status_code == 200
         assert resp.json()["total"] == 1
@@ -417,18 +468,27 @@ class TestUserFiltering:
 
         await client.post(
             "/api/v1/users",
-            json={"email": "alice@alpha.com", "name": "Alice", "team_id": t1_id},
+            json={
+                "username": "alice2",
+                "email": "alice@alpha.com",
+                "name": "Alice",
+                "team_id": t1_id,
+            },
         )
         await client.post(
             "/api/v1/users",
-            json={"email": "bob@beta.com", "name": "Bob", "team_id": t1_id},
+            json={
+                "username": "bob2",
+                "email": "bob@beta.com",
+                "name": "Bob",
+                "team_id": t1_id,
+            },
         )
         await client.post(
             "/api/v1/users",
-            json={"email": "charlie@alpha.com", "name": "Charlie"},
+            json={"username": "charlie2", "email": "charlie@alpha.com", "name": "Charlie"},
         )
 
-        # Should only match alice (team_id AND email pattern)
         resp = await client.get(f"/api/v1/users?team_id={t1_id}&email=alpha")
         assert resp.status_code == 200
         assert resp.json()["total"] == 1
@@ -438,16 +498,14 @@ class TestUserFiltering:
         """Filtering with no results returns empty list, not 404 or error."""
         await client.post(
             "/api/v1/users",
-            json={"email": "real@example.com", "name": "Real User"},
+            json={"username": "realuser", "email": "real@example.com", "name": "Real User"},
         )
 
-        # No match on email
         resp = await client.get("/api/v1/users?email=nonexistent")
         assert resp.status_code == 200
         assert resp.json()["total"] == 0
         assert resp.json()["results"] == []
 
-        # No match on name
         resp = await client.get("/api/v1/users?name=nonexistent")
         assert resp.status_code == 200
         assert resp.json()["total"] == 0
@@ -461,14 +519,14 @@ class TestGetUser:
         """Get a user by ID."""
         create_resp = await client.post(
             "/api/v1/users",
-            json={"email": "get@example.com", "name": "Get User"},
+            json={"username": "getuser", "name": "Get User"},
         )
         user_id = create_resp.json()["id"]
 
         resp = await client.get(f"/api/v1/users/{user_id}")
 
         assert resp.status_code == 200
-        assert resp.json()["email"] == "get@example.com"
+        assert resp.json()["username"] == "getuser"
 
     async def test_get_user_with_team(self, client: AsyncClient):
         """Get user includes team name."""
@@ -477,7 +535,7 @@ class TestGetUser:
 
         create_resp = await client.post(
             "/api/v1/users",
-            json={"email": "getteam@example.com", "name": "Get Team User", "team_id": team_id},
+            json={"username": "getteam", "name": "Get Team User", "team_id": team_id},
         )
         user_id = create_resp.json()["id"]
 
@@ -497,7 +555,7 @@ class TestGetUser:
         """Cannot get deactivated user."""
         create_resp = await client.post(
             "/api/v1/users",
-            json={"email": "deact@example.com", "name": "Deact User"},
+            json={"username": "deactuser", "name": "Deact User"},
         )
         user_id = create_resp.json()["id"]
 
@@ -514,7 +572,7 @@ class TestUpdateUser:
         """Update user name."""
         create_resp = await client.post(
             "/api/v1/users",
-            json={"email": "upd@example.com", "name": "Original Name"},
+            json={"username": "upduser", "name": "Original Name"},
         )
         user_id = create_resp.json()["id"]
 
@@ -527,7 +585,7 @@ class TestUpdateUser:
         """Update user email."""
         create_resp = await client.post(
             "/api/v1/users",
-            json={"email": "old@example.com", "name": "Email User"},
+            json={"username": "emailupd", "email": "old@example.com", "name": "Email User"},
         )
         user_id = create_resp.json()["id"]
 
@@ -545,7 +603,7 @@ class TestUpdateUser:
 
         create_resp = await client.post(
             "/api/v1/users",
-            json={"email": "switch@example.com", "name": "Switch User", "team_id": team1_id},
+            json={"username": "switchuser", "name": "Switch User", "team_id": team1_id},
         )
         user_id = create_resp.json()["id"]
 
@@ -558,7 +616,7 @@ class TestUpdateUser:
         """Update user role."""
         create_resp = await client.post(
             "/api/v1/users",
-            json={"email": "role@example.com", "name": "Role User"},
+            json={"username": "roleuser", "name": "Role User"},
         )
         user_id = create_resp.json()["id"]
 
@@ -567,19 +625,19 @@ class TestUpdateUser:
         assert resp.status_code == 200
         assert resp.json()["role"] == "admin"
 
-    async def test_update_user_duplicate_email(self, client: AsyncClient):
-        """Cannot update to duplicate email."""
+    async def test_update_user_duplicate_username(self, client: AsyncClient):
+        """Cannot update to duplicate username."""
         await client.post(
             "/api/v1/users",
-            json={"email": "taken@example.com", "name": "First"},
+            json={"username": "taken", "name": "First"},
         )
         create_resp = await client.post(
             "/api/v1/users",
-            json={"email": "other@example.com", "name": "Second"},
+            json={"username": "other", "name": "Second"},
         )
         user_id = create_resp.json()["id"]
 
-        resp = await client.patch(f"/api/v1/users/{user_id}", json={"email": "taken@example.com"})
+        resp = await client.patch(f"/api/v1/users/{user_id}", json={"username": "taken"})
 
         assert resp.status_code == 409
 
@@ -594,7 +652,7 @@ class TestUpdateUser:
         """Cannot update to non-existent team."""
         create_resp = await client.post(
             "/api/v1/users",
-            json={"email": "badteam@example.com", "name": "Bad Team User"},
+            json={"username": "badteam", "name": "Bad Team User"},
         )
         user_id = create_resp.json()["id"]
 
@@ -611,7 +669,7 @@ class TestDeactivateUser:
         """Deactivate a user."""
         create_resp = await client.post(
             "/api/v1/users",
-            json={"email": "bye@example.com", "name": "Bye User"},
+            json={"username": "byeuser", "name": "Bye User"},
         )
         user_id = create_resp.json()["id"]
 
@@ -634,7 +692,7 @@ class TestDeactivateUser:
         """Deactivating already deactivated user returns 404."""
         create_resp = await client.post(
             "/api/v1/users",
-            json={"email": "double@example.com", "name": "Double Deact"},
+            json={"username": "doubledeact", "name": "Double Deact"},
         )
         user_id = create_resp.json()["id"]
 
@@ -651,7 +709,7 @@ class TestReactivateUser:
         """Reactivate a deactivated user."""
         create_resp = await client.post(
             "/api/v1/users",
-            json={"email": "comeback@example.com", "name": "Comeback User"},
+            json={"username": "comeback", "name": "Comeback User"},
         )
         user_id = create_resp.json()["id"]
 
@@ -660,7 +718,7 @@ class TestReactivateUser:
         resp = await client.post(f"/api/v1/users/{user_id}/reactivate")
 
         assert resp.status_code == 200
-        assert resp.json()["email"] == "comeback@example.com"
+        assert resp.json()["username"] == "comeback"
 
         # Verify back in active list
         list_resp = await client.get("/api/v1/users")
@@ -670,7 +728,7 @@ class TestReactivateUser:
         """Reactivating active user is a no-op."""
         create_resp = await client.post(
             "/api/v1/users",
-            json={"email": "already@example.com", "name": "Already Active"},
+            json={"username": "already", "name": "Already Active"},
         )
         user_id = create_resp.json()["id"]
 

@@ -130,19 +130,23 @@ class Settings(BaseSettings):  # type: ignore[misc]
 
     # ── Admin Bootstrap ──────────────────────────────────────────
 
-    admin_email: str | None = Field(
-        default=None,
-        description="Bootstrap admin user email. Creates or updates an admin "
+    admin_username: str = Field(
+        default="admin",
+        description="Bootstrap admin username. Creates or updates an admin "
         "user on startup (idempotent, safe for k8s restarts).",
     )
-    admin_password: str | None = Field(
-        default=None,
+    admin_password: str = Field(
+        default="admin",
         description="Bootstrap admin user password. "
-        "WARNING: Use a strong password; rotated via env var.",
+        "WARNING: Use a strong password in production; rotated via env var.",
     )
     admin_name: str = Field(
         default="Admin",
         description="Display name for the bootstrap admin user.",
+    )
+    admin_email: str | None = Field(
+        default=None,
+        description="Optional email for the bootstrap admin user.",
     )
 
     # ── Demo Mode ────────────────────────────────────────────────

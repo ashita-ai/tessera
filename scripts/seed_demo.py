@@ -78,13 +78,15 @@ TEAMS = [
 DEMO_USERS = [
     {
         "name": "Admin User",
+        "username": "admin",
         "email": "admin@test.com",
-        "password": "admin",
+        "password": "adminpwd1",
         "role": "admin",
         "team": "data-platform",
     },
     {
         "name": "Team Admin",
+        "username": "team_admin",
         "email": "team_admin@test.com",
         "password": "team_admin",
         "role": "team_admin",
@@ -92,32 +94,90 @@ DEMO_USERS = [
     },
     {
         "name": "Regular User",
+        "username": "user",
         "email": "user@test.com",
-        "password": "user",
+        "password": "userpass1",
         "role": "user",
         "team": "marketing-analytics",
     },
 ]
 
-# Users to create (12 users across 5 teams)
+# Users to create (12 humans + 2 bots across 5 teams)
 USERS = [
-    # Data Platform (3 users)
-    {"name": "Alice Chen", "email": "alice@company.com", "team": "data-platform"},
-    {"name": "Bob Martinez", "email": "bob@company.com", "team": "data-platform"},
-    {"name": "Charlie Kim", "email": "charlie@company.com", "team": "data-platform"},
+    # Data Platform (3 humans + 1 bot)
+    {
+        "name": "Alice Chen",
+        "username": "alice",
+        "email": "alice@company.com",
+        "team": "data-platform",
+    },
+    {
+        "name": "Bob Martinez",
+        "username": "bob",
+        "email": "bob@company.com",
+        "team": "data-platform",
+    },
+    {
+        "name": "Charlie Kim",
+        "username": "charlie",
+        "email": "charlie@company.com",
+        "team": "data-platform",
+    },
+    {"name": "dbt Sync Bot", "username": "dbt-sync", "team": "data-platform", "user_type": "bot"},
     # Marketing Analytics (2 users)
-    {"name": "Carol Johnson", "email": "carol@company.com", "team": "marketing-analytics"},
-    {"name": "Dan Wilson", "email": "dan@company.com", "team": "marketing-analytics"},
+    {
+        "name": "Carol Johnson",
+        "username": "carol",
+        "email": "carol@company.com",
+        "team": "marketing-analytics",
+    },
+    {
+        "name": "Dan Wilson",
+        "username": "dan",
+        "email": "dan@company.com",
+        "team": "marketing-analytics",
+    },
     # Finance Analytics (2 users)
-    {"name": "Emma Davis", "email": "emma@company.com", "team": "finance-analytics"},
-    {"name": "Frank Brown", "email": "frank@company.com", "team": "finance-analytics"},
-    # Product Analytics (3 users)
-    {"name": "Grace Taylor", "email": "grace@company.com", "team": "product-analytics"},
-    {"name": "Henry Anderson", "email": "henry@company.com", "team": "product-analytics"},
-    {"name": "Ivy Thomas", "email": "ivy@company.com", "team": "product-analytics"},
+    {
+        "name": "Emma Davis",
+        "username": "emma",
+        "email": "emma@company.com",
+        "team": "finance-analytics",
+    },
+    {
+        "name": "Frank Brown",
+        "username": "frank",
+        "email": "frank@company.com",
+        "team": "finance-analytics",
+    },
+    # Product Analytics (3 users + 1 bot)
+    {
+        "name": "Grace Taylor",
+        "username": "grace",
+        "email": "grace@company.com",
+        "team": "product-analytics",
+    },
+    {
+        "name": "Henry Anderson",
+        "username": "henry",
+        "email": "henry@company.com",
+        "team": "product-analytics",
+    },
+    {
+        "name": "Ivy Thomas",
+        "username": "ivy",
+        "email": "ivy@company.com",
+        "team": "product-analytics",
+    },
+    {
+        "name": "Analytics Pipeline",
+        "username": "analytics-bot",
+        "team": "product-analytics",
+        "user_type": "bot",
+    },
     # Sales Ops (2 users)
-    {"name": "Jack Moore", "email": "jack@company.com", "team": "sales-ops"},
-    {"name": "Kate Jackson", "email": "kate@company.com", "team": "sales-ops"},
+    {"name": "Jack Moore", "username": "jack", "email": "jack@company.com", "team": "sales-ops"},
+    {"name": "Kate Jackson", "username": "kate", "email": "kate@company.com", "team": "sales-ops"},
 ]
 
 
@@ -169,14 +229,24 @@ def create_team(name: str, metadata: dict | None = None) -> str | None:
 
 def create_user(
     name: str,
-    email: str,
+    username: str,
     team_id: str,
+    email: str | None = None,
     password: str | None = None,
     role: str = "user",
+    user_type: str = "human",
 ) -> str | None:
     """Create a user and return their ID."""
     try:
-        payload: dict = {"name": name, "email": email, "team_id": team_id, "role": role}
+        payload: dict = {
+            "name": name,
+            "username": username,
+            "team_id": team_id,
+            "role": role,
+            "user_type": user_type,
+        }
+        if email:
+            payload["email"] = email
         if password:
             payload["password"] = password
 
@@ -188,15 +258,16 @@ def create_user(
         )
         if resp.status_code == 201:
             user_id = resp.json()["id"]
+            type_label = f" [{user_type}]" if user_type != "human" else ""
             role_label = f" [{role}]" if role != "user" else ""
-            print(f"  Created user '{name}' ({email}){role_label} -> {user_id[:8]}...")
+            print(f"  Created user '{username}'{type_label}{role_label} -> {user_id[:8]}...")
             return user_id
         elif resp.status_code == 409:
-            print(f"  User '{email}' already exists")
+            print(f"  User '{username}' already exists")
             return "exists"
-        print(f"  Failed to create user '{name}': {resp.status_code} - {resp.text[:100]}")
+        print(f"  Failed to create user '{username}': {resp.status_code} - {resp.text[:100]}")
     except httpx.RequestError as e:
-        print(f"  Error creating user '{name}': {e}")
+        print(f"  Error creating user '{username}': {e}")
     return None
 
 
@@ -1400,8 +1471,9 @@ def main() -> int:
         if team_id:
             result = create_user(
                 user["name"],
-                user["email"],
+                user["username"],
                 team_id,
+                email=user.get("email"),
                 password=user.get("password"),
                 role=user.get("role", "user"),
             )
@@ -1416,7 +1488,13 @@ def main() -> int:
     for user in USERS:
         team_id = team_ids.get(user["team"])
         if team_id:
-            result = create_user(user["name"], user["email"], team_id)
+            result = create_user(
+                user["name"],
+                user["username"],
+                team_id,
+                email=user.get("email"),
+                user_type=user.get("user_type", "human"),
+            )
             if result:
                 users_created += 1
 

@@ -261,11 +261,11 @@ class TestListTeamMembers:
         # Create users in the team
         await client.post(
             "/api/v1/users",
-            json={"email": "alice@example.com", "name": "Alice", "team_id": team_id},
+            json={"username": "alice", "name": "Alice", "team_id": team_id},
         )
         await client.post(
             "/api/v1/users",
-            json={"email": "bob@example.com", "name": "Bob", "team_id": team_id},
+            json={"username": "bob", "name": "Bob", "team_id": team_id},
         )
 
         resp = await client.get(f"/api/v1/teams/{team_id}/members")
@@ -290,7 +290,7 @@ class TestListTeamMembers:
             resp = await client.post(
                 "/api/v1/users",
                 json={
-                    "email": f"{name.lower()}-{suffix}@example.com",
+                    "username": f"{name.lower()}{suffix}",
                     "name": name,
                     "team_id": team_id,
                 },

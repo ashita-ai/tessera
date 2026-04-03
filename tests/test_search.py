@@ -44,7 +44,7 @@ class TestSearchEndpoint:
         """Search finds users by name."""
         # Create a user
         user_resp = await client.post(
-            "/api/v1/users", json={"name": "SearchableUser", "email": "searchable@test.com"}
+            "/api/v1/users", json={"username": "searchableuser", "name": "SearchableUser"}
         )
         assert user_resp.status_code == 201
         user_id = user_resp.json()["id"]
@@ -62,7 +62,12 @@ class TestSearchEndpoint:
         """Search finds users by email."""
         # Create a user
         user_resp = await client.post(
-            "/api/v1/users", json={"name": "EmailUser", "email": "uniqueemail123@test.com"}
+            "/api/v1/users",
+            json={
+                "username": "uniqueemail123",
+                "name": "EmailUser",
+                "email": "uniqueemail123@test.com",
+            },
         )
         assert user_resp.status_code == 201
         user_id = user_resp.json()["id"]
@@ -133,7 +138,7 @@ class TestSearchEndpoint:
         team_id = team_resp.json()["id"]
 
         user_resp = await client.post(
-            "/api/v1/users", json={"name": "TypeFilterUser", "email": "typefilter@test.com"}
+            "/api/v1/users", json={"username": "typefilteruser", "name": "TypeFilterUser"}
         )
         assert user_resp.status_code == 201
 

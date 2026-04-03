@@ -25,7 +25,8 @@ async def _create_team(session: AsyncSession, name: str) -> TeamDB:
 
 async def _create_user(session: AsyncSession, team_id: UUID, email: str) -> UserDB:
     """Create a user row to satisfy FK constraints on assets.owner_user_id."""
-    user = UserDB(email=email, name=email.split("@")[0], team_id=team_id)
+    username = email.split("@")[0].lower()
+    user = UserDB(username=username, email=email, name=username, team_id=team_id)
     session.add(user)
     await session.flush()
     return user

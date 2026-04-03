@@ -54,6 +54,7 @@ from tessera.models.enums import (
     SchemaFormat,
     SemverMode,
     UserRole,
+    UserType,
     WebhookDeliveryStatus,
 )
 
@@ -70,13 +71,17 @@ class Base(DeclarativeBase):
 
 
 class UserDB(Base):
-    """User database model - individual people who own assets."""
+    """User database model - humans and bots who own assets."""
 
     __tablename__ = "users"
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
-    email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    username: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True, unique=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    user_type: Mapped[UserType] = mapped_column(
+        Enum(UserType), default=UserType.HUMAN, nullable=False
+    )
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     role: Mapped[UserRole] = mapped_column(Enum(UserRole), default=UserRole.USER, nullable=False)
     team_id: Mapped[UUID | None] = mapped_column(
@@ -97,6 +102,7 @@ class UserDB(Base):
     # Relationships
     team: Mapped["TeamDB | None"] = relationship(back_populates="members")
     owned_assets: Mapped[list["AssetDB"]] = relationship(back_populates="owner_user")
+    api_keys: Mapped[list["APIKeyDB"]] = relationship(back_populates="user")
 
 
 class TeamDB(Base):
@@ -407,6 +413,9 @@ class APIKeyDB(Base):
     )  # indexed for prefix-based lookup
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     team_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("teams.id"), nullable=False, index=True)
+    user_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("users.id"), nullable=True, index=True
+    )
     scopes: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     agent_name: Mapped[str | None] = mapped_column(
         String(255), nullable=True
@@ -429,6 +438,7 @@ class APIKeyDB(Base):
 
     # Relationships
     team: Mapped["TeamDB"] = relationship()
+    user: Mapped["UserDB | None"] = relationship(back_populates="api_keys")
 
 
 class WebhookDeliveryDB(Base):

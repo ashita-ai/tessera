@@ -64,9 +64,11 @@ async def get_current_user(
         if user:
             return {
                 "id": str(user.id),
+                "username": user.username,
                 "email": user.email,
                 "name": user.name,
                 "role": user.role.value,
+                "user_type": user.user_type.value,
                 "team_id": str(user.team_id) if user.team_id else None,
             }
     except Exception as e:
@@ -86,9 +88,11 @@ async def require_current_user(
     if settings.auth_disabled:
         return {
             "id": "00000000-0000-0000-0000-000000000000",
-            "email": "dev@tessera.local",
+            "username": "dev",
+            "email": None,
             "name": "Dev User",
             "role": "admin",
+            "user_type": "human",
             "team_id": None,
         }
 
@@ -144,18 +148,27 @@ async def login_page(
 @router.post("/login")
 async def login_submit(
     request: Request,
-    email: str = Form(...),
+    username: str = Form(...),
     password: str = Form(...),
     session: AsyncSession = Depends(get_session),
 ) -> RedirectResponse:
     """Handle login form submission."""
-    # Look up user by email
+    from tessera.models.enums import UserType
+
+    # Normalize username
+    normalized = username.strip().lower()
+
+    # Look up user by username
     result = await session.execute(
-        select(UserDB).where(UserDB.email == email).where(UserDB.deactivated_at.is_(None))
+        select(UserDB).where(UserDB.username == normalized).where(UserDB.deactivated_at.is_(None))
     )
     user = result.scalar_one_or_none()
 
     if not user or not user.password_hash:
+        return RedirectResponse(url="/login?error=invalid", status_code=302)
+
+    # Bots cannot log in via the web UI
+    if user.user_type == UserType.BOT:
         return RedirectResponse(url="/login?error=invalid", status_code=302)
 
     # Verify password

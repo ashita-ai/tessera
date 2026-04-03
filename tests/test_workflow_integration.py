@@ -278,7 +278,7 @@ class TestDataIntegrity:
         # Create user in team1
         user_resp = await client.post(
             "/api/v1/users",
-            json={"name": "Alice Smith", "email": "team1user@test.com", "team_id": team1_id},
+            json={"username": "alicesmith", "name": "Alice Smith", "team_id": team1_id},
         )
         assert user_resp.status_code == 201, f"Failed to create user: {user_resp.json()}"
         user_id = user_resp.json()["id"]
@@ -307,7 +307,7 @@ class TestDataIntegrity:
 
         user_resp = await client.post(
             "/api/v1/users",
-            json={"name": "Same Team User", "email": "sameteam@test.com", "team_id": team_id},
+            json={"username": "sameteamuser", "name": "Same Team User", "team_id": team_id},
         )
         user_id = user_resp.json()["id"]
 
@@ -333,14 +333,14 @@ class TestDataIntegrity:
 
         user1_resp = await client.post(
             "/api/v1/users",
-            json={"name": "Bob Jones", "email": "user1@test.com", "team_id": team1_id},
+            json={"username": "bobjones", "name": "Bob Jones", "team_id": team1_id},
         )
         assert user1_resp.status_code == 201, f"Failed to create user1: {user1_resp.json()}"
         user1_id = user1_resp.json()["id"]
 
         user2_resp = await client.post(
             "/api/v1/users",
-            json={"name": "Carol White", "email": "user2@test.com", "team_id": team2_id},
+            json={"username": "carolwhite", "name": "Carol White", "team_id": team2_id},
         )
         assert user2_resp.status_code == 201, f"Failed to create user2: {user2_resp.json()}"
         user2_id = user2_resp.json()["id"]
