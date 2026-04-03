@@ -22,7 +22,7 @@ function toActivity(e: AuditEvent): ActivityItem {
     entityType: e.entity_type,
     actor: e.actor_id ?? "system",
     actorType: e.actor_type as "human" | "agent",
-    timestamp: e.created_at,
+    timestamp: e.occurred_at,
     severity: m.severity,
   };
 }

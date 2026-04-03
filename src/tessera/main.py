@@ -163,7 +163,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 app = FastAPI(
     title="Tessera",
-    description="Data contract coordination for warehouses",
+    description="Service contract coordination",
     version="0.1.0",
     lifespan=lifespan,
 )

@@ -1,6 +1,6 @@
 # Sync API
 
-Import schemas from external sources: dbt, OpenAPI, and GraphQL.
+Import schemas from external sources. Each sync adapter normalizes its source format to JSON Schema contracts that flow through the same contract engine.
 
 ## dbt Sync
 
@@ -65,7 +65,7 @@ Returns **200** when all operations succeed, or **207 Multi-Status** when any co
 POST /api/v1/sync/dbt
 ```
 
-Simple manifest upload (backwards compatibility).
+Simple manifest upload (backwards compatibility). Consider using `/upload` instead.
 
 ### Impact Analysis
 

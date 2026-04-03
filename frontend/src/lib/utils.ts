@@ -24,8 +24,3 @@ export function formatDate(date: string | Date): string {
     year: d.getFullYear() !== now.getFullYear() ? "numeric" : undefined,
   });
 }
-
-export function truncate(str: string, maxLen: number): string {
-  if (str.length <= maxLen) return str;
-  return str.slice(0, maxLen - 1) + "\u2026";
-}

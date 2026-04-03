@@ -464,9 +464,9 @@ class WebhookDeliveryDB(Base):
 
 
 class AuditRunDB(Base):
-    """Audit run tracking for WAP (Write-Audit-Publish) integration.
+    """Audit run tracking for contract guarantee verification.
 
-    Records the results of data quality checks (dbt tests, Great Expectations, etc.)
+    Records the results of quality checks (test suites, monitoring probes, etc.)
     against contract guarantees. Enables runtime enforcement tracking.
     """
 
@@ -485,7 +485,7 @@ class AuditRunDB(Base):
     guarantees_failed: Mapped[int] = mapped_column(Integer, default=0)
     triggered_by: Mapped[str] = mapped_column(
         String(50), nullable=False, index=True
-    )  # "dbt_test", "great_expectations", "soda", "manual"
+    )  # "test_suite", "monitoring_probe", "ci_pipeline", "manual"
     run_id: Mapped[str | None] = mapped_column(
         String(255), nullable=True, index=True
     )  # External run ID for correlation (e.g., dbt invocation_id)

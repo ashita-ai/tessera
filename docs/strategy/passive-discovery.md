@@ -4,6 +4,9 @@
 **Date:** 2026-03-29
 **Author:** Evan Volgas
 
+!!! note "OTEL Discovery Priority"
+    Following [ADR-014](../adrs/014-service-contract-pivot.md) (Spec-007), OTEL-based service dependency discovery is now the priority tier for discovering dependencies between services. The OTEL approach queries trace backends (Jaeger, Tempo, Datadog) for service-to-service call edges and maps them to Tessera registrations with confidence scores. Warehouse query log scanning remains relevant for data model dependencies but is no longer the primary discovery mechanism.
+
 ## The Problem
 
 Tessera's coordination model is only as good as its dependency graph. If a producer makes a breaking change and Tessera doesn't know about a downstream consumer, that consumer breaks silently — exactly the failure mode Tessera exists to prevent.
@@ -72,6 +75,10 @@ Passive discovery should not automatically create hard dependencies. It should o
 This is the difference between "we automatically registered you as a consumer" (dangerous — noisy, wrong, erodes trust) and "we think you consume this table — can you confirm?" (helpful — saves manual work, builds trust).
 
 ### Signal Sources (Ranked by Value)
+
+#### Tier 0: Highest-Value (Service Dependencies)
+
+**OTEL Trace-Based Discovery** — see [ADR-014, Phase 2](../adrs/014-service-contract-pivot.md). Query OTEL-compatible backends for service-to-service call edges. This is the primary discovery mechanism for service dependencies and is being implemented as part of the service contract pivot.
 
 #### Tier 1: High-Value, Moderate Effort
 

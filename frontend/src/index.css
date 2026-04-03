@@ -77,12 +77,3 @@ body {
 .stagger > *:nth-child(4) { animation-delay: 120ms; }
 .stagger > *:nth-child(5) { animation-delay: 160ms; }
 .stagger > *:nth-child(6) { animation-delay: 200ms; }
-
-@keyframes pulse-ring {
-  0% { transform: scale(1); opacity: 0.5; }
-  100% { transform: scale(2); opacity: 0; }
-}
-
-.node-pulse {
-  animation: pulse-ring 2.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-}

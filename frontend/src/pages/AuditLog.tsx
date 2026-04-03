@@ -74,7 +74,7 @@ export function AuditLog() {
                     <span className="ml-1 rounded-sm bg-accent-dim px-1 py-px font-mono text-[9px] text-accent">bot</span>
                   )}
                   {" \u00b7 "}
-                  {formatDate(event.created_at)}
+                  {formatDate(event.occurred_at)}
                 </p>
               </div>
             </div>

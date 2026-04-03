@@ -1,3 +1,4 @@
+import React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { Proposal } from "@/lib/api";
@@ -43,8 +44,8 @@ export function Proposals() {
 function ProposalRow({ proposal }: { proposal: Proposal }) {
   const queryClient = useQueryClient();
   const ackMutation = useMutation({
-    mutationFn: (response: "APPROVED" | "BLOCKED" | "MIGRATING") =>
-      api.acknowledgeProposal(proposal.id, { response }),
+    mutationFn: (data: { response: "APPROVED" | "BLOCKED" | "MIGRATING"; consumer_team_id: string }) =>
+      api.acknowledgeProposal(proposal.id, { response: data.response, consumer_team_id: data.consumer_team_id }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["proposals"] });
     },
@@ -54,6 +55,8 @@ function ProposalRow({ proposal }: { proposal: Proposal }) {
     proposal.total_consumers > 0
       ? proposal.acknowledgment_count / proposal.total_consumers
       : 0;
+
+  const [teamId, setTeamId] = React.useState("");
 
   return (
     <div className="rounded-lg border border-line bg-bg-raised p-4 transition-colors hover:border-line-strong">
@@ -95,10 +98,22 @@ function ProposalRow({ proposal }: { proposal: Proposal }) {
       </div>
 
       {proposal.status === "pending" && (
-        <div className="ml-3.5 mt-3 flex gap-1.5 border-t border-line/40 pt-2.5">
-          <ActionBtn label="Approve" color="green" disabled={ackMutation.isPending} onClick={() => ackMutation.mutate("APPROVED")} />
-          <ActionBtn label="Migrating" color="amber" disabled={ackMutation.isPending} onClick={() => ackMutation.mutate("MIGRATING")} />
-          <ActionBtn label="Block" color="red" disabled={ackMutation.isPending} onClick={() => ackMutation.mutate("BLOCKED")} />
+        <div className="ml-3.5 mt-3 space-y-2 border-t border-line/40 pt-2.5">
+          <input
+            type="text"
+            placeholder="Consumer team ID"
+            value={teamId}
+            onChange={(e) => setTeamId(e.target.value)}
+            className="w-full rounded-md border border-line bg-bg-surface px-2 py-1 font-mono text-[10px] text-t1 placeholder:text-t3 focus:border-accent focus:outline-none"
+          />
+          {ackMutation.isError && (
+            <p className="text-[10px] text-red">{ackMutation.error instanceof Error ? ackMutation.error.message : "Acknowledgment failed"}</p>
+          )}
+          <div className="flex gap-1.5">
+            <ActionBtn label="Approve" color="green" disabled={ackMutation.isPending || !teamId} onClick={() => ackMutation.mutate({ response: "APPROVED", consumer_team_id: teamId })} />
+            <ActionBtn label="Migrating" color="amber" disabled={ackMutation.isPending || !teamId} onClick={() => ackMutation.mutate({ response: "MIGRATING", consumer_team_id: teamId })} />
+            <ActionBtn label="Block" color="red" disabled={ackMutation.isPending || !teamId} onClick={() => ackMutation.mutate({ response: "BLOCKED", consumer_team_id: teamId })} />
+          </div>
         </div>
       )}
     </div>

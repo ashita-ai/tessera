@@ -1,6 +1,6 @@
 # ADR-014: Pivot from Data Warehouse Contracts to Service Contract Coordination
 
-**Status:** Draft
+**Status:** Accepted
 **Date:** 2026-04-02
 **Authors:** Evan Volgas, Jeremiah (co-design)
 
@@ -120,8 +120,8 @@ When a breaking change is detected or a proposal is created, notify the affected
 
 ### What gets deprecated
 
-- **dbt sync endpoints** — remain functional but are no longer the primary integration path. No new investment.
-- **BigQuery/DuckDB connectors** — freeze. These were speculative and have zero test coverage (#395).
+- **dbt sync endpoints** — continue as a sync adapter on equal footing with OpenAPI, GraphQL, and gRPC. No longer the primary integration path.
+- **BigQuery/DuckDB connectors** — removed. These were speculative and had zero test coverage (#395).
 - **Warehouse-specific resource types** (MODEL, SOURCE, SEED, SNAPSHOT) — still valid enum values but not the focus.
 
 ### What happens to the AI Enablement epic (#362)
@@ -164,7 +164,7 @@ Defer MCP implementation until the service registry and OTEL discovery are stabl
 - Slack Block Kit formatter
 - Team → channel configuration
 - Service dependency graph visualization
-- Deprecation of warehouse-first documentation and framing
+- ~~Deprecation of warehouse-first documentation and framing~~ (done)
 
 **Why third:** Notifications are the most visible feature to end users but depend on the proposal workflow already generating the right events.
 
@@ -179,7 +179,7 @@ Defer MCP implementation until the service registry and OTEL discovery are stabl
 
 **Costs:**
 
-- Maintaining two integration paths (warehouse + service) increases surface area. Mitigated by freezing warehouse investment.
+- Maintaining multiple sync adapters (OpenAPI, GraphQL, gRPC, dbt) increases surface area. Each adapter is intentionally thin — parsing and normalization only.
 - OTEL integration ties Tessera to the observability stack. Teams without OTEL can still use manual registration, but the "magic" auto-discovery feature requires it.
 - Repo polling introduces git as an infrastructure dependency. Webhook-based triggers (CI integration) are the long-term answer but add integration work.
 - The dbt community was a natural early-adopter audience. Pivoting away from warehouse-first messaging means finding a new go-to-market angle.

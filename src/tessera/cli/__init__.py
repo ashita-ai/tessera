@@ -148,7 +148,7 @@ def team_get(
 
 @asset_app.command("create")
 def asset_create(
-    fqn: Annotated[str, typer.Argument(help="Fully qualified name (e.g., warehouse.schema.table)")],
+    fqn: Annotated[str, typer.Argument(help="Fully qualified name (e.g., payments.orders.v1)")],
     owner_team_id: Annotated[str, typer.Option("--team", "-t", help="Owner team ID")],
     metadata: Annotated[str | None, typer.Option("--metadata", "-m", help="JSON metadata")] = None,
 ) -> None:

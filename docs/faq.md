@@ -4,7 +4,7 @@
 
 ### What is Tessera?
 
-Tessera is a data contract coordination server for warehouses and AI agents. It lets data producers publish schemas and data quality guarantees while consumers register dependencies — so breaking changes require explicit acknowledgment before going live.
+Tessera is a service contract coordination platform. It lets producers publish schema contracts for their APIs, services, and data models while consumers register dependencies — so breaking changes require explicit acknowledgment before going live. It works across OpenAPI, GraphQL, gRPC, and dbt through a schema-agnostic contract engine that normalizes everything to JSON Schema.
 
 ### How is Tessera different from a schema registry?
 
@@ -20,7 +20,7 @@ Yes. Tessera is released under the MIT License.
 
 ### Does Tessera replace my data warehouse or ETL tool?
 
-No. Tessera sits alongside your existing stack. It doesn't move, transform, or store data — it coordinates the *contracts* that describe your data so that changes are communicated before they break downstream consumers.
+No. Tessera sits alongside your existing stack. It doesn't move, transform, or store data — it coordinates the *contracts* that describe your service interfaces and data models so that changes are communicated before they break downstream consumers.
 
 ---
 
@@ -111,11 +111,11 @@ Yes. The producer can withdraw a pending proposal, which cancels it without publ
 
 ### How does the dbt integration work?
 
-Upload your `manifest.json` to `POST /api/v1/sync/dbt/upload`. Tessera extracts models, sources, seeds, and snapshots; converts dbt column types to JSON Schema; maps dbt tests to data quality guarantees; and optionally auto-publishes contracts. Configure behavior via your model's `meta.tessera` YAML block (owner, consumers, freshness, volume, compatibility mode).
+The dbt integration is one of several sync adapters (alongside OpenAPI, GraphQL, and gRPC). Upload your `manifest.json` to `POST /api/v1/sync/dbt/upload`. Tessera extracts models, sources, seeds, and snapshots; converts dbt column types to JSON Schema; maps dbt tests to data quality guarantees; and optionally auto-publishes contracts. Configure behavior via your model's `meta.tessera` YAML block (owner, consumers, freshness, volume, compatibility mode).
 
 ### Can I use Tessera with OpenAPI or GraphQL?
 
-Yes. Upload an OpenAPI 3.x spec to `/api/v1/sync/openapi` or a GraphQL introspection result to `/api/v1/sync/graphql`. Tessera creates one asset per endpoint or operation and extracts schemas from request/response definitions.
+Yes — these are first-class sync adapters. Upload an OpenAPI 3.x spec to `/api/v1/sync/openapi` or a GraphQL introspection result to `/api/v1/sync/graphql`. Tessera creates one asset per endpoint or operation and extracts schemas from request/response definitions. All schemas are normalized to JSON Schema internally, so the same diffing, compatibility checking, and proposal workflow applies regardless of source.
 
 ### Does Tessera support Avro schemas?
 

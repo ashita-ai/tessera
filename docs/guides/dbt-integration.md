@@ -1,6 +1,9 @@
 # dbt Integration
 
-Tessera integrates deeply with dbt to automatically extract and publish contracts from your dbt project.
+!!! note "Sync Adapter"
+    The dbt integration is one of several sync adapters (alongside OpenAPI, GraphQL, and gRPC). All sync adapters produce JSON Schema contracts that flow through the same contract engine — schema diffing, compatibility checking, proposals, and acknowledgments work identically regardless of source.
+
+Tessera integrates with dbt to automatically extract and publish contracts from your dbt project.
 
 ## Overview
 

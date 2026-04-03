@@ -81,7 +81,7 @@ export interface Acknowledgment {
   response: "APPROVED" | "BLOCKED" | "MIGRATING";
   responded_by: string;
   responded_at: string;
-  comment?: string;
+  notes?: string;
 }
 
 export interface Team {
@@ -100,7 +100,7 @@ export interface AuditEvent {
   actor_id?: string;
   actor_type: string;
   payload: Record<string, unknown>;
-  created_at: string;
+  occurred_at: string;
 }
 
 export interface Dependency {
@@ -203,7 +203,7 @@ export const api = {
   listProposals: (params?: QueryParams) =>
     request<PaginatedResponse<Proposal>>("/proposals", {}, params),
   getProposal: (id: string) => request<Proposal>(`/proposals/${id}`),
-  acknowledgeProposal: (id: string, data: { response: string; comment?: string }) =>
+  acknowledgeProposal: (id: string, data: { response: string; consumer_team_id: string; notes?: string }) =>
     request<Acknowledgment>(`/proposals/${id}/acknowledge`, {
       method: "POST",
       body: JSON.stringify(data),

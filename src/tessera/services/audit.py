@@ -76,7 +76,6 @@ class AuditAction(StrEnum):
     API_KEY_USED = "api_key.used"
 
     # Sync actions
-    DBT_SYNC = "dbt.sync"
     DBT_SYNC_UPLOAD = "dbt.sync_upload"
 
     # Consumption actions

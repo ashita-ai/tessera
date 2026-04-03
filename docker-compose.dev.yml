@@ -53,7 +53,6 @@ services:
       WEBHOOK_URL: http://webhook-receiver:5555/webhooks
       WEBHOOK_SECRET: dev-webhook-secret
     volumes:
-      - ./src/tessera/templates:/app/src/tessera/templates:ro
       - ./src/tessera/static:/app/src/tessera/static:ro
     depends_on:
       db:

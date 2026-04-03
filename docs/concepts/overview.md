@@ -1,16 +1,29 @@
 # Concepts Overview
 
-Tessera is built around a few core concepts that work together to coordinate data contracts.
+Tessera is built around a few core concepts that work together to coordinate service and data contracts.
 
 ## Core Entities
 
 ### Assets
 
-An **Asset** represents a data object in your warehouse - a table, view, or model. Each asset has:
+An **Asset** represents any schema-bearing interface you want to track contracts for — an API endpoint, gRPC method, GraphQL operation, or data model. Each asset has:
 
-- **FQN (Fully Qualified Name)**: Unique identifier like `warehouse.schema.table`
+- **FQN (Fully Qualified Name)**: Unique identifier like `api.users_api.get_users_id` or `warehouse.schema.table`
 - **Owner Team**: The team responsible for the asset
-- **Metadata**: Tags, descriptions, dbt info
+- **Metadata**: Tags, descriptions, source-specific info
+
+```json
+{
+  "fqn": "api.users_api.get_users_id",
+  "owner_team_id": "team-uuid",
+  "metadata": {
+    "resource_type": "api_endpoint",
+    "tags": ["public", "core"]
+  }
+}
+```
+
+A warehouse model works the same way:
 
 ```json
 {
@@ -49,7 +62,7 @@ A **Contract** defines the schema guarantee for an asset. It specifies:
 
 ### Teams
 
-**Teams** are groups of users who own assets and consume data. Teams:
+**Teams** are groups of users who own assets and consume contracts. Teams:
 
 - Own assets (producers)
 - Register as consumers of other assets

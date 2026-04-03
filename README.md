@@ -2,7 +2,7 @@
   <img src="https://raw.githubusercontent.com/ashita-ai/tessera/main/assets/logo.png" alt="Tessera" width="300">
 </p>
 
-<h3 align="center">Data contract coordination for warehouses — and the AI agents that query them</h3>
+<h3 align="center">Service contract coordination — stop breaking each other's APIs</h3>
 
 <p align="center">
   <a href="https://ashita-ai.github.io/tessera">Docs</a> |
@@ -15,14 +15,14 @@
 
 ## What Tessera does
 
-Other tools detect breaking changes. Tessera **coordinates the workflow around them** — for humans and AI agents alike.
+Other tools detect breaking changes. Tessera **coordinates the workflow around them**.
 
-When a producer wants to make a breaking schema change, Tessera creates a proposal, notifies every affected consumer, and blocks publication until they acknowledge. The change ships only when everyone downstream is ready.
+When a producer wants to make a breaking API change, Tessera creates a proposal, notifies every affected consumer, and blocks publication until they acknowledge. The change ships only when everyone downstream is ready.
 
 ```
-Producer: "I want to drop user_email"
+Producer: "I want to remove the email field from GET /users/{id}"
     ↓
-Tessera: "3 teams depend on this. Creating proposal, notifying them."
+Tessera: "3 services depend on this. Creating proposal, notifying them."
     ↓
 Consumers: "We've migrated. Acknowledged."
     ↓
@@ -31,24 +31,24 @@ Tessera: "All consumers ready. Publishing v2.0.0."
 
 Non-breaking changes skip this entirely and auto-publish with a version bump.
 
-### AI agents as consumers
+### The problem
 
-AI agents that write SQL, build dbt models, or generate pipeline code are modifying schemas without knowing who depends on what. An agent can silently break downstream consumers because it has no way to check.
+Services break each other's APIs without knowing. A team renames a field in their OpenAPI spec, removes a gRPC method, or changes a GraphQL return type — and the team that depends on it only finds out when their oncall pages at 2 AM. Dependencies between services are invisible unless someone manually documents them.
 
-Tessera gives agents the same guardrails humans get: register as a consumer, check contracts before changing schemas, and get blocked when a change would break something downstream. See the [AI agent integration guide](https://ashita-ai.github.io/tessera/guides/ai-agent-integration/) for details.
+Tessera makes these dependencies explicit and breaking changes coordinated. It works the same way regardless of source: OpenAPI specs, GraphQL schemas, gRPC/protobuf definitions, dbt models, or raw JSON Schema. Everything normalizes to JSON Schema internally for diffing and compatibility checking.
 
 ## Why not just use...
 
 | Tool | What it does well | Gap Tessera fills |
 |------|------------------|-------------------|
 | **Schema Registry** (Confluent) | Schema versioning + compatibility for Kafka streams | Block-or-allow only. No proposal workflow, no consumer notification, no acknowledgment tracking |
+| **Buf** | Protobuf linting and breaking change detection in CI | Detection only. No consumer registry, no coordination workflow |
+| **Optic** | OpenAPI diff and changelog in CI/CD | CLI tool for individual specs. No cross-service dependency graph or proposal workflow |
+| **GraphQL Inspector** | Schema diff and validation for GraphQL | Single-schema tool. No consumer registry, no multi-service coordination |
+| **Backstage** | Service catalog with metadata and ownership | Catalog, not a contract enforcement layer. No schema diffing or change coordination |
 | **datacontract-cli** | Lint, validate, test, export contracts in CI/CD | CLI tool, no server. No consumer registry, no coordination |
-| **Open Data Contract Standard** | Standardized YAML format for defining contracts | A spec, not a runtime. No enforcement or coordination |
-| **Soda Data Contracts** | Pipeline quality gates and data quality checks | Quality validation, not schema change coordination |
-| **Data Mesh Manager** | Data product marketplace with contract support | Commercial SaaS. Broader scope, less focused on change coordination |
-| **No contract layer** | Agents query data directly | No way to know if data is fresh, authoritative, or safe to use. Schema changes break agents silently |
 
-Tessera's unique contribution is the **proposal-acknowledgment workflow**: a self-hosted coordination server where breaking changes are blocked until affected consumers explicitly sign off. Nothing else in the open-source ecosystem does this.
+Tessera's unique contribution is the **proposal-acknowledgment workflow**: a self-hosted coordination server where breaking changes are blocked until affected consumers explicitly sign off. It works across API types (OpenAPI, GraphQL, gRPC, dbt) through a schema-agnostic contract engine.
 
 ## Quick Start
 
@@ -78,10 +78,10 @@ Force-approve is available for emergencies, but it's audit-logged.
 
 - **Schema diffing** - Detects property changes, type narrowing/widening, constraint tightening, enum changes, required field changes, nullable changes, and more
 - **Compatibility modes** - Backward, forward, full, or none (matching Kafka semantics)
-- **Multi-format schemas** - JSON Schema, Avro, OpenAPI, GraphQL (normalized to JSON Schema internally)
-- **AI agent integration** - Agents register as consumers, check contracts before modifying schemas, and participate in the proposal workflow
-- **dbt integration** - Import models, tests, and lineage from dbt manifests
+- **Proposal workflow** - Breaking changes create proposals; all registered consumers must acknowledge before publication
+- **Sync adapters** - OpenAPI, GraphQL, gRPC, and dbt sync adapters import schemas into a unified contract engine. All normalize to JSON Schema internally
 - **Impact analysis** - Recursive lineage traversal shows all downstream assets and teams affected by a change
+- **AI agent integration** - Agents register as consumers, check contracts before modifying schemas, and participate in the proposal workflow
 - **Semantic versioning** - Auto, suggest, or enforce modes with pre-release support
 - **Data quality guarantees** - Not-null, unique, accepted_values, freshness, volume checks tracked alongside schemas
 - **Write-Audit-Publish** - Optionally block publishing if data quality audits are failing
@@ -114,7 +114,7 @@ See [configuration docs](https://ashita-ai.github.io/tessera/getting-started/qui
 - [Quickstart Guide](https://ashita-ai.github.io/tessera/getting-started/quickstart/)
 - [Python SDK](https://ashita-ai.github.io/tessera/guides/python-sdk/) | [PyPI](https://pypi.org/project/tessera-sdk/)
 - [AI Agent Integration](https://ashita-ai.github.io/tessera/guides/ai-agent-integration/)
-- [dbt Integration](https://ashita-ai.github.io/tessera/guides/dbt-integration/)
+- [Sync Adapters](https://ashita-ai.github.io/tessera/api/sync/) (OpenAPI, GraphQL, gRPC, dbt)
 - [API Reference](https://ashita-ai.github.io/tessera/api/overview/)
 
 ## License
