@@ -274,6 +274,34 @@ class TestListUsers:
         assert resp.json()["total"] == 1
         assert resp.json()["results"][0]["user_type"] == "human"
 
+    async def test_list_users_filter_by_username(self, client: AsyncClient):
+        """Filter users by username pattern (case-insensitive partial match)."""
+        await client.post(
+            "/api/v1/users",
+            json={"username": "alice.eng", "name": "Alice"},
+        )
+        await client.post(
+            "/api/v1/users",
+            json={"username": "bob.sales", "name": "Bob"},
+        )
+        await client.post(
+            "/api/v1/users",
+            json={"username": "alice.sales", "name": "Alice Sales"},
+        )
+
+        resp = await client.get("/api/v1/users?username=alice")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 2
+
+        resp = await client.get("/api/v1/users?username=ALICE")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 2
+
+        resp = await client.get("/api/v1/users?username=bob.sales")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 1
+        assert resp.json()["results"][0]["username"] == "bob.sales"
+
     async def test_list_users_excludes_deactivated(self, client: AsyncClient):
         """Deactivated users not listed by default."""
         await client.post(
@@ -686,6 +714,20 @@ class TestUpdateUser:
             json={"user_type": "bot", "password": "shouldfail123"},
         )
         assert resp.status_code == 422
+
+    async def test_update_existing_bot_password_rejected(self, client: AsyncClient):
+        """Cannot set password on an existing bot user without changing user_type."""
+        create_resp = await client.post(
+            "/api/v1/users",
+            json={"username": "existingbot", "name": "Existing Bot", "user_type": "bot"},
+        )
+        user_id = create_resp.json()["id"]
+
+        resp = await client.patch(
+            f"/api/v1/users/{user_id}",
+            json={"password": "sneakypassword123"},
+        )
+        assert resp.status_code == 400
 
     async def test_update_user_not_found(self, client: AsyncClient):
         """Update non-existent user returns 404."""

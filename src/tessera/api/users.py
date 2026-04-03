@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing_extensions import TypedDict
 
 from tessera.api.auth import Auth, RequireAdmin, RequireRead
-from tessera.api.errors import DuplicateError, ErrorCode, NotFoundError
+from tessera.api.errors import BadRequestError, DuplicateError, ErrorCode, NotFoundError
 from tessera.api.pagination import PaginationParams, pagination_params
 from tessera.api.rate_limit import limit_read, limit_write
 from tessera.api.types import PaginatedResponse
@@ -279,6 +279,9 @@ async def update_user(
     if update.team_id is not None:
         user.team_id = update.team_id
     if update.password is not None:
+        effective_type = update.user_type if update.user_type is not None else user.user_type
+        if effective_type == UserType.BOT:
+            raise BadRequestError("Bot users cannot have passwords", ErrorCode.VALIDATION_ERROR)
         user.password_hash = _hasher.hash(update.password)
     if update.role is not None:
         user.role = update.role

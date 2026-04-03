@@ -73,7 +73,7 @@ def upgrade() -> None:
         bind.execute(
             sa.text(
                 "UPDATE users SET username = username || '-' "
-                "|| SUBSTR(REPLACE(HEX(RANDOMBLOB(4)), '0', ''), 1, 6) "
+                "|| LOWER(SUBSTR(HEX(RANDOMBLOB(3)), 1, 6)) "
                 "WHERE rowid NOT IN ("
                 "  SELECT MIN(rowid) FROM users GROUP BY username"
                 ")"
