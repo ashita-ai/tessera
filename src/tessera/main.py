@@ -243,7 +243,7 @@ if static_dir.exists():
 if spa_dist_dir.exists() and (spa_dist_dir / "assets").exists():
     app.mount("/assets", StaticFiles(directory=str(spa_dist_dir / "assets")), name="spa-assets")
 
-# Web UI: auth routes (login/logout) use Jinja2, all other pages serve the React SPA.
+# SPA + auth routes
 _spa_index = spa_dist_dir / "index.html" if spa_dist_dir.exists() else None
 
 
@@ -254,34 +254,27 @@ def _read_spa_html() -> str | None:
     return None
 
 
-# Register only login/logout/session routes from the web module
-_auth_router = APIRouter(tags=["web-auth"])
-
-
-@_auth_router.get("/login", response_class=HTMLResponse, response_model=None)
-async def login_page_proxy(request: Request, session: AsyncSession = Depends(get_session)) -> Any:
-    """Proxy to Jinja2 login page."""
-    from tessera.web.routes import login_page
-
-    return await login_page(request, session)
+# Auth routes: POST /login (form submission) and GET /logout.
+# GET /login is served by the SPA catch-all (React renders the login page).
+_auth_router = APIRouter(tags=["auth"])
 
 
 @_auth_router.post("/login")
-async def login_submit_proxy(
+async def login_submit_handler(
     request: Request,
     username: str = Form(...),
     password: str = Form(...),
     session: AsyncSession = Depends(get_session),
 ) -> Any:
-    """Proxy to Jinja2 login handler."""
+    """Handle login form submission."""
     from tessera.web.routes import login_submit
 
     return await login_submit(request, username, password, session)
 
 
 @_auth_router.get("/logout")
-async def logout_proxy(request: Request) -> Any:
-    """Proxy to logout handler."""
+async def logout_handler(request: Request) -> Any:
+    """Handle logout."""
     from tessera.web.routes import logout
 
     return await logout(request)
@@ -302,7 +295,6 @@ def _register_spa_catchall() -> None:
         "/assets/",
         "/health",
         "/metrics",
-        "/login",
         "/logout",
     )
 

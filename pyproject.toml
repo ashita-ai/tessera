@@ -1,7 +1,7 @@
 [project]
 name = "tessera-contracts"
 version = "0.2.0"
-description = "Data contract coordination for warehouses"
+description = "Service contract coordination"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -22,7 +22,6 @@ dependencies = [
     "redis>=5.0.0,<6.0.0",
     "argon2-cffi>=23.0.0,<24.0.0",
     "slowapi>=0.1.9,<1.0.0",
-    "jinja2>=3.1.0,<4.0.0",
     "email-validator>=2.3.0,<3.0.0",
     "itsdangerous>=2.0.0,<3.0.0",
     "python-multipart>=0.0.12,<1.0.0",
@@ -44,12 +43,6 @@ dev = [
     "pytest-cov>=6.0.0,<7.0.0",
     "ruff>=0.8.0,<1.0.0",
     "mypy>=1.13.0,<2.0.0",
-]
-bigquery = [
-    "google-cloud-bigquery>=3.25.0,<4.0.0",
-]
-duckdb = [
-    "duckdb>=1.0.0,<2.0.0",
 ]
 demo = [
     "dbt-duckdb>=1.10.0",
@@ -94,8 +87,6 @@ source = ["src/tessera"]
 concurrency = ["greenlet", "thread"]
 omit = [
     "src/tessera/cli/*",
-    "src/tessera/connectors/*",
-    "src/tessera/web/*",
 ]
 
 [tool.coverage.report]
@@ -115,9 +106,7 @@ dev = [
     "uvloop>=0.22.0,<1.0.0; sys_platform != 'win32'",
     "httptools>=0.7.0,<1.0.0",
     "watchfiles>=1.0.0,<2.0.0",
-    "duckdb>=1.0.0,<2.0.0",
     "pyarrow>=15.0.0",
-    "dbt-duckdb>=1.10.0",
     "pip-audit>=2.10.0",
 ]
 

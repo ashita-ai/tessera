@@ -1,4 +1,4 @@
-"""Tessera CLI - Data contract coordination from the command line."""
+"""Tessera CLI - Service contract coordination from the command line."""
 
 import json
 import logging
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 app = typer.Typer(
     name="tessera",
-    help="Data contract coordination for warehouses",
+    help="Service contract coordination",
     no_args_is_help=True,
 )
 

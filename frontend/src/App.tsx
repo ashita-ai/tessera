@@ -6,11 +6,13 @@ import { Assets } from "@/pages/Assets";
 import { Proposals } from "@/pages/Proposals";
 import { Teams } from "@/pages/Teams";
 import { AuditLog } from "@/pages/AuditLog";
+import { Login } from "@/pages/Login";
 
 export function App() {
   return (
     <BrowserRouter>
       <Routes>
+        <Route path="login" element={<Login />} />
         <Route element={<Shell />}>
           <Route index element={<Dashboard />} />
           <Route path="services" element={<Services />} />
