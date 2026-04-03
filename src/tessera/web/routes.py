@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.config import settings
 from tessera.db import UserDB, get_session
+from tessera.models.enums import UserType
 
 logger = logging.getLogger(__name__)
 
@@ -153,8 +154,6 @@ async def login_submit(
     session: AsyncSession = Depends(get_session),
 ) -> RedirectResponse:
     """Handle login form submission."""
-    from tessera.models.enums import UserType
-
     # Normalize username
     normalized = username.strip().lower()
 

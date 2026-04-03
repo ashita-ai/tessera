@@ -641,6 +641,52 @@ class TestUpdateUser:
 
         assert resp.status_code == 409
 
+    async def test_update_user_invalid_username_rejected(self, client: AsyncClient):
+        """Cannot update username to an invalid format."""
+        create_resp = await client.post(
+            "/api/v1/users",
+            json={"username": "validuser", "name": "Valid User"},
+        )
+        user_id = create_resp.json()["id"]
+
+        # Username starting with a digit should be rejected
+        resp = await client.patch(f"/api/v1/users/{user_id}", json={"username": "123invalid"})
+        assert resp.status_code == 422
+
+        # Username with spaces should be rejected
+        resp = await client.patch(f"/api/v1/users/{user_id}", json={"username": "has spaces"})
+        assert resp.status_code == 422
+
+    async def test_update_human_to_bot_clears_password(self, client: AsyncClient):
+        """Switching a human with password to bot clears their password_hash."""
+        create_resp = await client.post(
+            "/api/v1/users",
+            json={
+                "username": "humantobotuser",
+                "name": "Human To Bot",
+                "password": "securepass123",
+            },
+        )
+        user_id = create_resp.json()["id"]
+
+        resp = await client.patch(f"/api/v1/users/{user_id}", json={"user_type": "bot"})
+        assert resp.status_code == 200
+        assert resp.json()["user_type"] == "bot"
+
+    async def test_update_bot_with_password_rejected(self, client: AsyncClient):
+        """Cannot set user_type to bot and password in the same update."""
+        create_resp = await client.post(
+            "/api/v1/users",
+            json={"username": "botupduser", "name": "Bot Update User"},
+        )
+        user_id = create_resp.json()["id"]
+
+        resp = await client.patch(
+            f"/api/v1/users/{user_id}",
+            json={"user_type": "bot", "password": "shouldfail123"},
+        )
+        assert resp.status_code == 422
+
     async def test_update_user_not_found(self, client: AsyncClient):
         """Update non-existent user returns 404."""
         fake_id = str(uuid4())

@@ -266,12 +266,15 @@ async def update_user(
             raise NotFoundError(ErrorCode.TEAM_NOT_FOUND, "Team not found")
 
     if update.username is not None:
-        user.username = update.username.strip().lower()
+        user.username = update.username  # already normalized by validator
     if update.email is not None:
         user.email = update.email.lower().strip()
     if update.name is not None:
         user.name = update.name
     if update.user_type is not None:
+        # Enforce bot invariant: clear password_hash when switching to bot
+        if update.user_type == UserType.BOT and user.password_hash is not None:
+            user.password_hash = None
         user.user_type = update.user_type
     if update.team_id is not None:
         user.team_id = update.team_id
@@ -284,13 +287,15 @@ async def update_user(
     if update.metadata is not None:
         user.metadata_ = update.metadata
 
+    # Capture before flush — ORM object expires after rollback
+    effective_username = update.username if update.username is not None else user.username
     try:
         await session.flush()
     except IntegrityError:
         await session.rollback()
         raise DuplicateError(
             ErrorCode.DUPLICATE_USER,
-            f"User with username '{update.username}' already exists",
+            f"User with username '{effective_username}' already exists",
         )
     await session.refresh(user)
 

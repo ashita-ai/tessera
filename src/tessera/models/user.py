@@ -90,6 +90,29 @@ class UserUpdate(BaseModel):
     notification_preferences: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = None
 
+    @field_validator("username")
+    @classmethod
+    def validate_and_normalize_username(cls, v: str | None) -> str | None:
+        """Normalize to lowercase and validate username format."""
+        if v is None:
+            return None
+        v = v.strip().lower()
+        if not v:
+            raise ValueError("Username cannot be empty or whitespace only")
+        if not USERNAME_PATTERN.match(v):
+            raise ValueError(
+                "Username must start with a letter, end with a letter or digit, "
+                "and contain only letters, digits, hyphens, underscores, and dots"
+            )
+        return v
+
+    @model_validator(mode="after")
+    def validate_bot_constraints(self) -> "UserUpdate":
+        """Prevent setting a password on a bot user via update."""
+        if self.user_type == UserType.BOT and self.password is not None:
+            raise ValueError("Bot users cannot have passwords — they authenticate via API keys")
+        return self
+
 
 class User(BaseModel):
     """User entity."""

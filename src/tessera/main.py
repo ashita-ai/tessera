@@ -73,8 +73,10 @@ async def bootstrap_admin_user() -> None:
     - If the user doesn't exist, create them with admin role
     - If the user exists, update their password and ensure admin role
 
-    Always runs (admin_username defaults to "admin", admin_password defaults to "admin").
+    Only runs when both ADMIN_USERNAME and ADMIN_PASSWORD are set.
     """
+    if not settings.admin_username or not settings.admin_password:
+        return
     from argon2 import PasswordHasher
 
     from tessera.db import TeamDB, UserDB
