@@ -283,14 +283,31 @@ async def logout_proxy(request: Request) -> Any:
 app.include_router(_auth_router)
 
 
-# SPA catch-all: serves React index.html for all unmatched routes.
-# React Router handles client-side routing for /, /services, /assets, etc.
-@app.get("/{path:path}", response_class=HTMLResponse, include_in_schema=False)
-async def spa_catchall(path: str) -> HTMLResponse:
-    """Serve the React SPA for all non-API routes."""
-    if _spa_html:
-        return HTMLResponse(_spa_html)
-    raise HTTPException(status_code=404, detail="Not found")
+# SPA catch-all must be the LAST route. We define it as a function and register
+# it after /health and /metrics (see below).
+def _register_spa_catchall() -> None:
+    """Register the SPA catch-all AFTER all other routes."""
+
+    # Paths that should NOT be handled by the SPA catch-all
+    _non_spa_prefixes = (
+        "/api/",
+        "/static/",
+        "/assets/",
+        "/health",
+        "/metrics",
+        "/login",
+        "/logout",
+    )
+
+    @app.get("/{path:path}", response_class=HTMLResponse, include_in_schema=False)
+    async def spa_catchall(path: str) -> HTMLResponse:
+        """Serve the React SPA for all non-API, non-system routes."""
+        full_path = f"/{path}"
+        if any(full_path.startswith(p) for p in _non_spa_prefixes):
+            raise HTTPException(status_code=404, detail="Not found")
+        if _spa_html:
+            return HTMLResponse(_spa_html)
+        raise HTTPException(status_code=404, detail="Not found")
 
 
 @app.get("/metrics")
@@ -381,3 +398,7 @@ async def health_ready(
 async def health_live() -> dict[str, str]:
     """Liveness probe - basic check that app is running."""
     return {"status": "alive"}
+
+
+# Register SPA catch-all LAST so /health, /metrics, and other routes take priority.
+_register_spa_catchall()
