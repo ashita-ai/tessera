@@ -95,6 +95,7 @@ Force-publish is available for emergencies (admin-only, audit-logged).
 - **Webhooks** — Signed delivery (HMAC-SHA256) with SSRF protection, retry with backoff, delivery tracking
 - **API keys** — Scoped (read, write, admin), revocable, expiring. Supports agent identity with separate rate limit tiers
 - **Passive dependency discovery** — Mines preflight audit signals to infer which teams consume which assets, with confidence scoring and a confirm/reject workflow to promote inferences to registrations
+- **Git-based repo sync** — Register repositories and Tessera automatically clones them, discovers spec files (OpenAPI, gRPC, GraphQL), creates services, and publishes contracts. A background worker polls for changes on a configurable interval
 - **Audit log** — Append-only history of every publish, proposal, acknowledgment, force-approve, and consumption event
 - **Web UI** — Browse assets, view contract history, manage proposals and teams
 
@@ -109,6 +110,11 @@ Force-publish is available for emergencies (admin-only, audit-logged).
 | `WEBHOOK_ALLOWED_DOMAINS` | Comma-separated domain allowlist | None (all allowed) |
 | `AUTH_DISABLED` | Disable auth for development | `false` |
 | `ENVIRONMENT` | `development` or `production` | `development` |
+| `TESSERA_REPO_DIR` | Directory for cloned repositories | `./data/repos` |
+| `TESSERA_GIT_TOKEN` | Git auth token for private repos (injected into HTTPS clone URLs) | None |
+| `TESSERA_SYNC_INTERVAL` | Background repo sync poll interval in seconds (0 to disable) | `60` |
+| `TESSERA_REPO_MAX_SIZE_MB` | Maximum clone size in megabytes | `500` |
+| `TESSERA_GIT_TIMEOUT` | Git operation timeout in seconds | `120` |
 
 See [configuration docs](https://ashita-ai.github.io/tessera/getting-started/quickstart/) for the full list.
 

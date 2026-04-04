@@ -19,7 +19,7 @@ from typing import Any
 from uuid import UUID
 
 import yaml
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.config import settings
@@ -72,6 +72,13 @@ class SyncResult:
 # ---------------------------------------------------------------------------
 # Git operations — subprocess with explicit args, no shell=True
 # ---------------------------------------------------------------------------
+
+
+def _sanitize_stderr(stderr: str, token: str | None) -> str:
+    """Remove auth tokens from git stderr before including in error messages."""
+    if token and token in stderr:
+        return stderr.replace(token, "***")
+    return stderr
 
 
 def _inject_token(git_url: str, token: str | None) -> str:
@@ -157,14 +164,14 @@ async def clone_or_pull(
             cwd=str(repo_dir),
         )
         if rc != 0:
-            raise RuntimeError(f"git fetch failed: {stderr}")
+            raise RuntimeError(f"git fetch failed: {_sanitize_stderr(stderr, token)}")
 
         rc, _, stderr = await _run_git(
             ["reset", "--hard", "FETCH_HEAD"],
             cwd=str(repo_dir),
         )
         if rc != 0:
-            raise RuntimeError(f"git reset failed: {stderr}")
+            raise RuntimeError(f"git reset failed: {_sanitize_stderr(stderr, token)}")
     else:
         # Clone: shallow clone
         rc, _, stderr = await _run_git(
@@ -174,7 +181,7 @@ async def clone_or_pull(
             # Clean up partial clone
             if repo_dir.exists():
                 shutil.rmtree(repo_dir, ignore_errors=True)
-            raise RuntimeError(f"git clone failed: {stderr}")
+            raise RuntimeError(f"git clone failed: {_sanitize_stderr(stderr, token)}")
 
     # Validate repo size
     max_bytes = settings.repo_max_size_mb * 1024 * 1024
@@ -192,7 +199,7 @@ async def clone_or_pull(
         cwd=str(repo_dir),
     )
     if rc != 0:
-        raise RuntimeError(f"git rev-parse failed: {stderr}")
+        raise RuntimeError(f"git rev-parse failed: {_sanitize_stderr(stderr, token)}")
 
     return str(repo_dir), sha.strip()
 
@@ -359,7 +366,7 @@ def assign_spec_to_service(
             continue
 
         # Check if the spec path starts with the service root_path
-        if spec_path.startswith(root + "/") or spec_path.startswith(root):
+        if spec_path.startswith(root + "/") or spec_path == root:
             if len(root) > best_length:
                 best_length = len(root)
                 best_match = svc
@@ -740,7 +747,7 @@ async def _poll_once(session_maker: Any) -> None:
             select(RepoDB)
             .where(RepoDB.sync_enabled.is_(True))
             .where(RepoDB.deleted_at.is_(None))
-            .where(RepoDB.spec_paths != "[]")  # Has spec paths configured
+            .where(func.json_array_length(RepoDB.spec_paths) > 0)
             .order_by(RepoDB.last_synced_at.asc().nullsfirst())
         )
         result = await session.execute(stmt)
@@ -753,7 +760,12 @@ async def _poll_once(session_maker: Any) -> None:
                 if elapsed < settings.sync_interval:
                     continue
 
-            logger.info("Background sync starting for repo %s (%s)", repo.name, repo.id)
+            # Capture scalar values before any rollback can expire the ORM object
+            repo_name = repo.name
+            repo_id = repo.id
+            owner_team_id = repo.owner_team_id
+
+            logger.info("Background sync starting for repo %s (%s)", repo_name, repo_id)
             try:
                 sync_result = await asyncio.wait_for(
                     sync_repo(session, repo),
@@ -764,44 +776,50 @@ async def _poll_once(session_maker: Any) -> None:
                 if sync_result.success:
                     logger.info(
                         "Sync completed for %s: %d specs, %d contracts published",
-                        repo.name,
+                        repo_name,
                         sync_result.specs_found,
                         sync_result.contracts_published,
                     )
-                    await _log_sync_event(session, repo, sync_result)
+                    await _log_sync_event(session, repo_id, owner_team_id, sync_result)
                     await session.commit()
                 else:
-                    logger.warning("Sync failed for %s: %s", repo.name, sync_result.errors)
-                    await _log_sync_failed(session, repo, sync_result.errors)
+                    logger.warning("Sync failed for %s: %s", repo_name, sync_result.errors)
+                    await _log_sync_failed(session, repo_id, owner_team_id, sync_result.errors)
                     await session.commit()
 
             except TimeoutError:
                 await session.rollback()
-                logger.error("Sync timed out for repo %s", repo.name)
-                await _log_sync_failed(session, repo, ["Sync timed out"])
+                logger.error("Sync timed out for repo %s", repo_name)
+                await _log_sync_failed(session, repo_id, owner_team_id, ["Sync timed out"])
                 await session.commit()
             except Exception:
                 await session.rollback()
-                logger.exception("Unexpected error syncing repo %s", repo.name)
+                logger.exception("Unexpected error syncing repo %s", repo_name)
                 try:
-                    await _log_sync_failed(session, repo, ["Unexpected error — see server logs"])
+                    await _log_sync_failed(
+                        session,
+                        repo_id,
+                        owner_team_id,
+                        ["Unexpected error — see server logs"],
+                    )
                     await session.commit()
                 except Exception:
-                    logger.exception("Failed to log sync failure for repo %s", repo.name)
+                    logger.exception("Failed to log sync failure for repo %s", repo_name)
 
 
 async def _log_sync_event(
     session: AsyncSession,
-    repo: RepoDB,
+    repo_id: UUID,
+    owner_team_id: UUID,
     sync_result: SyncResult,
 ) -> None:
     """Log a successful sync audit event."""
     await audit.log_event(
         session=session,
         entity_type="repo",
-        entity_id=repo.id,
+        entity_id=repo_id,
         action=AuditAction.REPO_SYNCED,
-        actor_id=repo.owner_team_id,
+        actor_id=owner_team_id,
         actor_type="agent",
         payload={
             "commit_sha": sync_result.commit_sha,
@@ -815,16 +833,17 @@ async def _log_sync_event(
 
 async def _log_sync_failed(
     session: AsyncSession,
-    repo: RepoDB,
+    repo_id: UUID,
+    owner_team_id: UUID,
     errors: list[str],
 ) -> None:
     """Log a failed sync audit event."""
     await audit.log_event(
         session=session,
         entity_type="repo",
-        entity_id=repo.id,
+        entity_id=repo_id,
         action=AuditAction.REPO_SYNC_FAILED,
-        actor_id=repo.owner_team_id,
+        actor_id=owner_team_id,
         actor_type="agent",
         payload={"errors": errors},
     )
