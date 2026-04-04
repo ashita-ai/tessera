@@ -1,5 +1,7 @@
 """dbt manifest upload endpoint."""
 
+import logging
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -30,10 +32,12 @@ from tessera.api.sync.helpers import (
     resolve_team_by_name,
     resolve_user_by_email,
 )
-from tessera.db import AssetDB, ContractDB, TeamDB, UserDB, get_session
-from tessera.models.enums import ResourceType
+from tessera.db import AssetDB, AssetDependencyDB, ContractDB, TeamDB, UserDB, get_session
+from tessera.models.enums import DependencyType, ResourceType
 from tessera.services import audit
 from tessera.services.audit import AuditAction
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -169,6 +173,91 @@ def _build_node_metadata(
     return metadata
 
 
+def _dependency_type_for_node_id(node_id: str) -> DependencyType:
+    """Determine DependencyType from a dbt node ID prefix.
+
+    Model-to-model edges are TRANSFORMS. Everything else (source, seed,
+    snapshot) is CONSUMES.
+    """
+    if node_id.startswith("model."):
+        return DependencyType.TRANSFORMS
+    return DependencyType.CONSUMES
+
+
+async def _sync_asset_dependencies(
+    session: AsyncSession,
+    asset: AssetDB,
+    depends_on_node_ids: list[str],
+    node_id_to_fqn: dict[str, str],
+    assets_by_fqn: dict[str, AssetDB],
+) -> dict[str, int]:
+    """Sync AssetDependencyDB rows from dbt depends_on for a single asset.
+
+    Creates new rows for dependencies that don't exist yet, and soft-deletes
+    rows for dependencies that were removed from the manifest. Reactivates
+    previously soft-deleted rows if the dependency reappears.
+
+    Returns counts: {"created": N, "reactivated": M, "soft_deleted": P, "skipped": Q}
+    """
+    counts = {"created": 0, "reactivated": 0, "soft_deleted": 0, "skipped": 0}
+
+    # Resolve node IDs to (asset, dependency_type) pairs
+    resolved: dict[UUID, DependencyType] = {}
+    for node_id in depends_on_node_ids:
+        fqn = node_id_to_fqn.get(node_id)
+        if not fqn:
+            counts["skipped"] += 1
+            continue
+        dep_asset = assets_by_fqn.get(fqn)
+        if not dep_asset:
+            logger.warning("Dependency FQN %s not found in Tessera, skipping", fqn)
+            counts["skipped"] += 1
+            continue
+        if dep_asset.id == asset.id:
+            continue
+        resolved[dep_asset.id] = _dependency_type_for_node_id(node_id)
+
+    # Fetch all existing dependency rows for this asset (including soft-deleted)
+    existing_result = await session.execute(
+        select(AssetDependencyDB).where(
+            AssetDependencyDB.dependent_asset_id == asset.id,
+        )
+    )
+    existing_rows = {
+        (row.dependency_asset_id, row.dependency_type): row
+        for row in existing_result.scalars().all()
+    }
+
+    # Upsert: create or reactivate
+    seen_keys: set[tuple[UUID, DependencyType]] = set()
+    for dep_asset_id, dep_type in resolved.items():
+        key = (dep_asset_id, dep_type)
+        seen_keys.add(key)
+        existing = existing_rows.get(key)
+        if existing:
+            if existing.deleted_at is not None:
+                existing.deleted_at = None
+                counts["reactivated"] += 1
+            # else: already active, nothing to do
+        else:
+            session.add(
+                AssetDependencyDB(
+                    dependent_asset_id=asset.id,
+                    dependency_asset_id=dep_asset_id,
+                    dependency_type=dep_type,
+                )
+            )
+            counts["created"] += 1
+
+    # Soft-delete rows not in the current depends_on
+    for key, row in existing_rows.items():
+        if key not in seen_keys and row.deleted_at is None:
+            row.deleted_at = datetime.now(UTC)
+            counts["soft_deleted"] += 1
+
+    return counts
+
+
 @router.post("/dbt/upload")
 @limit_admin
 async def upload_dbt_manifest(
@@ -234,6 +323,7 @@ async def upload_dbt_manifest(
         ]
     ] = []
     asset_consumer_map: dict[str, tuple[AssetDB, UUID, list[str], list[dict[str, Any]]]] = {}
+    dependency_sync_queue: list[tuple[AssetDB, list[str]]] = []
 
     # Caches
     team_cache: dict[str, TeamDB | None] = {}
@@ -331,6 +421,9 @@ async def upload_dbt_manifest(
                         )
                     )
 
+            if not is_source:
+                dependency_sync_queue.append((existing, depends_on_node_ids))
+
             if upload_req.auto_register_consumers:
                 asset_consumer_map[fqn] = (
                     existing,
@@ -371,6 +464,9 @@ async def upload_dbt_manifest(
                     (new_asset, columns, guarantees, tessera_meta.compatibility_mode)
                 )
 
+            if not is_source:
+                dependency_sync_queue.append((new_asset, depends_on_node_ids))
+
             if upload_req.auto_register_consumers:
                 asset_consumer_map[fqn] = (
                     new_asset,
@@ -386,6 +482,42 @@ async def upload_dbt_manifest(
             f"Found {len(conflicts)} existing assets",
             details={"conflicts": conflicts[:20]},
         )
+
+    # ---- Dependency sync ----
+    # Flush first so new assets have IDs assigned, then build the FQN lookup.
+    await session.flush()
+
+    dependencies_created = 0
+    dependency_warnings: list[str] = []
+    if dependency_sync_queue:
+        # Build FQN→asset lookup from the database (covers assets from this sync
+        # and any pre-existing assets that dependencies may reference).
+        all_fqns: set[str] = set()
+        for _asset, dep_node_ids in dependency_sync_queue:
+            for nid in dep_node_ids:
+                dep_fqn = node_id_to_fqn.get(nid)
+                if dep_fqn:
+                    all_fqns.add(dep_fqn)
+
+        assets_by_fqn: dict[str, AssetDB] = {}
+        if all_fqns:
+            fqn_result = await session.execute(
+                select(AssetDB).where(
+                    AssetDB.fqn.in_(list(all_fqns)),
+                    AssetDB.deleted_at.is_(None),
+                )
+            )
+            assets_by_fqn = {a.fqn: a for a in fqn_result.scalars().all()}
+
+        for sync_asset, dep_node_ids in dependency_sync_queue:
+            try:
+                counts = await _sync_asset_dependencies(
+                    session, sync_asset, dep_node_ids, node_id_to_fqn, assets_by_fqn
+                )
+                dependencies_created += counts["created"] + counts["reactivated"]
+            except Exception:
+                logger.exception("Failed to sync dependencies for %s", sync_asset.fqn)
+                dependency_warnings.append(f"{sync_asset.fqn}: failed to sync dependencies")
 
     # ---- Post-processing ----
     contracts_published = 0
@@ -455,6 +587,7 @@ async def upload_dbt_manifest(
             "assets_created": assets_created,
             "assets_updated": assets_updated,
             "assets_skipped": assets_skipped,
+            "dependencies_synced": dependencies_created,
             "contracts_published": contracts_published,
             "proposals_created": proposals_created,
             "registrations_created": registrations_created,
@@ -462,7 +595,7 @@ async def upload_dbt_manifest(
         },
     )
 
-    has_failures = bool(contract_warnings or registration_warnings)
+    has_failures = bool(contract_warnings or registration_warnings or dependency_warnings)
     if has_failures:
         response.status_code = 207
 
@@ -475,6 +608,9 @@ async def upload_dbt_manifest(
             "skipped": assets_skipped,
             "deleted": assets_deleted,
             "deleted_fqns": (deleted_assets_info[:20] if deleted_assets_info else []),
+        },
+        "dependencies": {
+            "synced": dependencies_created,
         },
         "contracts": {
             "published": contracts_published,
@@ -490,4 +626,5 @@ async def upload_dbt_manifest(
         "ownership_warnings": (ownership_warnings[:20] if ownership_warnings else []),
         "contract_warnings": (contract_warnings[:20] if contract_warnings else []),
         "registration_warnings": (registration_warnings[:20] if registration_warnings else []),
+        "dependency_warnings": (dependency_warnings[:20] if dependency_warnings else []),
     }
