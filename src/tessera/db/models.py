@@ -33,6 +33,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     DateTime,
     Enum,
     ForeignKey,
@@ -147,6 +148,102 @@ class TeamDB(Base):
     # Relationships
     members: Mapped[list["UserDB"]] = relationship(back_populates="team")
     assets: Mapped[list["AssetDB"]] = relationship(back_populates="owner_team")
+    repos: Mapped[list["RepoDB"]] = relationship(back_populates="owner_team")
+    services: Mapped[list["ServiceDB"]] = relationship(back_populates="owner_team")
+
+
+class RepoDB(Base):
+    """Repository database model.
+
+    A git repository owned by a team. Repos are the unit of git operations
+    (clone, fetch, poll) and CODEOWNERS parsing. Hierarchy: Team → Repo → Service → Asset.
+    """
+
+    __tablename__ = "repos"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    git_url: Mapped[str] = mapped_column(String(500), nullable=False)
+    default_branch: Mapped[str] = mapped_column(String(100), nullable=False, default="main")
+    spec_paths: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    owner_team_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("teams.id"), nullable=False, index=True
+    )
+    sync_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    codeowners_path: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_synced_commit: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, onupdate=_utcnow
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+
+    __table_args__ = (
+        Index(
+            "uq_repo_name_active",
+            "name",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
+            sqlite_where=text("deleted_at IS NULL"),
+        ),
+        Index(
+            "uq_repo_git_url_active",
+            "git_url",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
+            sqlite_where=text("deleted_at IS NULL"),
+        ),
+    )
+
+    # Relationships
+    owner_team: Mapped["TeamDB"] = relationship(back_populates="repos", lazy="selectin")
+    services: Mapped[list["ServiceDB"]] = relationship(back_populates="repo")
+
+
+class ServiceDB(Base):
+    """Service database model.
+
+    A deployable unit within a repository. A single-service repo has one service
+    with ``root_path = '/'``. A monorepo has multiple services, each with a
+    distinct root path. Hierarchy: Team → Repo → Service → Asset.
+    """
+
+    __tablename__ = "services"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    repo_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("repos.id"), nullable=False, index=True)
+    root_path: Mapped[str] = mapped_column(String(500), nullable=False, default="/")
+    otel_service_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    owner_team_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("teams.id"), nullable=False, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, onupdate=_utcnow
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+
+    __table_args__ = (
+        Index(
+            "uq_service_name_repo_active",
+            "name",
+            "repo_id",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
+            sqlite_where=text("deleted_at IS NULL"),
+        ),
+    )
+
+    # Relationships
+    repo: Mapped["RepoDB"] = relationship(back_populates="services", lazy="selectin")
+    owner_team: Mapped["TeamDB"] = relationship(back_populates="services", lazy="selectin")
+    assets: Mapped[list["AssetDB"]] = relationship(back_populates="service")
 
 
 class AssetDB(Base):
@@ -161,6 +258,9 @@ class AssetDB(Base):
     )
     owner_user_id: Mapped[UUID | None] = mapped_column(
         Uuid, ForeignKey("users.id"), nullable=True, index=True
+    )
+    service_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("services.id"), nullable=True, index=True
     )
     environment: Mapped[str] = mapped_column(
         String(50), nullable=False, default="production", index=True
@@ -193,6 +293,7 @@ class AssetDB(Base):
     # Use selectin for owner_team since it's often needed for auth checks
     owner_team: Mapped["TeamDB"] = relationship(back_populates="assets", lazy="selectin")
     owner_user: Mapped["UserDB | None"] = relationship(back_populates="owned_assets")
+    service: Mapped["ServiceDB | None"] = relationship(back_populates="assets")
     # Contracts and proposals use default lazy loading - use explicit options() when needed
     contracts: Mapped[list["ContractDB"]] = relationship(back_populates="asset")
     proposals: Mapped[list["ProposalDB"]] = relationship(back_populates="asset")
