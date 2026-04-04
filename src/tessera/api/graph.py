@@ -23,9 +23,13 @@ GRAPH_CACHE_TTL = 60
 graph_cache = CacheService(prefix="graph", ttl=GRAPH_CACHE_TTL)
 
 
-def _graph_cache_key(team_id: UUID | None) -> str:
+def _graph_cache_key(
+    team_id: UUID | None,
+    min_confidence: float,
+    include_unregistered: bool,
+) -> str:
     """Build a deterministic cache key for the full graph endpoint."""
-    return f"services:team={team_id or 'all'}"
+    return f"services:team={team_id or 'all'}:conf={min_confidence}:unreg={include_unregistered}"
 
 
 @router.get(
@@ -41,6 +45,16 @@ async def get_service_graph(
     request: Request,
     auth: Auth,
     team_id: UUID | None = Query(None, description="Filter to services owned by this team"),
+    min_confidence: float = Query(
+        0.0,
+        ge=0.0,
+        le=1.0,
+        description="Minimum confidence for OTEL edges (manual edges always included)",
+    ),
+    include_unregistered: bool = Query(
+        False,
+        description="Include OTEL-observed services not yet registered in Tessera",
+    ),
     _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
 ) -> ServiceGraphResponse:
@@ -50,12 +64,16 @@ async def get_service_graph(
     When team_id is provided, the graph is scoped to that team's services plus
     their direct neighbors.
     """
-    cache_key = _graph_cache_key(team_id)
+    cache_key = _graph_cache_key(team_id, min_confidence, include_unregistered)
     cached = await graph_cache.get(cache_key)
     if cached is not None:
         return ServiceGraphResponse.model_validate(cached)
 
-    graph = await build_service_graph(session, team_id=team_id)
+    graph = await build_service_graph(
+        session,
+        team_id=team_id,
+        min_confidence=min_confidence,
+    )
 
     await graph_cache.set(cache_key, graph.model_dump(mode="json"))
     return graph

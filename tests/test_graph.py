@@ -1,9 +1,11 @@
 """Tests for /api/v1/graph endpoints.
 
 Covers: graph construction, edge aggregation, neighborhood filtering,
-impact traversal, team filter, and breaking proposal flag.
+impact traversal, team filter, breaking proposal flag, confidence filtering,
+and timezone handling.
 """
 
+from datetime import UTC, datetime, timedelta, timezone
 from uuid import UUID
 
 import pytest
@@ -18,7 +20,8 @@ from tessera.db.models import (
     ServiceDB,
     TeamDB,
 )
-from tessera.models.enums import DependencyType, ProposalStatus
+from tessera.models.enums import DependencySource, DependencyType, ProposalStatus
+from tessera.services.graph import _ensure_utc, _sync_status
 
 pytestmark = pytest.mark.asyncio
 
@@ -480,3 +483,178 @@ class TestImpactGraph:
         by_name = {s["name"]: s for s in data["affected_services"]}
         assert by_name["svc-b"]["depth"] == 1
         assert by_name["svc-c"]["depth"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Confidence filtering (min_confidence query param)
+# ---------------------------------------------------------------------------
+
+
+class TestConfidenceFilter:
+    """Tests for min_confidence query parameter on GET /graph/services."""
+
+    async def _seed_with_otel_edge(self, test_engine) -> dict[str, str]:
+        """Seed graph with one manual and one OTEL edge.
+
+        Topology:
+            svc-api --(CONSUMES, manual)--> svc-db
+            svc-api --(CONSUMES, otel, confidence=0.4)--> svc-cache
+        """
+        session_maker = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+        async with session_maker() as session:
+            team = TeamDB(name="platform")
+            session.add(team)
+            await session.flush()
+
+            repo = RepoDB(
+                name="acme/platform",
+                git_url="https://github.com/acme/platform",
+                owner_team_id=team.id,
+            )
+            session.add(repo)
+            await session.flush()
+
+            svc_api = ServiceDB(name="svc-api", repo_id=repo.id, owner_team_id=team.id)
+            svc_db = ServiceDB(name="svc-db", repo_id=repo.id, owner_team_id=team.id)
+            svc_cache = ServiceDB(name="svc-cache", repo_id=repo.id, owner_team_id=team.id)
+            session.add_all([svc_api, svc_db, svc_cache])
+            await session.flush()
+
+            asset_api = AssetDB(fqn="api.endpoint", owner_team_id=team.id, service_id=svc_api.id)
+            asset_db = AssetDB(fqn="db.table", owner_team_id=team.id, service_id=svc_db.id)
+            asset_cache = AssetDB(fqn="cache.key", owner_team_id=team.id, service_id=svc_cache.id)
+            session.add_all([asset_api, asset_db, asset_cache])
+            await session.flush()
+
+            # Manual edge: api -> db
+            dep_manual = AssetDependencyDB(
+                dependent_asset_id=asset_api.id,
+                dependency_asset_id=asset_db.id,
+                dependency_type=DependencyType.CONSUMES,
+                source=DependencySource.MANUAL,
+            )
+            # OTEL edge: api -> cache (low confidence)
+            dep_otel = AssetDependencyDB(
+                dependent_asset_id=asset_api.id,
+                dependency_asset_id=asset_cache.id,
+                dependency_type=DependencyType.CONSUMES,
+                source=DependencySource.OTEL,
+                confidence=0.4,
+                call_count=150,
+            )
+            session.add_all([dep_manual, dep_otel])
+            await session.flush()
+            await session.commit()
+
+            return {
+                "svc_api_id": str(svc_api.id),
+                "svc_db_id": str(svc_db.id),
+                "svc_cache_id": str(svc_cache.id),
+            }
+
+    async def test_no_filter_returns_all_edges(self, client: AsyncClient, test_engine):
+        """Default min_confidence=0.0 includes all edges."""
+        await self._seed_with_otel_edge(test_engine)
+        resp = await client.get("/api/v1/graph/services")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["metadata"]["edge_count"] == 2
+
+    async def test_high_confidence_excludes_low_otel_edge(self, client: AsyncClient, test_engine):
+        """min_confidence=0.5 excludes the 0.4-confidence OTEL edge."""
+        await self._seed_with_otel_edge(test_engine)
+        resp = await client.get(
+            "/api/v1/graph/services",
+            params={"min_confidence": 0.5},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        # Only the manual edge remains (confidence=NULL passes through)
+        assert data["metadata"]["edge_count"] == 1
+        edge = data["edges"][0]
+        assert edge["source_type"] == "manual"
+        assert edge["confidence"] is None
+
+    async def test_manual_edges_always_included(self, client: AsyncClient, test_engine):
+        """Manual edges (confidence=NULL) are never filtered by min_confidence."""
+        await self._seed_with_otel_edge(test_engine)
+        resp = await client.get(
+            "/api/v1/graph/services",
+            params={"min_confidence": 1.0},
+        )
+        data = resp.json()
+        # Only manual edge survives at max confidence filter
+        assert data["metadata"]["edge_count"] == 1
+        assert data["edges"][0]["source_type"] == "manual"
+
+    async def test_otel_edge_has_confidence_and_call_count(self, client: AsyncClient, test_engine):
+        """OTEL edges report aggregated confidence and call_count."""
+        await self._seed_with_otel_edge(test_engine)
+        resp = await client.get("/api/v1/graph/services")
+        data = resp.json()
+        otel_edges = [e for e in data["edges"] if e["source_type"] == "otel"]
+        assert len(otel_edges) == 1
+        assert otel_edges[0]["confidence"] == pytest.approx(0.4)
+        assert otel_edges[0]["call_count"] == 150
+
+    async def test_include_unregistered_param_accepted(self, client: AsyncClient, test_engine):
+        """include_unregistered parameter is accepted and returns empty list (no OTEL data)."""
+        await self._seed_with_otel_edge(test_engine)
+        resp = await client.get(
+            "/api/v1/graph/services",
+            params={"include_unregistered": True},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["unregistered_services"] == []
+
+
+# ---------------------------------------------------------------------------
+# Timezone handling
+# ---------------------------------------------------------------------------
+
+
+class TestTimezoneHandling:
+    """Tests for _sync_status and _ensure_utc timezone correctness."""
+
+    def test_ensure_utc_naive_datetime(self):
+        """Naive datetime gets UTC tzinfo stamped."""
+        naive = datetime(2026, 1, 1, 12, 0, 0)
+        result = _ensure_utc(naive)
+        assert result.tzinfo is UTC
+        assert result.hour == 12
+
+    def test_ensure_utc_already_utc(self):
+        """UTC-aware datetime passes through unchanged."""
+        aware = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
+        result = _ensure_utc(aware)
+        assert result.tzinfo is UTC
+        assert result.hour == 12
+
+    def test_ensure_utc_non_utc_timezone(self):
+        """Non-UTC datetime is converted (not just re-labeled)."""
+        # UTC+5 at 17:00 should become 12:00 UTC
+        tz_plus5 = timezone(timedelta(hours=5))
+        aware = datetime(2026, 1, 1, 17, 0, 0, tzinfo=tz_plus5)
+        result = _ensure_utc(aware)
+        assert result.tzinfo is UTC
+        assert result.hour == 12
+
+    def test_sync_status_none(self):
+        """None last_synced_at returns 'never'."""
+        assert _sync_status(None) == "never"
+
+    def test_sync_status_recent(self):
+        """Recently synced returns 'ok'."""
+        recent = datetime.now(UTC) - timedelta(hours=1)
+        assert _sync_status(recent) == "ok"
+
+    def test_sync_status_stale(self):
+        """Sync older than 24h returns 'stale'."""
+        old = datetime.now(UTC) - timedelta(hours=25)
+        assert _sync_status(old) == "stale"
+
+    def test_sync_status_naive_datetime(self):
+        """Naive datetime (from SQLite) is handled correctly."""
+        # Naive datetime representing "1 hour ago in UTC"
+        naive_recent = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=1)
+        assert _sync_status(naive_recent) == "ok"

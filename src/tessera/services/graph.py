@@ -36,11 +36,23 @@ from tessera.models.graph import (
 STALE_THRESHOLD = timedelta(hours=24)
 
 
+def _ensure_utc(dt: datetime) -> datetime:
+    """Normalize a datetime to UTC-aware.
+
+    PostgreSQL returns tz-aware datetimes; SQLite returns naive ones.
+    Using .replace(tzinfo=UTC) on an already-aware datetime silently
+    overwrites the tzinfo without converting — use astimezone instead.
+    """
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
+
+
 def _sync_status(last_synced_at: datetime | None) -> str:
     """Derive sync status from the repo's last_synced_at timestamp."""
     if last_synced_at is None:
         return "never"
-    age = datetime.now(UTC) - last_synced_at.replace(tzinfo=UTC)
+    age = datetime.now(UTC) - _ensure_utc(last_synced_at)
     if age > STALE_THRESHOLD:
         return "stale"
     return "ok"
@@ -128,18 +140,23 @@ async def _load_service_nodes(
 async def _load_service_edges(
     session: AsyncSession,
     service_ids: set[UUID] | None = None,
+    min_confidence: float = 0.0,
 ) -> list[ServiceEdge]:
     """Load and aggregate asset-level dependencies into service-level edges.
 
     Groups by (source_service, target_service, dependency_type). For each group:
-      - confidence = max (NULL for manual-only edges)
-      - call_count = sum (NULL for manual-only edges)
+      - source_type = the dependency source (manual, otel, inferred)
+      - confidence = max across asset edges (NULL for manual-only edges)
+      - call_count = sum across asset edges (NULL for manual-only edges)
       - asset_level_edges = count of asset pairs
 
     Args:
         session: Database session.
         service_ids: If provided, only include edges where both endpoints are
             in this set. Pass None for full graph.
+        min_confidence: Minimum confidence threshold for OTEL edges. Edges with
+            non-null confidence below this value are excluded. Manual edges
+            (confidence=NULL) are always included.
     """
     # Alias the assets table for source and target sides of the join
     src_asset = AssetDB.__table__.alias("src_asset")
@@ -150,6 +167,9 @@ async def _load_service_edges(
             src_asset.c.service_id.label("source_service_id"),
             tgt_asset.c.service_id.label("target_service_id"),
             AssetDependencyDB.dependency_type,
+            AssetDependencyDB.source,
+            func.max(AssetDependencyDB.confidence).label("max_confidence"),
+            func.sum(AssetDependencyDB.call_count).label("total_call_count"),
             func.count().label("edge_count"),
         )
         .join(
@@ -171,6 +191,7 @@ async def _load_service_edges(
             src_asset.c.service_id,
             tgt_asset.c.service_id,
             AssetDependencyDB.dependency_type,
+            AssetDependencyDB.source,
         )
     )
 
@@ -182,23 +203,39 @@ async def _load_service_edges(
     result = await session.execute(edge_query)
     rows = result.all()
 
-    return [
-        ServiceEdge(
-            source=row.source_service_id,
-            target=row.target_service_id,
-            dependency_type=str(row.dependency_type),
-            source_type="manual",
-            confidence=None,
-            call_count=None,
-            asset_level_edges=row.edge_count,
+    edges: list[ServiceEdge] = []
+    for row in rows:
+        max_conf: float | None = row.max_confidence
+        # Filter: if the edge has a confidence score and it's below
+        # the threshold, exclude it. Manual edges (confidence=NULL) pass through.
+        if max_conf is not None and max_conf < min_confidence:
+            continue
+
+        total_calls: int | None = row.total_call_count
+        # Coerce sum result: databases return 0 for SUM of all-NULL, but the
+        # API contract uses NULL to signal "not applicable" for manual edges.
+        if total_calls is not None and max_conf is None:
+            total_calls = None
+
+        edges.append(
+            ServiceEdge(
+                source=row.source_service_id,
+                target=row.target_service_id,
+                dependency_type=str(row.dependency_type),
+                source_type=str(row.source),
+                confidence=max_conf,
+                call_count=int(total_calls) if total_calls is not None else None,
+                asset_level_edges=row.edge_count,
+            )
         )
-        for row in rows
-    ]
+
+    return edges
 
 
 async def build_service_graph(
     session: AsyncSession,
     team_id: UUID | None = None,
+    min_confidence: float = 0.0,
 ) -> ServiceGraphResponse:
     """Build the full service dependency graph.
 
@@ -206,7 +243,7 @@ async def build_service_graph(
     plus their direct neighbors (services connected by at least one edge).
     """
     # 1. Load all edges first (unfiltered) so we can find neighbors
-    all_edges = await _load_service_edges(session)
+    all_edges = await _load_service_edges(session, min_confidence=min_confidence)
 
     # 2. Load services (filtered by team if requested)
     if team_id is not None:
