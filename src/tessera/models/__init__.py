@@ -59,6 +59,7 @@ from tessera.models.proposal import (
 )
 from tessera.models.registration import Registration, RegistrationCreate, RegistrationUpdate
 from tessera.models.repo import Repo, RepoCreate, RepoUpdate
+from tessera.models.service import Service, ServiceCreate, ServiceUpdate
 from tessera.models.team import Team, TeamCreate, TeamUpdate
 from tessera.models.user import User, UserCreate, UserUpdate, UserWithTeam
 
@@ -76,6 +77,10 @@ __all__ = [
     "UserCreate",
     "UserUpdate",
     "UserWithTeam",
+    # Service
+    "Service",
+    "ServiceCreate",
+    "ServiceUpdate",
     # Team
     "Team",
     "TeamCreate",

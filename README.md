@@ -89,6 +89,7 @@ Force-publish is available for emergencies (admin-only, audit-logged).
 - **Data quality guarantees** — Not-null, unique, accepted_values, freshness, volume checks tracked alongside schemas
 - **Write-Audit-Publish** — Optionally block publishing until data quality audits pass
 - **Semantic metadata** — Tag assets with labels (e.g., `pii`, `financial`) and annotate individual fields with descriptions and tags via JSONPath keys
+- **Service management** — Register services as deployable units within repositories, track which assets belong to each service, filter by repo/team/OTel name
 - **Team-based ownership** — Assets belong to teams (survives personnel changes), with optional user-level stewardship
 - **AI agent integration** — Agents register as consumers, check contracts before modifying schemas, and participate in the proposal workflow
 - **Webhooks** — Signed delivery (HMAC-SHA256) with SSRF protection, retry with backoff, delivery tracking

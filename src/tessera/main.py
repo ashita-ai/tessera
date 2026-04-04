@@ -39,6 +39,7 @@ from tessera.api import (
     repos,
     schemas,
     search,
+    services,
     sync,
     teams,
     users,
@@ -224,6 +225,7 @@ api_v1.include_router(registrations.router, prefix="/registrations", tags=["regi
 api_v1.include_router(proposals.router, prefix="/proposals", tags=["proposals"])
 api_v1.include_router(pending_proposals.router, tags=["proposals"])
 api_v1.include_router(repos.router, prefix="/repos", tags=["repos"])
+api_v1.include_router(services.router, prefix="/services", tags=["services"])
 api_v1.include_router(schemas.router, prefix="/schemas", tags=["schemas"])
 api_v1.include_router(sync.router, prefix="/sync", tags=["sync"])
 api_v1.include_router(api_keys.router, prefix="/api-keys", tags=["api-keys"])

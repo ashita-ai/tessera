@@ -81,6 +81,11 @@ class AuditAction(StrEnum):
     REPO_DELETED = "repo.deleted"
     REPO_SYNC_TRIGGERED = "repo.sync_triggered"
 
+    # Service actions
+    SERVICE_CREATED = "service.created"
+    SERVICE_UPDATED = "service.updated"
+    SERVICE_DELETED = "service.deleted"
+
     # Sync actions
     DBT_SYNC_UPLOAD = "dbt.sync_upload"
 

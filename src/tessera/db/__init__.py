@@ -26,6 +26,8 @@ __all__ = [
     "init_db",
     "UserDB",
     "TeamDB",
+    "RepoDB",
+    "ServiceDB",
     "AssetDB",
     "AssetDependencyDB",
     "ContractDB",
