@@ -62,6 +62,7 @@ export function DependencyGraph({
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const simulationRef = useRef<d3.Simulation<SimNode, SimLink> | null>(null);
+  const cleanupRef = useRef<(() => void) | undefined>(undefined);
   const teamMap = useRef(new Map<string, number>()).current;
 
   const render = useCallback(() => {
@@ -272,15 +273,31 @@ export function DependencyGraph({
     nodes
       .on("mouseenter", (_event: MouseEvent, d: SimNode) => {
         const node = d.data;
-        const lines = [
-          `<strong style="color:#fafafa">${node.label}</strong>`,
-          node.team_name ? `Team: ${node.team_name}` : null,
-          node.resource_type ? `Type: ${node.resource_type}` : null,
-          node.has_breaking_proposal
-            ? `<span style="color:#f87171">Breaking proposal</span>`
-            : null,
-        ].filter(Boolean);
-        tooltip.html(lines.join("<br/>")).style("opacity", "1");
+        const el = tooltip.node()!;
+        el.textContent = "";
+
+        const label = document.createElement("strong");
+        label.style.color = "#fafafa";
+        label.textContent = node.label;
+        el.appendChild(label);
+
+        if (node.team_name) {
+          el.appendChild(document.createElement("br"));
+          el.appendChild(document.createTextNode(`Team: ${node.team_name}`));
+        }
+        if (node.resource_type) {
+          el.appendChild(document.createElement("br"));
+          el.appendChild(document.createTextNode(`Type: ${node.resource_type}`));
+        }
+        if (node.has_breaking_proposal) {
+          el.appendChild(document.createElement("br"));
+          const warn = document.createElement("span");
+          warn.style.color = "#f87171";
+          warn.textContent = "Breaking proposal";
+          el.appendChild(warn);
+        }
+
+        tooltip.style("opacity", "1");
 
         // Highlight connected edges
         links
@@ -358,15 +375,22 @@ export function DependencyGraph({
   }, [graphData, propWidth, propHeight, onNodeClick, focusNodeId, teamMap]);
 
   useEffect(() => {
+    cleanupRef.current?.();
     const cleanup = render();
-    return () => cleanup?.();
+    cleanupRef.current = cleanup ?? undefined;
+    return () => {
+      cleanupRef.current?.();
+      cleanupRef.current = undefined;
+    };
   }, [render]);
 
   // Re-render on container resize
   useEffect(() => {
     if (!containerRef.current) return;
     const observer = new ResizeObserver(() => {
-      render();
+      cleanupRef.current?.();
+      const cleanup = render();
+      cleanupRef.current = cleanup ?? undefined;
     });
     observer.observe(containerRef.current);
     return () => observer.disconnect();
