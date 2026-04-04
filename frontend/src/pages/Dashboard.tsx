@@ -1,8 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import type { Proposal, AuditEvent } from "@/lib/api";
 import { StatCard } from "@/components/shared/StatCard";
 import { ActivityFeed, type ActivityItem } from "@/components/shared/ActivityFeed";
+import { DependencyGraph } from "@/components/graph/DependencyGraph";
+import { GraphSkeleton } from "@/components/shared/Skeleton";
 import { formatDate } from "@/lib/utils";
 
 function toActivity(e: AuditEvent): ActivityItem {
@@ -28,9 +31,11 @@ function toActivity(e: AuditEvent): ActivityItem {
 }
 
 export function Dashboard() {
+  const navigate = useNavigate();
   const stats = useQuery({ queryKey: ["stats"], queryFn: () => api.getStats() });
   const proposals = useQuery({ queryKey: ["proposals-pending"], queryFn: () => api.listProposals({ status: "pending", limit: 5 }) });
   const audit = useQuery({ queryKey: ["audit-recent"], queryFn: () => api.listAuditEvents({ limit: 8 }), retry: false });
+  const graph = useQuery({ queryKey: ["graph"], queryFn: () => api.getGraphData(), retry: false });
 
   const s = stats.data;
   const pending = proposals.data?.results ?? [];
@@ -47,25 +52,36 @@ export function Dashboard() {
 
       {/* Main content */}
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_280px]">
-        {/* Graph placeholder */}
+        {/* Dependency graph */}
         <div className="overflow-hidden rounded-lg border border-line bg-bg-raised">
           <div className="flex items-center justify-between border-b border-line px-4 py-2">
-            <span className="text-[13px] font-medium text-t2">Service graph</span>
+            <span className="text-[13px] font-medium text-t2">Dependency graph</span>
           </div>
-          <div className="flex h-[520px] flex-col items-center justify-center px-6">
-            <svg width="48" height="48" viewBox="0 0 48 48" fill="none" className="mb-4 text-t3">
-              <circle cx="14" cy="14" r="5" stroke="currentColor" strokeWidth="1.5" opacity="0.4" />
-              <circle cx="34" cy="14" r="5" stroke="currentColor" strokeWidth="1.5" opacity="0.4" />
-              <circle cx="24" cy="36" r="5" stroke="currentColor" strokeWidth="1.5" opacity="0.4" />
-              <line x1="18" y1="17" x2="21" y2="32" stroke="currentColor" strokeWidth="1" opacity="0.2" />
-              <line x1="30" y1="17" x2="27" y2="32" stroke="currentColor" strokeWidth="1" opacity="0.2" />
-              <line x1="19" y1="14" x2="29" y2="14" stroke="currentColor" strokeWidth="1" opacity="0.2" />
-            </svg>
-            <p className="text-[13px] text-t2">No services registered</p>
-            <p className="mt-1 max-w-xs text-center text-[11px] text-t3">
-              Register services and their API specs to see the dependency graph.
-              Dependencies are discovered automatically from OTEL traces.
-            </p>
+          <div className="h-[520px]">
+            {graph.isLoading ? (
+              <GraphSkeleton />
+            ) : !graph.data || graph.data.nodes.length === 0 ? (
+              <div className="flex h-full flex-col items-center justify-center px-6">
+                <svg width="48" height="48" viewBox="0 0 48 48" fill="none" className="mb-4 text-t3">
+                  <circle cx="14" cy="14" r="5" stroke="currentColor" strokeWidth="1.5" opacity="0.4" />
+                  <circle cx="34" cy="14" r="5" stroke="currentColor" strokeWidth="1.5" opacity="0.4" />
+                  <circle cx="24" cy="36" r="5" stroke="currentColor" strokeWidth="1.5" opacity="0.4" />
+                  <line x1="18" y1="17" x2="21" y2="32" stroke="currentColor" strokeWidth="1" opacity="0.2" />
+                  <line x1="30" y1="17" x2="27" y2="32" stroke="currentColor" strokeWidth="1" opacity="0.2" />
+                  <line x1="19" y1="14" x2="29" y2="14" stroke="currentColor" strokeWidth="1" opacity="0.2" />
+                </svg>
+                <p className="text-[13px] text-t2">No dependencies discovered</p>
+                <p className="mt-1 max-w-xs text-center text-[11px] text-t3">
+                  Register services and their API specs to see the dependency graph.
+                  Dependencies are discovered automatically from OTEL traces.
+                </p>
+              </div>
+            ) : (
+              <DependencyGraph
+                graphData={graph.data}
+                onNodeClick={(nodeId) => navigate(`/assets/${nodeId}`)}
+              />
+            )}
           </div>
         </div>
 
