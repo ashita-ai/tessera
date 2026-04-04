@@ -269,12 +269,13 @@ async def trigger_repo_sync(
     auth: Auth,
     _: None = RequireWrite,
     session: AsyncSession = Depends(get_session),
-) -> dict[str, str]:
+) -> dict[str, object]:
     """Trigger an immediate sync for a repository.
 
-    Requires write scope. Returns 202 Accepted — the sync itself runs
-    asynchronously (background worker not yet implemented).
+    Requires write scope. Runs sync synchronously and returns the result.
     """
+    from tessera.services.repo_sync import sync_repo
+
     repo = await _get_active_repo(session, repo_id)
 
     await audit.log_event(
@@ -286,4 +287,41 @@ async def trigger_repo_sync(
         payload={"name": repo.name},
     )
 
-    return {"status": "accepted", "message": f"Sync triggered for repository '{repo.name}'"}
+    sync_result = await sync_repo(session, repo)
+
+    if sync_result.success:
+        await audit.log_event(
+            session=session,
+            entity_type="repo",
+            entity_id=repo_id,
+            action=AuditAction.REPO_SYNCED,
+            actor_id=auth.team_id,
+            payload={
+                "commit_sha": sync_result.commit_sha,
+                "specs_found": sync_result.specs_found,
+                "contracts_published": sync_result.contracts_published,
+                "proposals_created": sync_result.proposals_created,
+                "services_created": sync_result.services_created,
+            },
+        )
+    else:
+        await audit.log_event(
+            session=session,
+            entity_type="repo",
+            entity_id=repo_id,
+            action=AuditAction.REPO_SYNC_FAILED,
+            actor_id=auth.team_id,
+            payload={"errors": sync_result.errors},
+        )
+
+    return {
+        "status": "completed" if sync_result.success else "failed",
+        "repo_id": str(repo_id),
+        "commit_sha": sync_result.commit_sha,
+        "specs_found": sync_result.specs_found,
+        "contracts_published": sync_result.contracts_published,
+        "proposals_created": sync_result.proposals_created,
+        "services_created": sync_result.services_created,
+        "errors": sync_result.errors,
+        "warnings": sync_result.warnings,
+    }

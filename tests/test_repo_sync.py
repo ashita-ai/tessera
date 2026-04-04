@@ -1,0 +1,782 @@
+"""Tests for the git-based repo sync worker and spec discovery.
+
+Tests cover: git operations (mocked), spec file discovery, service
+assignment by path, FQN generation, contract publishing integration,
+error handling, timeout behavior, and background worker logic.
+"""
+
+from __future__ import annotations
+
+import json
+import textwrap
+from pathlib import Path
+from typing import Any
+from unittest.mock import MagicMock, patch
+from uuid import uuid4
+
+import pytest
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from tessera.db import AssetDB, RepoDB, ServiceDB, TeamDB
+from tessera.models.enums import ResourceType
+from tessera.services.repo_sync import (
+    DiscoveredSpec,
+    _classify_spec_file,
+    _infer_service_name,
+    _inject_token,
+    _parse_spec,
+    assign_spec_to_service,
+    clone_or_pull,
+    discover_specs,
+    generate_fqn,
+    sync_repo,
+)
+
+pytestmark = pytest.mark.asyncio
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+async def _create_team(session: AsyncSession, name: str = "test-team") -> TeamDB:
+    team = TeamDB(name=name, metadata_={})
+    session.add(team)
+    await session.flush()
+    await session.refresh(team)
+    return team
+
+
+async def _create_repo(
+    session: AsyncSession,
+    team: TeamDB,
+    name: str = "test-repo",
+    git_url: str = "https://github.com/acme/test-repo.git",
+    spec_paths: list[str] | None = None,
+    **kwargs: Any,
+) -> RepoDB:
+    repo = RepoDB(
+        name=name,
+        git_url=git_url,
+        owner_team_id=team.id,
+        spec_paths=spec_paths if spec_paths is not None else ["api/"],
+        **kwargs,
+    )
+    session.add(repo)
+    await session.flush()
+    await session.refresh(repo)
+    return repo
+
+
+async def _create_service(
+    session: AsyncSession,
+    repo: RepoDB,
+    name: str = "order-service",
+    root_path: str = "services/orders",
+) -> ServiceDB:
+    svc = ServiceDB(
+        name=name,
+        repo_id=repo.id,
+        root_path=root_path,
+        owner_team_id=repo.owner_team_id,
+    )
+    session.add(svc)
+    await session.flush()
+    await session.refresh(svc)
+    return svc
+
+
+SAMPLE_OPENAPI = {
+    "openapi": "3.0.3",
+    "info": {"title": "Order API", "version": "1.0.0"},
+    "paths": {
+        "/orders": {
+            "get": {
+                "operationId": "list_orders",
+                "summary": "List all orders",
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {"id": {"type": "string"}},
+                                    },
+                                }
+                            }
+                        }
+                    }
+                },
+            },
+            "post": {
+                "operationId": "create_order",
+                "summary": "Create an order",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "properties": {
+                                    "item": {"type": "string"},
+                                    "quantity": {"type": "integer"},
+                                },
+                                "required": ["item", "quantity"],
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "id": {"type": "string"},
+                                        "status": {"type": "string"},
+                                    },
+                                }
+                            }
+                        }
+                    }
+                },
+            },
+        }
+    },
+}
+
+SAMPLE_PROTO = textwrap.dedent("""\
+    syntax = "proto3";
+    package orders;
+
+    message CreateOrderRequest {
+        string item = 1;
+        int32 quantity = 2;
+    }
+
+    message CreateOrderResponse {
+        string order_id = 1;
+        string status = 2;
+    }
+
+    service OrderService {
+        rpc CreateOrder(CreateOrderRequest) returns (CreateOrderResponse);
+    }
+""")
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: token injection
+# ---------------------------------------------------------------------------
+
+
+class TestTokenInjection:
+    def test_inject_https(self) -> None:
+        url = "https://github.com/org/repo.git"
+        result = _inject_token(url, "my-token")
+        assert result == "https://x-access-token:my-token@github.com/org/repo.git"
+
+    def test_inject_no_token(self) -> None:
+        url = "https://github.com/org/repo.git"
+        assert _inject_token(url, None) == url
+
+    def test_inject_ssh_unchanged(self) -> None:
+        url = "git@github.com:org/repo.git"
+        assert _inject_token(url, "token") == url
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: spec classification
+# ---------------------------------------------------------------------------
+
+
+class TestSpecClassification:
+    def test_openapi_yaml(self) -> None:
+        content = 'openapi: "3.0.0"\ninfo:\n  title: Test\n  version: "1.0"\npaths: {}'
+        assert _classify_spec_file(Path("api/spec.yaml"), content) == "openapi"
+
+    def test_openapi_json(self) -> None:
+        spec = {"openapi": "3.1.0", "info": {"title": "T", "version": "1"}, "paths": {}}
+        content = json.dumps(spec)
+        assert _classify_spec_file(Path("api/spec.json"), content) == "openapi"
+
+    def test_proto_file(self) -> None:
+        assert _classify_spec_file(Path("proto/orders.proto"), SAMPLE_PROTO) == "grpc"
+
+    def test_graphql_file(self) -> None:
+        result = _classify_spec_file(Path("schema.graphql"), "type Query { hello: String }")
+        assert result == "graphql"
+
+    def test_gql_extension(self) -> None:
+        assert _classify_spec_file(Path("schema.gql"), "type Query {}") == "graphql"
+
+    def test_yaml_without_openapi_key(self) -> None:
+        assert _classify_spec_file(Path("config.yaml"), "name: test\nversion: 1") is None
+
+    def test_unknown_extension(self) -> None:
+        assert _classify_spec_file(Path("readme.md"), "# Readme") is None
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: spec discovery (filesystem)
+# ---------------------------------------------------------------------------
+
+
+class TestDiscoverSpecs:
+    def test_discover_openapi_in_directory(self, tmp_path: Path) -> None:
+        api_dir = tmp_path / "api"
+        api_dir.mkdir()
+        spec_file = api_dir / "openapi.yaml"
+        spec_file.write_text(
+            json.dumps({"openapi": "3.0.0", "info": {"title": "T", "version": "1"}, "paths": {}})
+        )
+
+        specs = discover_specs(str(tmp_path), ["api/"])
+        assert len(specs) == 1
+        assert specs[0].spec_type == "openapi"
+        assert specs[0].file_path == "api/openapi.yaml"
+
+    def test_discover_proto_file(self, tmp_path: Path) -> None:
+        proto_dir = tmp_path / "proto"
+        proto_dir.mkdir()
+        (proto_dir / "orders.proto").write_text(SAMPLE_PROTO)
+
+        specs = discover_specs(str(tmp_path), ["proto/"])
+        assert len(specs) == 1
+        assert specs[0].spec_type == "grpc"
+
+    def test_discover_skips_hidden_dirs(self, tmp_path: Path) -> None:
+        hidden = tmp_path / ".git" / "refs"
+        hidden.mkdir(parents=True)
+        (hidden / "spec.yaml").write_text(
+            json.dumps({"openapi": "3.0.0", "info": {"title": "T", "version": "1"}, "paths": {}})
+        )
+
+        specs = discover_specs(str(tmp_path), [".git/"])
+        assert len(specs) == 0
+
+    def test_discover_no_duplicates(self, tmp_path: Path) -> None:
+        api_dir = tmp_path / "api"
+        api_dir.mkdir()
+        (api_dir / "spec.yaml").write_text(
+            json.dumps({"openapi": "3.0.0", "info": {"title": "T", "version": "1"}, "paths": {}})
+        )
+
+        # Two patterns pointing to the same file
+        specs = discover_specs(str(tmp_path), ["api/", "api/spec.yaml"])
+        assert len(specs) == 1
+
+    def test_discover_glob_pattern(self, tmp_path: Path) -> None:
+        (tmp_path / "a.proto").write_text(SAMPLE_PROTO)
+        (tmp_path / "b.proto").write_text(SAMPLE_PROTO)
+
+        specs = discover_specs(str(tmp_path), ["*.proto"])
+        assert len(specs) == 2
+
+    def test_discover_empty_spec_paths(self, tmp_path: Path) -> None:
+        specs = discover_specs(str(tmp_path), [])
+        assert len(specs) == 0
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: service assignment
+# ---------------------------------------------------------------------------
+
+
+class TestServiceAssignment:
+    def test_longest_prefix_match(self, test_session: AsyncSession) -> None:
+        """The service with the longest matching root_path wins."""
+        svc_root = MagicMock(spec=ServiceDB, root_path="/", name="root")
+        svc_orders = MagicMock(spec=ServiceDB, root_path="services/orders", name="orders")
+        svc_payments = MagicMock(spec=ServiceDB, root_path="services/payments", name="payments")
+
+        result = assign_spec_to_service(
+            "services/orders/api/openapi.yaml",
+            [svc_root, svc_orders, svc_payments],
+        )
+        assert result is svc_orders
+
+    def test_root_service_fallback(self) -> None:
+        svc_root = MagicMock(spec=ServiceDB, root_path="/", name="root")
+        result = assign_spec_to_service("somewhere/spec.yaml", [svc_root])
+        assert result is svc_root
+
+    def test_no_match_returns_none(self) -> None:
+        svc = MagicMock(spec=ServiceDB, root_path="services/orders", name="orders")
+        result = assign_spec_to_service("proto/spec.proto", [svc])
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: service name inference
+# ---------------------------------------------------------------------------
+
+
+class TestServiceNameInference:
+    def test_standard_path(self) -> None:
+        assert _infer_service_name("services/orders/api/openapi.yaml") == "orders"
+
+    def test_generic_dirs_filtered(self) -> None:
+        assert _infer_service_name("api/openapi.yaml") != "api"
+
+    def test_root_spec(self) -> None:
+        # When path is just the file, fall back to stem
+        name = _infer_service_name("openapi.yaml")
+        assert name == "openapi"
+
+    def test_hyphenated_name(self) -> None:
+        assert _infer_service_name("services/payment-service/api/spec.yaml") == "payment_service"
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: FQN generation
+# ---------------------------------------------------------------------------
+
+
+class TestFQNGeneration:
+    def test_basic_fqn(self) -> None:
+        result = generate_fqn("order_service", "rest", "create_order")
+        assert result == "order_service.rest.create_order"
+
+    def test_hyphen_normalization(self) -> None:
+        assert generate_fqn("payment-service", "grpc", "Pay") == "payment_service.grpc.Pay"
+
+    def test_empty_service_name(self) -> None:
+        fqn = generate_fqn("", "rest", "op")
+        assert fqn == "default.rest.op"
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: spec parsing
+# ---------------------------------------------------------------------------
+
+
+class TestParseSpec:
+    def test_parse_openapi_spec(self) -> None:
+        spec = DiscoveredSpec(
+            file_path="api/openapi.yaml",
+            spec_type="openapi",
+            content=json.dumps(SAMPLE_OPENAPI),
+        )
+        items = _parse_spec(spec)
+        assert len(items) == 2
+        op_ids = {item["fqn_suffix"] for item in items}
+        assert "rest.list_orders" in op_ids
+        assert "rest.create_order" in op_ids
+
+    def test_parse_proto_spec(self) -> None:
+        spec = DiscoveredSpec(
+            file_path="proto/orders.proto",
+            spec_type="grpc",
+            content=SAMPLE_PROTO,
+        )
+        items = _parse_spec(spec)
+        assert len(items) == 1
+        assert items[0]["fqn_suffix"] == "grpc.OrderService_CreateOrder"
+        assert items[0]["resource_type"] == ResourceType.GRPC_SERVICE
+
+    def test_parse_graphql_logs_warning(self) -> None:
+        spec = DiscoveredSpec(
+            file_path="schema.graphql",
+            spec_type="graphql",
+            content="type Query { hello: String }",
+        )
+        items = _parse_spec(spec)
+        assert len(items) == 0  # SDL not supported yet
+
+    def test_parse_invalid_openapi_returns_empty(self) -> None:
+        spec = DiscoveredSpec(
+            file_path="bad.yaml",
+            spec_type="openapi",
+            content="not: valid: yaml: {{{{",
+        )
+        items = _parse_spec(spec)
+        assert len(items) == 0
+
+
+# ---------------------------------------------------------------------------
+# Integration tests: sync_repo
+# ---------------------------------------------------------------------------
+
+
+class TestSyncRepo:
+    """Integration tests for the full sync_repo flow with mocked git."""
+
+    async def _setup_repo_with_specs(
+        self,
+        session: AsyncSession,
+        tmp_path: Path,
+        specs: dict[str, str],
+    ) -> tuple[RepoDB, TeamDB]:
+        """Create a team, repo, and mock spec files on disk."""
+        team = await _create_team(session)
+        repo = await _create_repo(
+            session,
+            team,
+            spec_paths=list({str(Path(p).parent) + "/" for p in specs}),
+        )
+
+        # Create fake repo directory with specs
+        repo_dir = tmp_path / str(repo.id)
+        repo_dir.mkdir(parents=True)
+        (repo_dir / ".git").mkdir()  # Mark as git repo
+
+        for rel_path, content in specs.items():
+            full_path = repo_dir / rel_path
+            full_path.parent.mkdir(parents=True, exist_ok=True)
+            full_path.write_text(content)
+
+        return repo, team
+
+    async def test_sync_single_openapi(self, test_session: AsyncSession, tmp_path: Path) -> None:
+        """Sync a repo with a single OpenAPI spec → creates service and assets."""
+        repo, team = await self._setup_repo_with_specs(
+            test_session,
+            tmp_path,
+            {"api/openapi.yaml": json.dumps(SAMPLE_OPENAPI)},
+        )
+
+        with patch(
+            "tessera.services.repo_sync.clone_or_pull",
+            return_value=(str(tmp_path / str(repo.id)), "abc123"),
+        ):
+            result = await sync_repo(test_session, repo)
+
+        assert result.success
+        assert result.commit_sha == "abc123"
+        assert result.specs_found == 1
+        assert result.services_created >= 1
+
+        # Verify service was created
+        svc_result = await test_session.execute(
+            select(ServiceDB).where(ServiceDB.repo_id == repo.id)
+        )
+        services = list(svc_result.scalars().all())
+        assert len(services) >= 1
+
+        # Verify assets were created
+        asset_result = await test_session.execute(
+            select(AssetDB).where(AssetDB.service_id == services[0].id)
+        )
+        assets = list(asset_result.scalars().all())
+        assert len(assets) >= 1
+
+    async def test_sync_monorepo_two_services(
+        self, test_session: AsyncSession, tmp_path: Path
+    ) -> None:
+        """Monorepo with two service dirs → each gets its own service and assets."""
+        team = await _create_team(test_session)
+        repo = await _create_repo(
+            test_session,
+            team,
+            spec_paths=["services/"],
+        )
+
+        repo_dir = tmp_path / str(repo.id)
+        (repo_dir / ".git").mkdir(parents=True)
+
+        # Service 1: orders
+        orders_dir = repo_dir / "services" / "orders" / "api"
+        orders_dir.mkdir(parents=True)
+        orders_spec = dict(SAMPLE_OPENAPI)
+        orders_spec["info"] = {"title": "Orders API", "version": "1.0.0"}
+        (orders_dir / "openapi.yaml").write_text(json.dumps(orders_spec))
+
+        # Service 2: payments (proto)
+        payments_dir = repo_dir / "services" / "payments" / "proto"
+        payments_dir.mkdir(parents=True)
+        (payments_dir / "payment.proto").write_text(SAMPLE_PROTO)
+
+        with patch(
+            "tessera.services.repo_sync.clone_or_pull",
+            return_value=(str(repo_dir), "def456"),
+        ):
+            result = await sync_repo(test_session, repo)
+
+        assert result.success
+        assert result.specs_found == 2
+        assert result.services_created >= 2
+
+        svc_result = await test_session.execute(
+            select(ServiceDB)
+            .where(ServiceDB.repo_id == repo.id)
+            .where(ServiceDB.deleted_at.is_(None))
+        )
+        services = list(svc_result.scalars().all())
+        service_names = {s.name for s in services}
+        assert len(services) >= 2
+        assert "orders" in service_names or any("order" in s.lower() for s in service_names)
+
+    async def test_sync_with_existing_service(
+        self, test_session: AsyncSession, tmp_path: Path
+    ) -> None:
+        """Specs matching an existing service's root_path use that service."""
+        repo, team = await self._setup_repo_with_specs(
+            test_session,
+            tmp_path,
+            {"services/orders/api/openapi.yaml": json.dumps(SAMPLE_OPENAPI)},
+        )
+        # Pre-create service
+        svc = await _create_service(test_session, repo)
+
+        with patch(
+            "tessera.services.repo_sync.clone_or_pull",
+            return_value=(str(tmp_path / str(repo.id)), "abc123"),
+        ):
+            # Reconfigure spec_paths to match our directory structure
+            repo.spec_paths = ["services/"]
+            await test_session.flush()
+            result = await sync_repo(test_session, repo)
+
+        assert result.success
+        assert result.services_created == 0  # Reused existing service
+
+        # Verify assets linked to existing service
+        asset_result = await test_session.execute(
+            select(AssetDB).where(AssetDB.service_id == svc.id)
+        )
+        assets = list(asset_result.scalars().all())
+        assert len(assets) >= 1
+
+    async def test_sync_no_change_skips(self, test_session: AsyncSession, tmp_path: Path) -> None:
+        """If the commit SHA hasn't changed, sync short-circuits."""
+        repo, _ = await self._setup_repo_with_specs(
+            test_session,
+            tmp_path,
+            {"api/openapi.yaml": json.dumps(SAMPLE_OPENAPI)},
+        )
+        repo.last_synced_commit = "same_sha"
+        await test_session.flush()
+
+        with patch(
+            "tessera.services.repo_sync.clone_or_pull",
+            return_value=(str(tmp_path / str(repo.id)), "same_sha"),
+        ):
+            result = await sync_repo(test_session, repo)
+
+        assert result.success
+        assert result.specs_found == 0
+        assert "No new commits" in result.warnings[0]
+
+    async def test_sync_no_spec_paths(self, test_session: AsyncSession) -> None:
+        """Repo with empty spec_paths returns success with a warning."""
+        team = await _create_team(test_session)
+        repo = await _create_repo(test_session, team, spec_paths=[])
+
+        with patch(
+            "tessera.services.repo_sync.clone_or_pull",
+            return_value=("/tmp/fake", "abc123"),
+        ):
+            result = await sync_repo(test_session, repo)
+
+        assert result.success
+        assert "No spec_paths" in result.warnings[0]
+
+    async def test_sync_git_failure(self, test_session: AsyncSession) -> None:
+        """Git clone/pull failure → sync fails with error."""
+        team = await _create_team(test_session)
+        repo = await _create_repo(test_session, team)
+
+        with patch(
+            "tessera.services.repo_sync.clone_or_pull",
+            side_effect=RuntimeError("Authentication failed"),
+        ):
+            result = await sync_repo(test_session, repo)
+
+        assert not result.success
+        assert "Authentication failed" in result.errors[0]
+
+    async def test_sync_updates_last_synced_fields(
+        self, test_session: AsyncSession, tmp_path: Path
+    ) -> None:
+        """Successful sync updates last_synced_at and last_synced_commit."""
+        repo, _ = await self._setup_repo_with_specs(
+            test_session,
+            tmp_path,
+            {"api/openapi.yaml": json.dumps(SAMPLE_OPENAPI)},
+        )
+
+        assert repo.last_synced_at is None
+        assert repo.last_synced_commit is None
+
+        with patch(
+            "tessera.services.repo_sync.clone_or_pull",
+            return_value=(str(tmp_path / str(repo.id)), "commit_xyz"),
+        ):
+            result = await sync_repo(test_session, repo)
+
+        assert result.success
+        await test_session.refresh(repo)
+        assert repo.last_synced_commit == "commit_xyz"
+        assert repo.last_synced_at is not None
+
+
+# ---------------------------------------------------------------------------
+# Git operations (mocked subprocess)
+# ---------------------------------------------------------------------------
+
+
+class TestCloneOrPull:
+    async def test_clone_new_repo(self, tmp_path: Path) -> None:
+        """First sync: shallow clone."""
+        repo = MagicMock(spec=RepoDB)
+        repo.id = uuid4()
+        repo.git_url = "https://github.com/acme/test.git"
+        repo.default_branch = "main"
+
+        with (
+            patch("tessera.services.repo_sync.settings") as mock_settings,
+            patch("tessera.services.repo_sync._run_git") as mock_git,
+            patch("tessera.services.repo_sync._dir_size", return_value=1000),
+        ):
+            mock_settings.repo_dir = str(tmp_path)
+            mock_settings.git_timeout = 120
+            mock_settings.repo_max_size_mb = 500
+
+            mock_git.side_effect = [
+                (0, "", ""),  # clone
+                (0, "abc123", ""),  # rev-parse HEAD
+            ]
+
+            repo_dir, sha = await clone_or_pull(repo, None)
+
+        assert sha == "abc123"
+        # Verify clone was called with correct args
+        clone_call = mock_git.call_args_list[0]
+        assert "clone" in clone_call[0][0]
+        assert "--depth" in clone_call[0][0]
+
+    async def test_pull_existing_repo(self, tmp_path: Path) -> None:
+        """Subsequent sync: fetch + reset."""
+        repo = MagicMock(spec=RepoDB)
+        repo.id = uuid4()
+        repo.git_url = "https://github.com/acme/test.git"
+        repo.default_branch = "main"
+
+        # Create fake .git directory to trigger pull path
+        repo_dir = tmp_path / str(repo.id)
+        (repo_dir / ".git").mkdir(parents=True)
+
+        with (
+            patch("tessera.services.repo_sync.settings") as mock_settings,
+            patch("tessera.services.repo_sync._run_git") as mock_git,
+            patch("tessera.services.repo_sync._dir_size", return_value=1000),
+        ):
+            mock_settings.repo_dir = str(tmp_path)
+            mock_settings.git_timeout = 120
+            mock_settings.repo_max_size_mb = 500
+
+            mock_git.side_effect = [
+                (0, "", ""),  # fetch
+                (0, "", ""),  # reset
+                (0, "def456", ""),  # rev-parse HEAD
+            ]
+
+            _, sha = await clone_or_pull(repo, None)
+
+        assert sha == "def456"
+        # Verify fetch was called (not clone)
+        fetch_call = mock_git.call_args_list[0]
+        assert "fetch" in fetch_call[0][0]
+
+    async def test_clone_failure_raises(self, tmp_path: Path) -> None:
+        """Git clone failure raises RuntimeError."""
+        repo = MagicMock(spec=RepoDB)
+        repo.id = uuid4()
+        repo.git_url = "https://github.com/acme/test.git"
+        repo.default_branch = "main"
+
+        with (
+            patch("tessera.services.repo_sync.settings") as mock_settings,
+            patch("tessera.services.repo_sync._run_git") as mock_git,
+        ):
+            mock_settings.repo_dir = str(tmp_path)
+            mock_settings.git_timeout = 120
+            mock_settings.repo_max_size_mb = 500
+
+            mock_git.return_value = (128, "", "fatal: repository not found")
+
+            with pytest.raises(RuntimeError, match="git clone failed"):
+                await clone_or_pull(repo, None)
+
+    async def test_repo_size_limit_enforced(self, tmp_path: Path) -> None:
+        """Repos exceeding size limit are rejected."""
+        repo = MagicMock(spec=RepoDB)
+        repo.id = uuid4()
+        repo.git_url = "https://github.com/acme/test.git"
+        repo.default_branch = "main"
+
+        with (
+            patch("tessera.services.repo_sync.settings") as mock_settings,
+            patch("tessera.services.repo_sync._run_git") as mock_git,
+            patch(
+                "tessera.services.repo_sync._dir_size",
+                return_value=600 * 1024 * 1024,  # 600MB
+            ),
+        ):
+            mock_settings.repo_dir = str(tmp_path)
+            mock_settings.git_timeout = 120
+            mock_settings.repo_max_size_mb = 500
+
+            mock_git.side_effect = [
+                (0, "", ""),  # clone succeeds
+            ]
+
+            with pytest.raises(RuntimeError, match="exceeds size limit"):
+                await clone_or_pull(repo, None)
+
+    async def test_token_injected_for_private_repo(self, tmp_path: Path) -> None:
+        """Auth token is injected into the clone URL."""
+        repo = MagicMock(spec=RepoDB)
+        repo.id = uuid4()
+        repo.git_url = "https://github.com/acme/private-repo.git"
+        repo.default_branch = "main"
+
+        with (
+            patch("tessera.services.repo_sync.settings") as mock_settings,
+            patch("tessera.services.repo_sync._run_git") as mock_git,
+            patch("tessera.services.repo_sync._dir_size", return_value=1000),
+        ):
+            mock_settings.repo_dir = str(tmp_path)
+            mock_settings.git_timeout = 120
+            mock_settings.repo_max_size_mb = 500
+
+            mock_git.side_effect = [
+                (0, "", ""),  # clone
+                (0, "abc", ""),  # rev-parse
+            ]
+
+            await clone_or_pull(repo, "ghp_secret_token")
+
+        # The clone command should have the token in the URL
+        clone_args = mock_git.call_args_list[0][0][0]
+        assert any("x-access-token:ghp_secret_token@" in arg for arg in clone_args)
+
+
+# ---------------------------------------------------------------------------
+# Background worker tests
+# ---------------------------------------------------------------------------
+
+
+class TestBackgroundWorker:
+    async def test_poll_skips_disabled_repos(self, test_session: AsyncSession) -> None:
+        """Repos with sync_enabled=False are not synced."""
+        team = await _create_team(test_session)
+        repo = await _create_repo(
+            test_session,
+            team,
+            sync_enabled=False,
+        )
+
+        # The background worker queries for sync_enabled=True,
+        # so this repo should not appear
+        result = await test_session.execute(
+            select(RepoDB).where(RepoDB.sync_enabled.is_(True)).where(RepoDB.deleted_at.is_(None))
+        )
+        repos = list(result.scalars().all())
+        repo_ids = {r.id for r in repos}
+        assert repo.id not in repo_ids

@@ -362,14 +362,17 @@ class TestTriggerSync:
     """Tests for POST /api/v1/repos/{id}/sync."""
 
     async def test_trigger_sync(self, client: AsyncClient):
-        """Trigger sync returns 202."""
+        """Trigger sync returns 202 with sync result."""
         team_id = await _create_team(client)
         repo = await _create_repo(client, team_id)
 
         resp = await client.post(f"/api/v1/repos/{repo['id']}/sync")
         assert resp.status_code == 202
         data = resp.json()
-        assert data["status"] == "accepted"
+        # Sync will fail because there's no real git repo, but
+        # the endpoint still returns 202 with a result payload
+        assert data["status"] in ("completed", "failed")
+        assert "repo_id" in data
 
     async def test_trigger_sync_not_found(self, client: AsyncClient):
         """Triggering sync on nonexistent repo should 404."""
