@@ -41,6 +41,7 @@ from tessera.api import (
     schemas,
     search,
     services,
+    slack_configs,
     sync,
     teams,
     users,
@@ -231,6 +232,7 @@ api_v1.include_router(schemas.router, prefix="/schemas", tags=["schemas"])
 api_v1.include_router(sync.router, prefix="/sync", tags=["sync"])
 api_v1.include_router(api_keys.router, prefix="/api-keys", tags=["api-keys"])
 api_v1.include_router(search.router)
+api_v1.include_router(slack_configs.router, prefix="/slack/configs", tags=["slack"])
 api_v1.include_router(webhooks.router)
 api_v1.include_router(audit.router)
 api_v1.include_router(preflight.router, prefix="/assets", tags=["preflight"])

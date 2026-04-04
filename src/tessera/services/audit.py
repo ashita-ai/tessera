@@ -103,6 +103,12 @@ class AuditAction(StrEnum):
     OTEL_SYNC_COMPLETED = "otel_sync.completed"
     OTEL_SYNC_FAILED = "otel_sync.failed"
 
+    # Slack config actions
+    SLACK_CONFIG_CREATED = "slack_config.created"
+    SLACK_CONFIG_UPDATED = "slack_config.updated"
+    SLACK_CONFIG_DELETED = "slack_config.deleted"
+    SLACK_CONFIG_TESTED = "slack_config.tested"
+
 
 async def log_event(
     session: AsyncSession,

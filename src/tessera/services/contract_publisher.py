@@ -39,6 +39,7 @@ from tessera.services.cache import cache_contract, invalidate_asset
 from tessera.services.schema_diff import check_compatibility, diff_schemas
 from tessera.services.schema_validator import validate_json_schema
 from tessera.services.slack import notify_proposal_created
+from tessera.services.slack_dispatcher import dispatch_slack_notifications
 from tessera.services.versioning import (
     INITIAL_VERSION,
     compute_version_suggestion,
@@ -929,6 +930,22 @@ class ContractPublishingWorkflow:
             await invalidate_asset(str(self.asset.id))
             await cache_contract(str(contract.id), Contract.model_validate(contract).model_dump())
 
+            # Notify affected teams via Slack about force publish
+            affected_team_ids = [ap.team_id for ap in await self._get_impacted_consumers()]
+            await dispatch_slack_notifications(
+                session=self.session,
+                event_type="force_publish",
+                team_ids=affected_team_ids,
+                payload={
+                    "asset_fqn": self.asset.fqn,
+                    "version": contract.version,
+                    "publisher_team": self.publisher_team.name,
+                    "publisher_user": None,
+                    "reason": self.audit_warning,
+                    "contract_id": str(contract.id),
+                },
+            )
+
             return self._build_result(
                 PublishAction.FORCE_PUBLISHED,
                 contract=contract,
@@ -1065,6 +1082,21 @@ class ContractPublishingWorkflow:
             producer_team=self.publisher_team.name,
             affected_consumers=[c.team_name for c in impacted_consumers],
             breaking_changes=breaking_changes_list,
+        )
+
+        # Dispatch per-team Slack notifications for proposal_created
+        await dispatch_slack_notifications(
+            session=self.session,
+            event_type="proposal_created",
+            team_ids=[c.team_id for c in impacted_consumers],
+            payload={
+                "asset_fqn": self.asset.fqn,
+                "version": self.version,
+                "producer_team": self.publisher_team.name,
+                "affected_consumers": [c.team_name for c in impacted_consumers],
+                "breaking_changes": breaking_changes_list,
+                "proposal_id": str(proposal.id),
+            },
         )
 
         return self._build_result(

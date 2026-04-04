@@ -16,6 +16,7 @@ from tessera.db.models import (
     RegistrationDB,
     RepoDB,
     ServiceDB,
+    SlackConfigDB,
     TeamDB,
     UserDB,
     WebhookDeliveryDB,
@@ -42,5 +43,6 @@ __all__ = [
     "AuditEventDB",
     "AuditRunDB",
     "APIKeyDB",
+    "SlackConfigDB",
     "WebhookDeliveryDB",
 ]
