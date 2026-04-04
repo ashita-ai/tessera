@@ -63,6 +63,7 @@ from tessera.services import (
 from tessera.services.audit import AuditAction
 from tessera.services.schema_validator import SchemaValidationError, validate_schema_or_raise
 from tessera.services.slack import notify_proposal_acknowledged, notify_proposal_approved
+from tessera.services.slack_dispatcher import dispatch_slack_notifications
 from tessera.services.webhooks import (
     send_contract_published,
     send_proposal_acknowledged,
@@ -893,6 +894,23 @@ async def acknowledge_proposal(
             response="blocked",
             notes=ack.notes,
         )
+        # Dispatch per-team Slack notifications for proposal_resolved (rejected)
+        affected_team_ids = [
+            t["team_id"] for t in (proposal.affected_teams or []) if "team_id" in t
+        ]
+        await dispatch_slack_notifications(
+            session=session,
+            event_type="proposal_resolved",
+            team_ids=[UUID(tid) if isinstance(tid, str) else tid for tid in affected_team_ids],
+            payload={
+                "asset_fqn": asset.fqn,
+                "version": "pending",
+                "status": "rejected",
+                "proposal_id": str(proposal_id),
+                "blocker_team": consumer_team.name,
+                "blocker_reason": ack.notes,
+            },
+        )
         return db_ack
 
     # Send webhook for acknowledgment
@@ -941,6 +959,21 @@ async def acknowledge_proposal(
         await notify_proposal_approved(
             asset_fqn=asset.fqn,
             version="pending",  # Version is determined at publish time
+        )
+        # Dispatch per-team Slack notifications for proposal_resolved (approved)
+        affected_team_ids = [
+            t["team_id"] for t in (proposal.affected_teams or []) if "team_id" in t
+        ]
+        await dispatch_slack_notifications(
+            session=session,
+            event_type="proposal_resolved",
+            team_ids=[UUID(tid) if isinstance(tid, str) else tid for tid in affected_team_ids],
+            payload={
+                "asset_fqn": asset.fqn,
+                "version": "pending",
+                "status": "approved",
+                "proposal_id": str(proposal_id),
+            },
         )
 
     return db_ack

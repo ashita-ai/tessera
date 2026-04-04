@@ -656,6 +656,42 @@ class AuditRunDB(Base):
     contract: Mapped["ContractDB | None"] = relationship()
 
 
+class SlackConfigDB(Base):
+    """Per-team Slack notification configuration.
+
+    Each team can configure one Slack channel per (team, channel_id) pair
+    with either an incoming webhook URL or a bot token for delivery.
+    The ``notify_on`` column stores a JSON array of event type strings
+    that this config should receive.
+    """
+
+    __tablename__ = "slack_configs"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    team_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("teams.id"), nullable=False, index=True)
+    channel_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    channel_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    webhook_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    bot_token: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    notify_on: Mapped[list[str]] = mapped_column(
+        JSON,
+        nullable=False,
+        default=lambda: ["proposal_created", "proposal_resolved", "force_publish"],
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, onupdate=_utcnow
+    )
+
+    __table_args__ = (
+        UniqueConstraint("team_id", "channel_id", name="uq_slack_configs_team_channel"),
+    )
+
+    # Relationships
+    team: Mapped["TeamDB"] = relationship(lazy="selectin")
+
+
 class InferredDependencyDB(Base):
     """Inferred dependency discovered by mining audit signals.
 

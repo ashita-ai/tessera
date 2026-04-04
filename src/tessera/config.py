@@ -109,6 +109,18 @@ class Settings(BaseSettings):  # type: ignore[misc]
         default=None,
         description="Slack incoming webhook URL for notifications.",
     )
+    slack_enabled: bool = Field(
+        default=False,
+        description="Enable team-scoped Slack notifications globally.",
+    )
+    tessera_base_url: str = Field(
+        default="http://localhost:3000",
+        description="Base URL for deep links in Slack messages.",
+    )
+    slack_rate_limit_per_second: int = Field(
+        default=1,
+        description="Max Slack API calls per second (Slack's limit is 1/sec per channel).",
+    )
 
     # ── Authentication ───────────────────────────────────────────
 
