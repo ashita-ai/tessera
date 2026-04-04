@@ -81,6 +81,10 @@ class AuditAction(StrEnum):
     # Consumption actions
     PREFLIGHT_CHECKED = "preflight.checked"
 
+    # Discovery actions
+    DISCOVERY_CONFIRMED = "discovery.confirmed"
+    DISCOVERY_REJECTED = "discovery.rejected"
+
 
 async def log_event(
     session: AsyncSession,

@@ -137,6 +137,15 @@ class SchemaFormat(StrEnum):
     AVRO = "avro"  # Apache Avro schema
 
 
+class InferredDependencyStatus(StrEnum):
+    """Status of an inferred dependency."""
+
+    PENDING = "pending"  # Inferred but not yet confirmed by a human
+    CONFIRMED = "confirmed"  # Confirmed and promoted to a registration
+    REJECTED = "rejected"  # Rejected by team — suppresses future re-inference
+    EXPIRED = "expired"  # Stale inference — no recent audit signals
+
+
 class ResourceType(StrEnum):
     """Type of asset resource.
 

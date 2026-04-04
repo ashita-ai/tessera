@@ -36,6 +36,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     Enum,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -60,6 +61,7 @@ from tessera.models.enums import (
     ContractStatus,
     DependencyType,
     GuaranteeMode,
+    InferredDependencyStatus,
     ProposalStatus,
     RegistrationStatus,
     ResourceType,
@@ -652,3 +654,48 @@ class AuditRunDB(Base):
     # Relationships
     asset: Mapped["AssetDB"] = relationship()
     contract: Mapped["ContractDB | None"] = relationship()
+
+
+class InferredDependencyDB(Base):
+    """Inferred dependency discovered by mining audit signals.
+
+    Rows are never hard-deleted. Rejected inferences keep status=REJECTED so
+    future scans can skip the same (asset, team, source) tuple.
+    """
+
+    __tablename__ = "inferred_dependencies"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    asset_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("assets.id"), nullable=False, index=True
+    )
+    consumer_team_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("teams.id"), nullable=False, index=True
+    )
+    dependency_type: Mapped[DependencyType] = mapped_column(
+        Enum(DependencyType), default=DependencyType.CONSUMES
+    )
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    source: Mapped[str] = mapped_column(String(50), nullable=False)
+    evidence: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    status: Mapped[InferredDependencyStatus] = mapped_column(
+        Enum(InferredDependencyStatus),
+        default=InferredDependencyStatus.PENDING,
+        index=True,
+    )
+    first_observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    last_observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    confirmed_by: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
+    promoted_registration_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("registrations.id"), nullable=True
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "asset_id",
+            "consumer_team_id",
+            "source",
+            name="uq_inferred_dep_asset_team_source",
+        ),
+    )
