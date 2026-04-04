@@ -441,8 +441,53 @@ class TestGenerateFQN:
     def test_no_package(self) -> None:
         assert generate_fqn("", "Svc", "Do") == "grpc.Svc.Do"
 
-    def test_dotted_package(self) -> None:
-        assert generate_fqn("com.example.api", "Svc", "Call") == "grpc.com.example.api.Svc.Call"
+    def test_dotted_package_sanitized(self) -> None:
+        """Dots in proto package are replaced with underscores to prevent FQN injection."""
+        assert generate_fqn("com.example.api", "Svc", "Call") == "grpc.com_example_api.Svc.Call"
+
+    def test_dots_in_service_name_rejected(self) -> None:
+        """Service names with dots are rejected (FQN injection vector)."""
+        from tessera.services.fqn import FQNComponentError
+
+        with pytest.raises(FQNComponentError, match="unsafe characters"):
+            generate_fqn("users", "User.Service", "GetUser")
+
+    def test_dots_in_method_name_rejected(self) -> None:
+        """Method names with dots are rejected."""
+        from tessera.services.fqn import FQNComponentError
+
+        with pytest.raises(FQNComponentError, match="unsafe characters"):
+            generate_fqn("users", "UserService", "Get.User")
+
+    def test_slashes_in_service_name_rejected(self) -> None:
+        """Slashes in service names are rejected."""
+        from tessera.services.fqn import FQNComponentError
+
+        with pytest.raises(FQNComponentError, match="unsafe characters"):
+            generate_fqn("users", "User/Service", "GetUser")
+
+    def test_impersonation_via_dotted_package(self) -> None:
+        """A crafted package cannot produce an FQN that collides with another team's assets.
+
+        Without sanitization, package="evil.real_team" would produce
+        grpc.evil.real_team.Svc.Call — same prefix as a legitimate
+        grpc.real_team.Svc.Call from a different package depth.
+        With sanitization, the dots become underscores, producing a
+        distinct FQN: grpc.evil_real_team.Svc.Call.
+        """
+        legitimate = generate_fqn("real_team", "Svc", "Call")
+        crafted = generate_fqn("evil.real_team", "Svc", "Call")
+        # The two FQNs must be distinct — no collision possible
+        assert legitimate != crafted
+        assert legitimate == "grpc.real_team.Svc.Call"
+        assert crafted == "grpc.evil_real_team.Svc.Call"
+
+    def test_unsafe_chars_in_package_segment_rejected(self) -> None:
+        """Package segments with slashes or other unsafe chars are rejected."""
+        from tessera.services.fqn import FQNComponentError
+
+        with pytest.raises(FQNComponentError, match="unsafe characters"):
+            generate_fqn("evil/pkg", "Svc", "Call")
 
 
 # ===========================================================================

@@ -344,39 +344,55 @@ def parse_graphql_introspection(introspection: dict[str, Any]) -> GraphQLParseRe
     )
 
 
+def _normalize_for_fqn(value: str) -> str:
+    """Normalize a pre-validated value for FQN use.
+
+    Lowercases and replaces spaces/hyphens with underscores.
+    Collapses consecutive underscores and strips leading/trailing ones.
+
+    This must only be called on values that have already passed
+    :func:`~tessera.services.fqn.validate_fqn_component`.
+    """
+    normalized = value.lower().replace(" ", "_").replace("-", "_")
+    while "__" in normalized:
+        normalized = normalized.replace("__", "_")
+    normalized = normalized.strip("_")
+    return normalized or "unknown"
+
+
 def generate_fqn(schema_name: str, operation_name: str, operation_type: str) -> str:
     """Generate a fully qualified name for a GraphQL operation.
 
     Format: graphql.<schema_name>.<type>_<operation_name>
     Example: graphql.users_api.query_list_users
 
+    All inputs are validated to reject dots, slashes, and other
+    special characters that could cause FQN injection.
+
     Args:
-        schema_name: The schema/API name
-        operation_name: The operation name (e.g., listUsers)
-        operation_type: "query" or "mutation"
+        schema_name: The schema/API name (alphanumeric, underscores,
+            hyphens, spaces only).
+        operation_name: The operation name (e.g., listUsers).
+        operation_type: "query" or "mutation".
 
     Returns:
-        A valid FQN string
-    """
-    # Normalize schema name: lowercase, replace spaces/hyphens with underscores
-    normalized_name = schema_name.lower().replace(" ", "_").replace("-", "_")
-    # Remove any characters that aren't alphanumeric or underscore
-    normalized_name = "".join(c if c.isalnum() or c == "_" else "" for c in normalized_name)
-    # Remove consecutive underscores
-    while "__" in normalized_name:
-        normalized_name = normalized_name.replace("__", "_")
-    normalized_name = normalized_name.strip("_")
-    if not normalized_name:
-        normalized_name = "unknown"
+        A valid FQN string.
 
-    # Normalize operation name
-    normalized_op = operation_name.lower()
-    normalized_op = "".join(c if c.isalnum() or c == "_" else "_" for c in normalized_op)
-    while "__" in normalized_op:
-        normalized_op = normalized_op.replace("__", "_")
-    normalized_op = normalized_op.strip("_")
-    if not normalized_op:
-        normalized_op = "unknown"
+    Raises:
+        FQNComponentError: If any component contains unsafe characters
+            like dots or slashes.
+    """
+    from tessera.services.fqn import validate_fqn_component
+
+    # Spaces and hyphens are safe (normalized to underscores below),
+    # so validate after replacing them.
+    _schema_check = schema_name.replace(" ", "_").replace("-", "_")
+    validate_fqn_component(_schema_check, "GraphQL schema name")
+    validate_fqn_component(operation_name, "GraphQL operation name")
+    validate_fqn_component(operation_type, "GraphQL operation type")
+
+    normalized_name = _normalize_for_fqn(schema_name)
+    normalized_op = _normalize_for_fqn(operation_name)
 
     return f"graphql.{normalized_name}.{operation_type}_{normalized_op}"
 

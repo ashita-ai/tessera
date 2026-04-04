@@ -515,20 +515,33 @@ def _combine_schemas(
 def generate_fqn(package: str, service_name: str, method_name: str) -> str:
     """Generate a fully qualified name for a gRPC RPC method.
 
-    Format: grpc.<package>.<service>.<method>
+    Format: grpc.<sanitized_package>.<service>.<method>
     Example: grpc.users.UserService.GetUser
 
+    Package dots are replaced with underscores to prevent FQN injection
+    (e.g., ``com.example.api`` becomes ``com_example_api``).
+    Service and method names are validated to contain only safe characters.
+
     Args:
-        package: The protobuf package name.
-        service_name: The gRPC service name.
-        method_name: The RPC method name.
+        package: The protobuf package name (dots allowed, will be sanitized).
+        service_name: The gRPC service name (no dots/slashes).
+        method_name: The RPC method name (no dots/slashes).
 
     Returns:
         A valid FQN string.
+
+    Raises:
+        FQNComponentError: If any component contains unsafe characters.
     """
+    from tessera.services.fqn import sanitize_proto_package, validate_fqn_component
+
+    validate_fqn_component(service_name, "gRPC service name")
+    validate_fqn_component(method_name, "gRPC method name")
+
     parts = ["grpc"]
-    if package:
-        parts.append(package)
+    sanitized_package = sanitize_proto_package(package)
+    if sanitized_package:
+        parts.append(sanitized_package)
     parts.append(service_name)
     parts.append(method_name)
     return ".".join(parts)
