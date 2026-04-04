@@ -95,10 +95,12 @@ async def _ssh_key_env(ssh_key: str) -> AsyncIterator[dict[str, str]]:
     """
     fd, key_path = tempfile.mkstemp(prefix="tessera_ssh_", suffix=".pem")
     try:
-        os.write(fd, ssh_key.encode("utf-8"))
-        if not ssh_key.endswith("\n"):
-            os.write(fd, b"\n")
-        os.close(fd)
+        try:
+            os.write(fd, ssh_key.encode("utf-8"))
+            if not ssh_key.endswith("\n"):
+                os.write(fd, b"\n")
+        finally:
+            os.close(fd)
         os.chmod(key_path, stat.S_IRUSR | stat.S_IWUSR)  # 0600
         yield {
             "GIT_SSH_COMMAND": (
@@ -266,6 +268,8 @@ def _dir_size(path: Path) -> int:
     """Calculate total size of a directory in bytes."""
     total = 0
     for entry in path.rglob("*"):
+        if entry.is_symlink():
+            continue
         if entry.is_file():
             total += entry.stat().st_size
     return total
@@ -962,7 +966,6 @@ async def _poll_once(session_maker: Any) -> None:
                     sync_repo(session, repo),
                     timeout=settings.sync_timeout,
                 )
-                await session.commit()
 
                 duration = time.monotonic() - t0
                 if sync_result.success:
@@ -976,7 +979,7 @@ async def _poll_once(session_maker: Any) -> None:
                 else:
                     logger.warning("Sync failed for %s: %s", target.name, sync_result.errors)
 
-                # Persist sync event + audit log in one commit.
+                # Persist sync data, sync event, and audit log atomically.
                 await save_sync_event(
                     session,
                     sync_result,
