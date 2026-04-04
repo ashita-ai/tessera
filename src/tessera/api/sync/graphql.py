@@ -7,7 +7,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,6 +33,16 @@ router = APIRouter()
 # =============================================================================
 
 
+def _validate_graphql_schema_name(v: str) -> str:
+    """Reject schema names with dots, slashes, or other FQN-unsafe characters."""
+    from tessera.services.fqn import validate_fqn_component
+
+    # Spaces and hyphens are safe (normalized to underscores in FQN generation)
+    check = v.replace(" ", "_").replace("-", "_")
+    validate_fqn_component(check, "schema_name")
+    return v
+
+
 class GraphQLImportRequest(BaseModel):
     """Request body for GraphQL schema import."""
 
@@ -46,6 +56,8 @@ class GraphQLImportRequest(BaseModel):
         description="Name for the GraphQL schema (used in FQN generation)",
     )
     owner_team_id: UUID = Field(..., description="Team that will own the imported assets")
+
+    _check_schema_name = field_validator("schema_name")(_validate_graphql_schema_name)
     environment: str = Field(
         default="production", min_length=1, max_length=50, description="Environment for assets"
     )
@@ -323,6 +335,8 @@ class GraphQLImpactRequest(BaseModel):
         description="Environment to check against",
     )
 
+    _check_schema_name = field_validator("schema_name")(_validate_graphql_schema_name)
+
 
 class GraphQLImpactResult(BaseModel):
     """Impact analysis result for a single GraphQL operation."""
@@ -492,6 +506,8 @@ class GraphQLDiffRequest(BaseModel):
         default=True,
         description="Return blocking=true if any breaking changes are detected",
     )
+
+    _check_schema_name = field_validator("schema_name")(_validate_graphql_schema_name)
 
 
 class GraphQLDiffItem(BaseModel):

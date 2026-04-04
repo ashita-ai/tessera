@@ -314,15 +314,40 @@ class TestGenerateFqn:
         fqn = generate_fqn("Users API", "createUser", "mutation")
         assert fqn == "graphql.users_api.mutation_createuser"
 
-    def test_special_characters_in_name(self) -> None:
-        """Test that special characters in schema name are handled."""
-        fqn = generate_fqn("My Cool API v2.0", "getData", "query")
-        assert fqn == "graphql.my_cool_api_v20.query_getdata"
+    def test_hyphens_and_spaces_allowed(self) -> None:
+        """Test that hyphens and spaces are normalized to underscores."""
+        fqn = generate_fqn("My Cool API", "getData", "query")
+        assert fqn == "graphql.my_cool_api.query_getdata"
+        fqn2 = generate_fqn("my-api", "getData", "query")
+        assert fqn2 == "graphql.my_api.query_getdata"
+
+    def test_dots_in_schema_name_rejected(self) -> None:
+        """Test that dots in schema name are rejected (FQN injection)."""
+        from tessera.services.fqn import FQNComponentError
+
+        with pytest.raises(FQNComponentError, match="unsafe characters"):
+            generate_fqn("My API v2.0", "getData", "query")
+
+    def test_slashes_in_schema_name_rejected(self) -> None:
+        """Test that slashes in schema name are rejected."""
+        from tessera.services.fqn import FQNComponentError
+
+        with pytest.raises(FQNComponentError, match="unsafe characters"):
+            generate_fqn("team/api", "getData", "query")
+
+    def test_dots_in_operation_name_rejected(self) -> None:
+        """Test that dots in operation name are rejected."""
+        from tessera.services.fqn import FQNComponentError
+
+        with pytest.raises(FQNComponentError, match="unsafe characters"):
+            generate_fqn("MyAPI", "get.Data", "query")
 
     def test_empty_schema_name(self) -> None:
         """Test handling of empty schema name."""
-        fqn = generate_fqn("", "test", "query")
-        assert fqn == "graphql.unknown.query_test"
+        from tessera.services.fqn import FQNComponentError
+
+        with pytest.raises(FQNComponentError, match="must not be empty"):
+            generate_fqn("", "test", "query")
 
 
 class TestOperationsToAssets:
