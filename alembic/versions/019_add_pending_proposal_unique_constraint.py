@@ -9,8 +9,10 @@ Without this index, two concurrent breaking-change publishes can both see
 both create one. The partial unique index ensures at most one pending
 proposal per asset at the database level.
 
-PostgreSQL requires an explicit cast to the enum type in the WHERE clause.
-SQLite stores enums as plain text, so no cast is needed.
+Important: Alembic migration 001 created the ``proposalstatus`` enum with
+lowercase values (``'pending'``), so the WHERE clause here uses lowercase.
+The SQLAlchemy model's ``create_all()`` path uses uppercase member names
+(``'PENDING'``) — the model's ``__table_args__`` handles that separately.
 """
 
 from collections.abc import Sequence

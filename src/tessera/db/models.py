@@ -344,8 +344,8 @@ class ProposalDB(Base):
             "uq_one_pending_proposal_per_asset",
             "asset_id",
             unique=True,
-            postgresql_where=text("status = 'pending'::proposalstatus"),
-            sqlite_where=text("status = 'pending'"),
+            postgresql_where=text("status = 'PENDING'"),
+            sqlite_where=text("status = 'PENDING'"),
         ),
     )
 
