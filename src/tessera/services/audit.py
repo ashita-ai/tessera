@@ -96,6 +96,13 @@ class AuditAction(StrEnum):
     DISCOVERY_CONFIRMED = "discovery.confirmed"
     DISCOVERY_REJECTED = "discovery.rejected"
 
+    # OTEL actions
+    OTEL_CONFIG_CREATED = "otel_config.created"
+    OTEL_CONFIG_UPDATED = "otel_config.updated"
+    OTEL_CONFIG_DELETED = "otel_config.deleted"
+    OTEL_SYNC_COMPLETED = "otel_sync.completed"
+    OTEL_SYNC_FAILED = "otel_sync.failed"
+
     # Slack config actions
     SLACK_CONFIG_CREATED = "slack_config.created"
     SLACK_CONFIG_UPDATED = "slack_config.updated"
