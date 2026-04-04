@@ -98,7 +98,7 @@ Force-publish is available for emergencies (admin-only, audit-logged).
 - **Passive dependency discovery** — Mines preflight audit signals to infer which teams consume which assets, with confidence scoring and a confirm/reject workflow to promote inferences to registrations
 - **Git-based repo sync** — Register repositories and Tessera automatically clones them, discovers spec files (OpenAPI, gRPC, GraphQL), creates services, and publishes contracts. A background worker polls for changes on a configurable interval
 - **Audit log** — Append-only history of every publish, proposal, acknowledgment, force-approve, and consumption event
-- **Web UI** — Browse assets, view contract history, manage proposals and teams
+- **Web UI** — Create and manage teams, register repositories and services, review and acknowledge proposals, explore the service dependency graph, search assets, and browse the audit log. Data ingestion (dbt, OpenAPI, GraphQL, gRPC sync) is API-only, designed for CI/CD pipelines
 
 ## Configuration
 

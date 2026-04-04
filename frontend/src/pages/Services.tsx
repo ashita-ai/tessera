@@ -99,6 +99,19 @@ function RegisterModal({ onClose }: { onClose: () => void }) {
   const [otelName, setOtelName] = useState("");
   const [error, setError] = useState<string | null>(null);
 
+  const reposQuery = useQuery({
+    queryKey: ["repos"],
+    queryFn: () => api.listRepos({ limit: 200 }),
+  });
+
+  const teamsQuery = useQuery({
+    queryKey: ["teams"],
+    queryFn: () => api.listTeams({ limit: 200 }),
+  });
+
+  const repos = reposQuery.data?.results ?? [];
+  const teams = teamsQuery.data?.results ?? [];
+
   const mutation = useMutation({
     mutationFn: () =>
       api.createService({
@@ -118,8 +131,8 @@ function RegisterModal({ onClose }: { onClose: () => void }) {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    if (!name.trim() || !repoId.trim() || !teamId.trim()) {
-      setError("Service name, repository ID, and team ID are required.");
+    if (!name.trim() || !repoId || !teamId) {
+      setError("Service name, repository, and owner team are required.");
       return;
     }
     mutation.mutate();
@@ -135,8 +148,22 @@ function RegisterModal({ onClose }: { onClose: () => void }) {
 
           <form className="mt-4 space-y-3" onSubmit={handleSubmit}>
             <Field label="Service name" placeholder="e.g., order-service" value={name} onChange={setName} />
-            <Field label="Repository ID" placeholder="UUID of the parent repository" value={repoId} onChange={setRepoId} />
-            <Field label="Owner team ID" placeholder="UUID of the owning team" value={teamId} onChange={setTeamId} />
+            <SelectField
+              label="Repository"
+              placeholder={reposQuery.isLoading ? "Loading repositories..." : "Select a repository"}
+              value={repoId}
+              onChange={setRepoId}
+              options={repos.map((r) => ({ value: r.id, label: r.name }))}
+              hint="The repository this service lives in"
+            />
+            <SelectField
+              label="Owner team"
+              placeholder={teamsQuery.isLoading ? "Loading teams..." : "Select a team"}
+              value={teamId}
+              onChange={setTeamId}
+              options={teams.map((t) => ({ value: t.id, label: t.name }))}
+              hint="The team responsible for this service"
+            />
             <Field label="Root path" placeholder="/" hint="Path within the repository for this service" value={rootPath} onChange={setRootPath} />
             <Field label="OTEL service name" placeholder="order-service" hint="Matches the service.name attribute in your OTEL traces" value={otelName} onChange={setOtelName} />
 
@@ -176,6 +203,25 @@ function Field({ label, placeholder, hint, value, onChange }: { label: string; p
         onChange={(e) => onChange(e.target.value)}
         className="w-full rounded-md border border-line bg-bg-surface px-3 py-1.5 font-mono text-xs text-t1 placeholder:text-t3 focus:border-accent/40 focus:outline-none"
       />
+      {hint && <p className="mt-0.5 text-[10px] text-t3">{hint}</p>}
+    </div>
+  );
+}
+
+function SelectField({ label, placeholder, hint, value, onChange, options }: { label: string; placeholder: string; hint?: string; value: string; onChange: (v: string) => void; options: { value: string; label: string }[] }) {
+  return (
+    <div>
+      <label className="mb-1 block text-[11px] font-medium text-t2">{label}</label>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full rounded-md border border-line bg-bg-surface px-3 py-1.5 font-mono text-xs text-t1 focus:border-accent/40 focus:outline-none"
+      >
+        <option value="" disabled className="text-t3">{placeholder}</option>
+        {options.map((opt) => (
+          <option key={opt.value} value={opt.value}>{opt.label}</option>
+        ))}
+      </select>
       {hint && <p className="mt-0.5 text-[10px] text-t3">{hint}</p>}
     </div>
   );
