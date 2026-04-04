@@ -285,6 +285,35 @@ class TestDiscoverSpecs:
         specs = discover_specs(str(tmp_path), [])
         assert len(specs) == 0
 
+    def test_discover_skips_symlinks(self, tmp_path: Path) -> None:
+        """Symlinks in a cloned repo must not be followed (path traversal risk)."""
+        api_dir = tmp_path / "api"
+        api_dir.mkdir()
+
+        # Create a real spec file outside the repo directory
+        external = tmp_path / "external"
+        external.mkdir()
+        secret = external / "secret.json"
+        secret.write_text(
+            json.dumps(
+                {"openapi": "3.0.0", "info": {"title": "Leaked", "version": "1"}, "paths": {}}
+            )
+        )
+
+        # Symlink inside repo pointing to external file
+        link = api_dir / "evil.json"
+        link.symlink_to(secret)
+
+        # Also add a real file so we know discovery works
+        real = api_dir / "real.yaml"
+        real.write_text(
+            json.dumps({"openapi": "3.0.0", "info": {"title": "Real", "version": "1"}, "paths": {}})
+        )
+
+        specs = discover_specs(str(tmp_path), ["api/"])
+        assert len(specs) == 1
+        assert specs[0].file_path == "api/real.yaml"
+
 
 # ---------------------------------------------------------------------------
 # Unit tests: service assignment
@@ -313,6 +342,19 @@ class TestServiceAssignment:
         svc = MagicMock(spec=ServiceDB, root_path="services/orders", name="orders")
         result = assign_spec_to_service("proto/spec.proto", [svc])
         assert result is None
+
+    def test_dot_root_path_matches_as_fallback(self) -> None:
+        """A service with root_path='.' (from Path('.').str()) matches as root fallback."""
+        svc_dot = MagicMock(spec=ServiceDB, root_path=".", name="root")
+        result = assign_spec_to_service("openapi.yaml", [svc_dot])
+        assert result is svc_dot
+
+    def test_dot_root_path_loses_to_longer_prefix(self) -> None:
+        """A '.' root service is only a fallback — a longer prefix match wins."""
+        svc_dot = MagicMock(spec=ServiceDB, root_path=".", name="root")
+        svc_api = MagicMock(spec=ServiceDB, root_path="api", name="api")
+        result = assign_spec_to_service("api/openapi.yaml", [svc_dot, svc_api])
+        assert result is svc_api
 
 
 # ---------------------------------------------------------------------------
