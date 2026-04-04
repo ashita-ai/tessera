@@ -154,6 +154,7 @@ async def log_contract_published(
     version: str,
     change_type: str | None = None,
     force: bool = False,
+    force_reason: str | None = None,
     prerelease: bool = False,
     previous_version: str | None = None,
 ) -> AuditEventDB:
@@ -163,6 +164,9 @@ async def log_contract_published(
         previous_version: Raw version string of the contract being superseded.
             Captured so the audit trail preserves the original value even when
             lenient parsing normalized it for version-bump computation.
+        force_reason: Human-written justification for force-publishing a
+            breaking change. Required when force=True; stored in the audit
+            payload so governance reviewers can evaluate the decision.
     """
     action = AuditAction.CONTRACT_FORCE_PUBLISHED if force else AuditAction.CONTRACT_PUBLISHED
     payload: dict[str, Any] = {
@@ -173,6 +177,8 @@ async def log_contract_published(
     }
     if previous_version is not None:
         payload["previous_version"] = previous_version
+    if force_reason is not None:
+        payload["force_reason"] = force_reason
     return await log_event(
         session=session,
         entity_type="contract",

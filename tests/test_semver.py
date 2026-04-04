@@ -381,7 +381,11 @@ class TestEnforceSemverMode:
         schema_v2 = make_schema(id="integer")  # Removed 'name'
         resp = await client.post(
             f"/api/v1/assets/{asset_id}/contracts",
-            params={"published_by": team_id, "force": "true"},  # force to skip proposal
+            params={
+                "published_by": team_id,
+                "force": "true",
+                "force_reason": "Testing version enforcement with force flag",
+            },  # force to skip proposal
             json={"schema": schema_v2, "version": "1.1.0"},  # Wrong - should be 2.0.0
         )
         assert resp.status_code == 400

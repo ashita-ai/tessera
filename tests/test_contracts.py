@@ -147,9 +147,23 @@ class TestContractPublishing:
             },
         )
 
-        # Force publish breaking change
-        resp = await client.post(
+        # Force publish without reason should fail
+        resp_no_reason = await client.post(
             f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}&force=true",
+            json={
+                "version": "2.0.0",
+                "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
+                "compatibility_mode": "backward",
+            },
+        )
+        assert resp_no_reason.status_code == 400
+        assert "force_reason" in resp_no_reason.json()["error"]["message"].lower()
+
+        # Force publish with reason should succeed
+        reason = "Removing deprecated field per Q2 migration plan agreed with consumers"
+        resp = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}&force=true"
+            f"&force_reason={reason}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -160,6 +174,82 @@ class TestContractPublishing:
         data = resp.json()
         assert data["action"] == "force_published"
         assert "warning" in data
+
+    async def test_force_publish_records_reason_in_audit(self, client: AsyncClient):
+        """Force-publish reason must appear in the audit trail."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "audit-reason"})
+        team_id = team_resp.json()["id"]
+        asset_resp = await client.post(
+            "/api/v1/assets", json={"fqn": "audit.reason.table", "owner_team_id": team_id}
+        )
+        asset_id = asset_resp.json()["id"]
+
+        # First contract
+        await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            json={
+                "version": "1.0.0",
+                "schema": {
+                    "type": "object",
+                    "properties": {"id": {"type": "integer"}, "name": {"type": "string"}},
+                },
+                "compatibility_mode": "backward",
+            },
+        )
+
+        # Force publish with reason
+        reason = "Emergency hotfix: name field type was wrong from initial release"
+        resp = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}&force=true"
+            f"&force_reason={reason}",
+            json={
+                "version": "2.0.0",
+                "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
+                "compatibility_mode": "backward",
+            },
+        )
+        assert resp.status_code == 201
+        contract_id = resp.json()["contract"]["id"]
+
+        # Verify the audit trail includes the reason
+        audit_resp = await client.get(f"/api/v1/audit/events?entity_id={contract_id}")
+        assert audit_resp.status_code == 200
+        events = audit_resp.json()["results"]
+        force_events = [e for e in events if e["action"] == "contract.force_published"]
+        assert len(force_events) == 1
+        assert force_events[0]["payload"]["force_reason"] == reason
+
+    async def test_force_reason_too_short(self, client: AsyncClient):
+        """Force reason under 10 characters should be rejected by query validation."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "short-reason"})
+        team_id = team_resp.json()["id"]
+        asset_resp = await client.post(
+            "/api/v1/assets", json={"fqn": "short.reason.table", "owner_team_id": team_id}
+        )
+        asset_id = asset_resp.json()["id"]
+
+        await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            json={
+                "version": "1.0.0",
+                "schema": {
+                    "type": "object",
+                    "properties": {"id": {"type": "integer"}, "x": {"type": "string"}},
+                },
+                "compatibility_mode": "backward",
+            },
+        )
+
+        resp = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}&force=true"
+            "&force_reason=short",
+            json={
+                "version": "2.0.0",
+                "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
+                "compatibility_mode": "backward",
+            },
+        )
+        assert resp.status_code == 422  # FastAPI query validation
 
     async def test_list_asset_contracts(self, client: AsyncClient):
         """List contracts for an asset."""

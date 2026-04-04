@@ -605,6 +605,7 @@ class ContractPublishingWorkflow:
         published_by_user_id: UUID | None = None,
         guarantees: dict[str, Any] | None = None,
         force: bool = False,
+        force_reason: str | None = None,
         audit_warning: str | None = None,
         field_descriptions: dict[str, str] | None = None,
         field_tags: dict[str, list[str]] | None = None,
@@ -619,6 +620,7 @@ class ContractPublishingWorkflow:
         self.published_by_user_id = published_by_user_id
         self.guarantees = guarantees
         self.force = force
+        self.force_reason = force_reason
         self.audit_warning = audit_warning
         self.field_descriptions = field_descriptions or {}
         self.field_tags = field_tags or {}
@@ -925,6 +927,7 @@ class ContractPublishingWorkflow:
                 version=contract.version,
                 change_type=str(diff_result.change_type),
                 force=True,
+                force_reason=self.force_reason,
                 previous_version=self.current_contract.version,
             )
             await invalidate_asset(str(self.asset.id))
@@ -941,7 +944,7 @@ class ContractPublishingWorkflow:
                     "version": contract.version,
                     "publisher_team": self.publisher_team.name,
                     "publisher_user": None,
-                    "reason": self.audit_warning,
+                    "reason": self.force_reason,
                     "contract_id": str(contract.id),
                 },
             )
