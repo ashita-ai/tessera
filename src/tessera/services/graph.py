@@ -19,6 +19,7 @@ from tessera.db.models import (
     ServiceDB,
     TeamDB,
 )
+from tessera.exceptions import ErrorCode, NotFoundError
 from tessera.models.enums import ProposalStatus
 from tessera.models.graph import (
     AffectedServiceNode,
@@ -264,8 +265,6 @@ async def build_neighborhood(
         select(ServiceDB.id).where(ServiceDB.id == service_id).where(ServiceDB.deleted_at.is_(None))
     )
     if svc_result.scalar_one_or_none() is None:
-        from tessera.api.errors import ErrorCode, NotFoundError
-
         raise NotFoundError(ErrorCode.SERVICE_NOT_FOUND, "Service not found")
 
     all_edges = await _load_service_edges(session)
@@ -316,8 +315,6 @@ async def build_impact_graph(
     )
     source_asset = asset_result.scalar_one_or_none()
     if source_asset is None:
-        from tessera.api.errors import ErrorCode, NotFoundError
-
         raise NotFoundError(ErrorCode.ASSET_NOT_FOUND, "Asset not found")
 
     # Resolve source service name

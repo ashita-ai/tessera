@@ -18,7 +18,7 @@ class ServiceNode(BaseModel):
     asset_count: int
     has_breaking_proposal: bool
     last_synced_at: datetime | None
-    sync_status: str = Field(description="One of: ok, error, never, stale")
+    sync_status: str = Field(description="One of: ok, never, stale")
 
 
 class ServiceEdge(BaseModel):
