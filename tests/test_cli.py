@@ -435,7 +435,7 @@ class TestHelpOutput:
     def test_main_help(self) -> None:
         result = runner.invoke(app, ["--help"])
         assert result.exit_code == 0
-        assert "Data contract coordination" in result.output
+        assert "Service contract coordination" in result.output
         assert "team" in result.output
         assert "asset" in result.output
         assert "contract" in result.output

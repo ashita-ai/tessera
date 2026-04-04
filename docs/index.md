@@ -1,30 +1,30 @@
 # Tessera
 
-**Data contract coordination for warehouses — and the AI agents that query them.**
+**Service contract coordination — stop breaking each other's APIs.**
 
-Tessera helps data teams coordinate schema changes across producers and consumers. When a producer wants to make a breaking change, consumers are notified and must acknowledge before the change goes live.
+Tessera helps teams coordinate schema changes across service boundaries. When a producer wants to make a breaking API change, consumers are notified and must acknowledge before the change goes live.
 
 ## Why Tessera?
 
-Data teams face a common problem: **breaking changes break pipelines**. AI agents make this worse — they query data and modify schemas without checking whether the data is fresh, authoritative, or safe to use.
+Teams face a common problem: **breaking changes break other teams' services**. Dependencies between services are invisible unless someone manually documents them.
 
-- A data engineer renames a column
-- Downstream dashboards break
-- An AI agent silently starts using stale data for decisions
+- A team removes a field from their REST API
+- Three other services that depend on that field break in production
+- The team that made the change only finds out when another team's oncall pages at 2 AM
 - Everyone scrambles to fix it
 
-Tessera solves this by making breaking changes explicit — for human teams and AI agents alike:
+Tessera solves this by making dependencies explicit and breaking changes coordinated:
 
-1. **Producers publish contracts** - JSON Schema definitions of their data assets
-2. **Consumers register dependencies** - Teams declare which assets they depend on
+1. **Producers publish contracts** - JSON Schema definitions of their API endpoints, gRPC methods, GraphQL operations, or data models
+2. **Consumers register dependencies** - Teams declare which contracts they depend on
 3. **Breaking changes require acknowledgment** - Before a breaking change goes live, all consumers must acknowledge
 
 ## Key Features
 
-- **Schema Diffing** - Automatically detect breaking vs non-breaking changes
+- **Schema Diffing** - Automatically detect breaking vs non-breaking changes across any JSON Schema source
 - **Consumer Registration** - Track who depends on what
 - **Proposal Workflow** - Coordinate breaking changes across teams
-- **dbt Integration** - Sync contracts from your dbt manifest
+- **Sync Adapters** - Import contracts from OpenAPI specs, GraphQL introspection, gRPC/protobuf definitions, and dbt manifests
 - **Audit Logging** - Track all contract changes and data quality events
 - **Web UI** - Visual interface for managing contracts and proposals
 
@@ -33,7 +33,7 @@ Tessera solves this by making breaking changes explicit — for human teams and 
 ```python
 import httpx
 
-# Publish a contract for your model
+# Publish a contract for your asset
 response = httpx.post(
     "http://localhost:8000/api/v1/assets/my-asset-id/contracts",
     params={"published_by": "your-team-id"},
@@ -107,18 +107,25 @@ If you later try to remove `email` (a breaking change), Tessera will:
 ## Architecture
 
 ```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│  dbt Project    │────▶│    Tessera      │◀────│   AI Agent     │
-│  (manifest.json)│     │    Server       │     │  (via REST API) │
-└─────────────────┘     └────────┬────────┘     └─────────────────┘
-                                 │
-        ┌────────────────────────┼────────────────────────┐
-        │                        │                        │
-        ▼                        ▼                        ▼
-┌───────────────┐      ┌─────────────────┐      ┌───────────────┐
-│   Producer    │      │    Consumer     │      │   Consumer    │
-│   Team A      │      │    Team B       │      │   Team C      │
-└───────────────┘      └─────────────────┘      └───────────────┘
+┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
+│  OpenAPI Spec   │  │ GraphQL Schema  │  │  gRPC/Protobuf  │  │  dbt Manifest   │
+└────────┬────────┘  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘
+         │                    │                    │                    │
+         └────────────────────┼────────────────────┼────────────────────┘
+                              ▼
+                    ┌─────────────────┐
+                    │    Tessera      │
+                    │    Server       │
+                    │  (JSON Schema)  │
+                    └────────┬────────┘
+                             │
+        ┌────────────────────┼────────────────────┐
+        │                    │                    │
+        ▼                    ▼                    ▼
+┌───────────────┐  ┌─────────────────┐  ┌───────────────┐
+│   Producer    │  │    Consumer     │  │   Consumer    │
+│   Team A      │  │    Team B       │  │   Team C      │
+└───────────────┘  └─────────────────┘  └───────────────┘
 ```
 
 ## License

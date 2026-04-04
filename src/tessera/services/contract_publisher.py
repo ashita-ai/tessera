@@ -12,6 +12,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.db import AssetDB, AuditRunDB, ContractDB, ProposalDB, RegistrationDB, TeamDB
@@ -1008,8 +1009,23 @@ class ContractPublishingWorkflow:
             affected_assets=affected_assets,
             objections=[],
         )
-        self.session.add(proposal)
-        await self.session.flush()
+        # Use a savepoint so an IntegrityError from the partial unique index
+        # (uq_one_pending_proposal_per_asset) rolls back only this INSERT,
+        # not the outer request transaction.
+        try:
+            async with self.session.begin_nested():
+                self.session.add(proposal)
+                await self.session.flush()
+        except IntegrityError:
+            # Concurrent duplicate — another request already created a pending
+            # proposal for this asset. Return it instead of creating a second.
+            existing = await self._check_pending_proposal()
+            existing_id = existing.id if existing else "unknown"
+            return self._build_result(
+                PublishAction.PROPOSAL_CREATED,
+                proposal=existing,
+                message=f"Asset already has pending proposal: {existing_id}",
+            )
         await self.session.refresh(proposal)
 
         await log_proposal_created(

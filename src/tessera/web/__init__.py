@@ -1,5 +1,5 @@
-"""Web UI module for Tessera."""
+"""Authentication module for Tessera web UI."""
 
-from tessera.web.routes import router
+from tessera.web.routes import register_login_required_handler
 
-__all__ = ["router"]
+__all__ = ["register_login_required_handler"]

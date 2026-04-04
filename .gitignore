@@ -11,6 +11,7 @@ downloads/
 eggs/
 .eggs/
 lib/
+!frontend/src/lib/
 lib64/
 parts/
 sdist/
@@ -50,3 +51,8 @@ htmlcov/
 .ruff_cache/
 cookies.txt
 site/
+
+# Frontend
+node_modules/
+frontend/dist/
+*.tsbuildinfo

@@ -2,7 +2,17 @@
 
 **ADR**: 001-ai-enablement
 **Priority**: 2
-**Status**: Draft
+**Status**: Draft (partially superseded by PR #407)
+
+## Supersession Note
+
+PR #407 introduced `UserType` (HUMAN/BOT) and `user_id` on `APIKeyDB`. Bot users authenticate exclusively via API keys and are blocked from web login. This covers the core "machine identity" use case that this spec originally addressed. What remains from this spec:
+
+- `agent_name` and `agent_framework` on APIKeyDB (not yet implemented — provides richer metadata than BOT user type alone)
+- `actor_type` on AuditEventDB (not yet implemented — can be derived from the API key's user_type)
+- Separate rate limit tiers for agent vs human keys (not yet implemented)
+
+The bot user model is the foundation; this spec adds metadata and observability on top.
 
 ## Overview
 

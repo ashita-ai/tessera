@@ -2,7 +2,7 @@
 
 ## Assets
 
-An asset represents any data object you want to track contracts for.
+An asset represents any schema-bearing interface you want to track contracts for — an API endpoint, gRPC method, GraphQL operation, or data model.
 
 ### Creating Assets
 
@@ -11,12 +11,12 @@ curl -X POST http://localhost:8000/api/v1/assets \
   -H "Authorization: Bearer $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "fqn": "warehouse.analytics.users",
+    "fqn": "api.users_service.get_users",
     "owner_team_id": "team-uuid",
     "environment": "production",
     "metadata": {
-      "description": "Core users table",
-      "tags": ["pii", "core"]
+      "description": "Users API endpoint",
+      "tags": ["public", "core"]
     }
   }'
 ```
@@ -25,7 +25,7 @@ curl -X POST http://localhost:8000/api/v1/assets \
 
 | Property | Required | Description |
 |----------|----------|-------------|
-| `fqn` | Yes | Unique identifier (e.g., `project.dataset.table`) |
+| `fqn` | Yes | Unique identifier (e.g., `api.users_service.get_users` or `warehouse.dataset.table`) |
 | `owner_team_id` | Yes | UUID of the owning team |
 | `environment` | No | Environment name (default: `production`) |
 | `metadata` | No | Arbitrary metadata object |
@@ -36,23 +36,26 @@ Assets have a `resource_type` that indicates their origin:
 
 | Resource Type | Source | Schema Format |
 |--------------|--------|---------------|
+| `api_endpoint` | OpenAPI import | `openapi` |
+| `graphql_query` | GraphQL import | `graphql` |
+| `grpc_method` | gRPC/protobuf import | `json_schema` |
+| `kafka_topic` | Avro import | `avro` |
 | `model` | dbt models | `json_schema` |
 | `seed` | dbt seeds | `json_schema` |
 | `source` | dbt sources | `json_schema` |
 | `snapshot` | dbt snapshots | `json_schema` |
-| `api_endpoint` | OpenAPI import | `openapi` |
-| `graphql_query` | GraphQL import | `graphql` |
-| `kafka_topic` | Avro import | `avro` |
 
-### Metadata from dbt
+### Metadata from sync adapters
 
-When syncing from dbt, metadata includes:
+Metadata varies by sync adapter. When syncing from dbt, metadata includes:
 
 - `resource_type`: model, seed, source, snapshot
 - `dbt_fqn`: Original dbt FQN array
 - `path`: File path in the project
 - `tags`: dbt tags
 - `depends_on`: Upstream dependencies
+
+When syncing from OpenAPI, metadata includes the HTTP method, path, and API title. GraphQL sync includes operation type and schema name. See the [Sync API docs](../api/sync.md) for details.
 
 ## Contracts
 
@@ -94,10 +97,10 @@ Tessera supports multiple schema formats for different asset types:
 
 | Format | Use Case | Example |
 |--------|----------|---------|
-| `json_schema` | dbt models, generic data assets | Default for warehouse tables |
+| `json_schema` | Any asset; the internal canonical format | Default for all contract diffing |
+| `openapi` | REST API endpoints | OpenAPI operation schemas (normalized to JSON Schema) |
+| `graphql` | GraphQL queries/mutations | GraphQL type definitions (normalized to JSON Schema) |
 | `avro` | Kafka topics, event streams | Apache Avro schemas |
-| `openapi` | REST API endpoints | OpenAPI operation schemas |
-| `graphql` | GraphQL queries/mutations | GraphQL type definitions |
 
 The schema format is automatically detected when importing from external sources (OpenAPI specs, GraphQL introspection, Avro schema registries).
 
@@ -137,4 +140,4 @@ Contracts can include SLA guarantees:
 }
 ```
 
-These are validated by dbt tests and reported to Tessera.
+These can be validated by external tools (dbt tests, GX checkpoints, Soda scans) and reported to Tessera.

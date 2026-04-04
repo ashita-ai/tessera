@@ -5,7 +5,7 @@ Get Tessera running in 5 minutes with Docker.
 ## Prerequisites
 
 - Docker and Docker Compose
-- A dbt project (optional, for manifest sync)
+- An OpenAPI spec, GraphQL schema, or dbt manifest (optional, for sync)
 
 ## Start Tessera
 
@@ -48,32 +48,59 @@ With `AUTH_DISABLED=true`, you can access the UI without logging in. Otherwise, 
 
 ## Create Your First Contract
 
-### 1. Create a Team
+### Option A: From an OpenAPI Spec
+
+The fastest path if you have an existing OpenAPI spec:
 
 ```bash
+# 1. Create a team
 curl -X POST http://localhost:8000/api/v1/teams \
   -H "Content-Type: application/json" \
-  -d '{"name": "data-platform"}'
+  -d '{"name": "platform-team"}'
 ```
 
 Save the returned `id` as `TEAM_ID`.
 
-### 2. Create an Asset
+```bash
+# 2. Import your OpenAPI spec
+curl -X POST http://localhost:8000/api/v1/sync/openapi \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"spec\": $(cat openapi.yaml | python3 -c 'import sys,json,yaml; json.dump(yaml.safe_load(sys.stdin), sys.stdout)'),
+    \"owner_team_id\": \"TEAM_ID\",
+    \"auto_publish_contracts\": true
+  }"
+```
+
+This creates one asset per endpoint, extracts request/response schemas, and publishes contracts. Tessera will detect breaking changes on subsequent imports.
+
+### Option B: Manual Contract
+
+Create an asset and contract directly:
 
 ```bash
+# 1. Create a team
+curl -X POST http://localhost:8000/api/v1/teams \
+  -H "Content-Type: application/json" \
+  -d '{"name": "platform-team"}'
+```
+
+Save the returned `id` as `TEAM_ID`.
+
+```bash
+# 2. Create an asset
 curl -X POST http://localhost:8000/api/v1/assets \
   -H "Content-Type: application/json" \
   -d '{
-    "fqn": "warehouse.analytics.users",
+    "fqn": "api.users_service.get_users",
     "owner_team_id": "TEAM_ID"
   }'
 ```
 
 Save the returned `id` as `ASSET_ID`.
 
-### 3. Publish a Contract
-
 ```bash
+# 3. Publish a contract
 curl -X POST "http://localhost:8000/api/v1/assets/ASSET_ID/contracts?published_by=TEAM_ID" \
   -H "Content-Type: application/json" \
   -d '{
@@ -90,7 +117,7 @@ curl -X POST "http://localhost:8000/api/v1/assets/ASSET_ID/contracts?published_b
   }'
 ```
 
-### 4. Register as a Consumer
+### Register as a Consumer
 
 Another team can register as a consumer of your contract:
 
@@ -105,9 +132,9 @@ curl -X POST http://localhost:8000/api/v1/registrations \
 
 If authentication is enabled, add `-H "Authorization: Bearer YOUR_API_KEY"` to all requests.
 
-## Sync from dbt
+### Option C: Sync from dbt
 
-If you have a dbt project, you can sync your models automatically:
+If you have a dbt project, you can sync your models:
 
 ```bash
 # Generate your manifest
@@ -124,14 +151,12 @@ curl -X POST http://localhost:8000/api/v1/sync/dbt/upload \
   }"
 ```
 
-This will:
-- Create assets for each model, source, seed, and snapshot
-- Extract column schemas from your YAML definitions
-- Publish contracts automatically
+This creates assets for each model, source, seed, and snapshot; extracts column schemas; and publishes contracts.
 
 ## What's Next?
 
 - [Installation Guide](installation.md) - Install without Docker
 - [Configuration](configuration.md) - Environment variables and settings
+- [Sync API](../api/sync.md) - OpenAPI, GraphQL, gRPC, and dbt sync adapters
 - [dbt Integration](../guides/dbt-integration.md) - Deep dive on dbt sync
 - [Concepts](../concepts/overview.md) - Understand how Tessera works

@@ -13,6 +13,16 @@ No cascade deletes are configured on any relationship. This is intentional:
   of referenced rows. Any hard delete of a parent would raise
   ``IntegrityError``, which is the desired behavior.
 
+Audit Table Immutability
+------------------------
+``audit_events`` is append-only by application convention **and** by database
+constraint. A partial unique index (``uq_one_pending_proposal_per_asset``)
+prevents duplicate pending proposals. In production, REVOKE DELETE and UPDATE
+on the ``audit_events`` table from the application role to enforce immutability
+at the database level::
+
+    REVOKE DELETE, UPDATE ON audit_events FROM tessera_app;
+
 If a cleanup job is ever needed for truly orphaned records, it should be
 implemented as a separate maintenance task with explicit audit logging.
 """
@@ -32,6 +42,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Uuid,
+    text,
 )
 from sqlalchemy.orm import (
     DeclarativeBase,
@@ -111,7 +122,7 @@ class TeamDB(Base):
     __tablename__ = "teams"
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
-    name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
     metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime | None] = mapped_column(
@@ -119,6 +130,18 @@ class TeamDB(Base):
     )
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True
+    )
+
+    __table_args__ = (
+        # Only enforce name uniqueness among non-deleted teams. This allows
+        # recreating a team with the same name after the original is soft-deleted.
+        Index(
+            "uq_team_name_active",
+            "name",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
+            sqlite_where=text("deleted_at IS NULL"),
+        ),
     )
 
     # Relationships
@@ -159,7 +182,12 @@ class AssetDB(Base):
         DateTime(timezone=True), nullable=True, index=True
     )
 
-    __table_args__ = (UniqueConstraint("fqn", "environment", name="uq_asset_fqn_environment"),)
+    __table_args__ = (
+        UniqueConstraint("fqn", "environment", name="uq_asset_fqn_environment"),
+        # Composite indexes for common soft-delete filtered queries
+        Index("idx_asset_team_active", "owner_team_id", "deleted_at"),
+        Index("idx_asset_env_active", "environment", "deleted_at"),
+    )
 
     # Relationships
     # Use selectin for owner_team since it's often needed for auth checks
@@ -253,6 +281,9 @@ class RegistrationDB(Base):
         UniqueConstraint(
             "contract_id", "consumer_team_id", name="uq_registration_contract_consumer"
         ),
+        # Composite index for counting active consumers per contract
+        Index("idx_registration_contract_active", "contract_id", "deleted_at"),
+        Index("idx_registration_team_active", "consumer_team_id", "deleted_at"),
     )
 
     # Relationships
@@ -302,8 +333,21 @@ class ProposalDB(Base):
     # Objections filed by affected teams (non-blocking but visible)
     objections: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
 
-    # Composite index for finding pending proposals by asset (common query pattern)
-    __table_args__ = (Index("idx_proposal_asset_status", "asset_id", "status"),)
+    __table_args__ = (
+        # Composite index for finding pending proposals by asset (common query pattern)
+        Index("idx_proposal_asset_status", "asset_id", "status"),
+        # Prevent duplicate pending proposals for the same asset. Without this,
+        # two concurrent breaking-change publishes can both see "no pending proposal"
+        # (FOR UPDATE acquires no lock when no row exists) and both create one.
+        # Uses dialect-specific WHERE clauses so it works on both PostgreSQL and SQLite.
+        Index(
+            "uq_one_pending_proposal_per_asset",
+            "asset_id",
+            unique=True,
+            postgresql_where=text("status = 'PENDING'"),
+            sqlite_where=text("status = 'PENDING'"),
+        ),
+    )
 
     # Relationships
     asset: Mapped["AssetDB"] = relationship(back_populates="proposals")
@@ -373,11 +417,21 @@ class AssetDependencyDB(Base):
             "dependency_type",
             name="uq_dependency_edge",
         ),
+        # Composite index for impact analysis: "what depends on this asset?"
+        Index("idx_dependency_target_active", "dependency_asset_id", "deleted_at"),
     )
 
 
 class AuditEventDB(Base):
-    """Audit event database model (append-only)."""
+    """Audit event database model (append-only).
+
+    This table must be treated as immutable. Rows are never updated or deleted.
+    In production, enforce this at the database level::
+
+        REVOKE DELETE, UPDATE ON audit_events FROM tessera_app;
+
+    No ``updated_at`` column exists by design — these records never change.
+    """
 
     __tablename__ = "audit_events"
 
@@ -464,9 +518,9 @@ class WebhookDeliveryDB(Base):
 
 
 class AuditRunDB(Base):
-    """Audit run tracking for WAP (Write-Audit-Publish) integration.
+    """Audit run tracking for contract guarantee verification.
 
-    Records the results of data quality checks (dbt tests, Great Expectations, etc.)
+    Records the results of quality checks (test suites, monitoring probes, etc.)
     against contract guarantees. Enables runtime enforcement tracking.
     """
 
@@ -485,7 +539,7 @@ class AuditRunDB(Base):
     guarantees_failed: Mapped[int] = mapped_column(Integer, default=0)
     triggered_by: Mapped[str] = mapped_column(
         String(50), nullable=False, index=True
-    )  # "dbt_test", "great_expectations", "soda", "manual"
+    )  # "test_suite", "monitoring_probe", "ci_pipeline", "manual"
     run_id: Mapped[str | None] = mapped_column(
         String(255), nullable=True, index=True
     )  # External run ID for correlation (e.g., dbt invocation_id)

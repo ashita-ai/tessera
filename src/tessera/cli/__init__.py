@@ -1,4 +1,4 @@
-"""Tessera CLI - Data contract coordination from the command line."""
+"""Tessera CLI - Service contract coordination from the command line."""
 
 import json
 import logging
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 app = typer.Typer(
     name="tessera",
-    help="Data contract coordination for warehouses",
+    help="Service contract coordination",
     no_args_is_help=True,
 )
 
@@ -148,7 +148,7 @@ def team_get(
 
 @asset_app.command("create")
 def asset_create(
-    fqn: Annotated[str, typer.Argument(help="Fully qualified name (e.g., warehouse.schema.table)")],
+    fqn: Annotated[str, typer.Argument(help="Fully qualified name (e.g., payments.orders.v1)")],
     owner_team_id: Annotated[str, typer.Option("--team", "-t", help="Owner team ID")],
     metadata: Annotated[str | None, typer.Option("--metadata", "-m", help="JSON metadata")] = None,
 ) -> None:

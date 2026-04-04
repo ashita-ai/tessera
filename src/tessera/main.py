@@ -8,9 +8,9 @@ from pathlib import Path
 from typing import Any
 
 import redis
-from fastapi import APIRouter, Depends, FastAPI
+from fastapi import APIRouter, Depends, FastAPI, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 from slowapi.errors import RateLimitExceeded
@@ -57,7 +57,6 @@ from tessera.db import get_session, init_db
 from tessera.db.database import dispose_engine
 from tessera.logging import configure_logging
 from tessera.services.metrics import MetricsMiddleware, get_metrics, update_gauge_metrics
-from tessera.web import router as web_router
 from tessera.web.routes import register_login_required_handler
 
 # Track application start time for uptime calculation
@@ -164,7 +163,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 app = FastAPI(
     title="Tessera",
-    description="Data contract coordination for warehouses",
+    description="Service contract coordination",
     version="0.1.0",
     lifespan=lifespan,
 )
@@ -235,11 +234,80 @@ app.include_router(api_v1)
 
 # Static files and Web UI
 static_dir = Path(__file__).parent / "static"
+spa_dist_dir = static_dir / "dist"
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
-# Web UI routes (must be added after API routes to avoid conflicts)
-app.include_router(web_router)
+# Mount Vite build assets at /assets so the React SPA's JS/CSS loads correctly.
+# Vite outputs to static/dist/assets/ with paths like /assets/index-*.js.
+if spa_dist_dir.exists() and (spa_dist_dir / "assets").exists():
+    app.mount("/assets", StaticFiles(directory=str(spa_dist_dir / "assets")), name="spa-assets")
+
+# SPA + auth routes
+_spa_index = spa_dist_dir / "index.html" if spa_dist_dir.exists() else None
+
+
+def _read_spa_html() -> str | None:
+    """Read SPA index.html from disk so frontend rebuilds apply without restart."""
+    if _spa_index and _spa_index.exists():
+        return _spa_index.read_text()
+    return None
+
+
+# Auth routes: POST /login (form submission) and GET /logout.
+# GET /login is served by the SPA catch-all (React renders the login page).
+_auth_router = APIRouter(tags=["auth"])
+
+
+@_auth_router.post("/login")
+async def login_submit_handler(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    session: AsyncSession = Depends(get_session),
+) -> Any:
+    """Handle login form submission."""
+    from tessera.web.routes import login_submit
+
+    return await login_submit(request, username, password, session)
+
+
+@_auth_router.get("/logout")
+async def logout_handler(request: Request) -> Any:
+    """Handle logout."""
+    from tessera.web.routes import logout
+
+    return await logout(request)
+
+
+app.include_router(_auth_router)
+
+
+# SPA catch-all must be the LAST route. We define it as a function and register
+# it after /health and /metrics (see below).
+def _register_spa_catchall() -> None:
+    """Register the SPA catch-all AFTER all other routes."""
+
+    # Paths that should NOT be handled by the SPA catch-all
+    _non_spa_prefixes = (
+        "/api/",
+        "/static/",
+        "/assets/",
+        "/health",
+        "/metrics",
+        "/logout",
+    )
+
+    @app.get("/{path:path}", response_class=HTMLResponse, include_in_schema=False)
+    async def spa_catchall(path: str) -> HTMLResponse:
+        """Serve the React SPA for all non-API, non-system routes."""
+        full_path = f"/{path}"
+        if any(full_path.startswith(p) for p in _non_spa_prefixes):
+            raise HTTPException(status_code=404, detail="Not found")
+        spa_html = _read_spa_html()
+        if spa_html:
+            return HTMLResponse(spa_html)
+        raise HTTPException(status_code=404, detail="Not found")
 
 
 @app.get("/metrics")
@@ -330,3 +398,7 @@ async def health_ready(
 async def health_live() -> dict[str, str]:
     """Liveness probe - basic check that app is running."""
     return {"status": "alive"}
+
+
+# Register SPA catch-all LAST so /health, /metrics, and other routes take priority.
+_register_spa_catchall()

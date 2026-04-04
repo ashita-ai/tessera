@@ -99,7 +99,6 @@ src/tessera/
 ├── models/        # Pydantic schemas
 ├── services/      # Business logic
 ├── web/           # Web UI routes
-├── templates/     # Jinja2 templates
 └── static/        # CSS, JS assets
 ```
 

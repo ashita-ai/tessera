@@ -4,6 +4,9 @@
 **Date:** 2026-03-29
 **Author:** Evan Volgas
 
+!!! warning "Superseded in Part"
+    This document predates [ADR-014](../adrs/014-service-contract-pivot.md) (service contract pivot). The warehouse connector roadmap (BigQuery, Snowflake, Databricks, Redshift) described in Stages 3-4 has been superseded. Tessera's scope has expanded from data warehouse contracts to service contract coordination across OpenAPI, GraphQL, gRPC, and dbt. The control plane vision remains valid, but "actual state" observation now prioritizes OTEL-based service dependency discovery over warehouse query log scanning.
+
 ## The Idea
 
 Compute has Kubernetes. Networking has service meshes. Storage has S3 lifecycle policies. Data has nothing.
@@ -27,7 +30,7 @@ By analogy to Kubernetes (the compute control plane):
 | Detects breaking changes (failed health check → rollback) | Detects breaking schema changes | Schema diff engine, compatibility modes |
 | Tracks who changed what (audit log) | Tracks who published what | Audit trail with actor_type |
 | Exposes an API for all operations | Exposes an API for all operations | 30+ REST endpoints, CLI, SDK |
-| Has a control loop (desired state → actual state) | Has a control loop (contract → actual schema) | WAP gate, BigQuery connector validation |
+| Has a control loop (desired state → actual state) | Has a control loop (contract → actual schema) | WAP gate, sync adapter validation |
 
 Tessera already implements most of these primitives. What's missing is the operational intelligence layer — the part that observes the actual state of the data ecosystem and reconciles it with the declared state.
 
@@ -77,20 +80,20 @@ Tessera already implements most of these primitives. What's missing is the opera
 
 ### 1. Observability of Actual State
 
-Tessera knows the declared state (contracts, registrations) but not the actual state (what's really happening in the warehouse).
+Tessera knows the declared state (contracts, registrations) but not the actual state (what's really happening in production).
 
 | Question | Can Tessera answer it today? |
 |----------|------------------------------|
-| What schema does this table actually have right now? | Partially (BigQuery connector can fetch, but not automatically) |
-| Is this contract's schema in sync with the actual table? | Only via manual BigQuery connector call |
-| Who actually queries this table? | No (see [Passive Discovery](passive-discovery.md)) |
-| Which columns are actually used? | No |
-| When was this table last updated? | Only if freshness guarantee is configured and audited |
-| Is this table growing normally? | No (volume anomaly detection doesn't exist) |
+| What schema does this endpoint/table actually have right now? | Partially (sync adapters can re-import, but not automatically) |
+| Is this contract's schema in sync with the actual spec? | Only via manual re-sync |
+| Who actually calls this service? | No (see [Passive Discovery](passive-discovery.md) and OTEL discovery in ADR-014) |
+| Which fields are actually used? | No |
+| When was this endpoint last called? | Only if freshness guarantee is configured and audited |
+| Is traffic to this service normal? | No (anomaly detection doesn't exist) |
 
 A control plane must reconcile declared state with actual state. Tessera currently trusts declarations. A control plane verifies.
 
-**What to build:** Scheduled reconciliation that fetches actual schemas from warehouses and compares them to the active contract. Drift detection: "the `orders` table in Snowflake has a column `discount_code` that doesn't exist in the contract." This is the data equivalent of Kubernetes detecting a pod that doesn't match its deployment spec.
+**What to build:** Scheduled reconciliation that re-imports specs from git repos and compares them to the active contract. Drift detection: "the OpenAPI spec for the users service added a field `middle_name` that doesn't exist in the contract." This is the equivalent of Kubernetes detecting a pod that doesn't match its deployment spec.
 
 ### 2. Passive Discovery
 
@@ -153,19 +156,19 @@ Schema change coordination between teams. Publishing, compatibility checks, prop
 ### Stage 3: Intelligence + Observability (Later — v0.4)
 
 **Additions:**
-- Warehouse connector for schema drift detection (Snowflake first)
-- Passive discovery from query logs
+- OTEL-based service dependency discovery (Jaeger first, then Tempo, Datadog)
+- Repo-based spec change detection (poll git repos for OpenAPI/protobuf/GraphQL spec changes)
 - Column-level dependency tracking
 - Reconciliation loop (declared vs actual schema)
 
-**Milestone:** Schema drift detection catches real discrepancies. Impact analysis uses column-level dependencies from query logs.
+**Milestone:** Service dependency discovery catches real dependencies from traffic. Impact analysis uses observed call edges.
 
 ### Stage 4: Full Control Plane (v1.0)
 
 **Additions:**
 - Policy engine (acknowledgment, publishing, discovery, deprecation policies)
 - Automated remediation (drift → auto-publish, stale → alert, unused → deprecate)
-- Additional warehouse connectors (BigQuery, Databricks, Redshift)
+- Additional OTEL backend connectors (Tempo, Datadog, Observe)
 - Federation between instances
 
 **Milestone:** Organizations running Tessera as infrastructure (always-on, multiple teams, policy-driven) rather than a tool used occasionally for specific changes.
@@ -186,9 +189,9 @@ Tessera tracks quality guarantees and gates publishing on audit results — it d
 
 Tessera has lineage data (the dependency graph) and should expose it via API for other tools to visualize. Building a lineage UI is a distraction from the control plane mission.
 
-### Don't Generalize Beyond Data (Yet)
+### Stay Focused on Schema-Bearing Interfaces
 
-Tessera's coordination model could apply to any schema-bearing interface (APIs, ML models, event streams). But generalizing prematurely diffuses focus. Win data first. The generalization is a reward for getting the core right.
+Tessera coordinates contracts for schema-bearing interfaces: APIs, data models, event streams. The contract engine is schema-agnostic (everything normalizes to JSON Schema), but the sync adapters and discovery mechanisms are specific to each source type. Resist the temptation to generalize beyond interfaces with machine-readable schemas.
 
 ---
 
@@ -200,7 +203,7 @@ Tessera's coordination model could apply to any schema-bearing interface (APIs, 
 | Platform engineering teams adopt it | Scope has expanded beyond data engineering |
 | Dependency graph coverage exceeds 80% | Passive discovery is working; the graph is trusted |
 | Agent traffic exceeds 30% of total API calls | Agents are first-class participants |
-| At least 3 warehouse connectors in production use | Cross-system coverage is real |
+| At least 3 sync adapter types in production use | Cross-system coverage is real |
 | Policy engine handles >50% of acknowledgments automatically | Automation has replaced manual coordination for routine changes |
 
 None of these require abandoning the current product. Each is an incremental addition that shifts the system from coordination tool to control plane. The code doesn't pivot. The capabilities expand.

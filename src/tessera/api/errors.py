@@ -229,16 +229,19 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         if self.environment == "production":
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
 
-        # CSP: Permissive for known web UI paths, strict for everything else.
-        # Allowlist approach ensures unknown/future paths default to strict.
-        is_web_ui = request.url.path.startswith(("/web", "/static"))
-        if is_web_ui:
+        # CSP: Permissive for SPA pages that load JS/CSS/fonts, strict for everything else.
+        # SPA paths: anything NOT under /api/, /health, /metrics, /static/, /assets/.
+        path = request.url.path
+        _non_spa = ("/api/", "/health", "/metrics", "/static/", "/assets/")
+        is_spa = not any(path.startswith(p) for p in _non_spa)
+        if is_spa:
             response.headers["Content-Security-Policy"] = (
                 "default-src 'self'; "
                 "script-src 'self' 'unsafe-inline'; "
                 "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
                 "img-src 'self' data:; "
                 "font-src 'self' https://fonts.gstatic.com; "
+                "connect-src 'self'; "
                 "frame-ancestors 'none'"
             )
         else:
