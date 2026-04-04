@@ -524,7 +524,7 @@ class AssetDependencyDB(Base):
     )
 
     otel_config_id: Mapped[UUID | None] = mapped_column(
-        Uuid, ForeignKey("otel_sync_configs.id"), nullable=True, index=True
+        Uuid, ForeignKey("otel_sync_configs.id", ondelete="SET NULL"), nullable=True, index=True
     )
 
     __table_args__ = (
