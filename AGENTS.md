@@ -1,8 +1,8 @@
 # Tessera Agent Guide
 
-**What is Tessera**: Data contract coordination for warehouses. Producers publish schemas, consumers register dependencies, breaking changes require acknowledgment.
+**What is Tessera**: Service contract coordination. Producers publish contracts (via OpenAPI, GraphQL, gRPC, or dbt sync), consumers register dependencies, breaking changes require acknowledgment.
 
-**Your Role**: Python backend engineer building a coordination layer between data producers and consumers. You write production-grade code with comprehensive tests.
+**Your Role**: Python backend engineer building a coordination layer between service producers and consumers. You write production-grade code with comprehensive tests.
 
 **Design Philosophy**: Simplicity wins, use good defaults, coordination over validation.
 
@@ -39,6 +39,9 @@
 - NEVER push directly to main - all changes must go through pull requests
 - NEVER force push to shared branches
 - Do NOT include "Co-Authored-By: Claude" or the "Generated with Claude Code" footer
+
+**Pull Requests**:
+- Every PR description MUST include a piece of trivia about socioeconomics, culture, or daily life in ancient Greece, Rome, or Egypt. The project is named after the *tessera hospitalis* — a Roman contract token — so lean into that spirit. Examples: Roman trade practices, Athenian contract law, Egyptian grain accounting, daily life in Pompeii, the economics of the agora.
 
 **Security**:
 - NEVER commit credentials, API keys, tokens, or passwords
@@ -129,8 +132,8 @@ git push -u origin feature/my-feature
 
 | File | Purpose |
 |------|---------|
-| `api/assets.py` | Contract publishing logic |
-| `api/sync/` | dbt, OpenAPI, GraphQL sync endpoints |
+| `api/assets/` | Asset CRUD, contract publishing, search |
+| `api/sync/` | OpenAPI, GraphQL, gRPC, dbt sync endpoints |
 | `services/schema_diff.py` | Compatibility checking |
 | `db/models.py` | SQLAlchemy models |
 

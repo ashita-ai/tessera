@@ -7,6 +7,7 @@ import { formatDate, cn } from "@/lib/utils";
 const STATUS_DOT: Record<string, string> = {
   pending: "bg-amber",
   approved: "bg-green",
+  published: "bg-accent",
   rejected: "bg-red",
   expired: "bg-t3",
   withdrawn: "bg-t3",
@@ -44,7 +45,7 @@ export function Proposals() {
 function ProposalRow({ proposal }: { proposal: Proposal }) {
   const queryClient = useQueryClient();
   const ackMutation = useMutation({
-    mutationFn: (data: { response: "APPROVED" | "BLOCKED" | "MIGRATING"; consumer_team_id: string }) =>
+    mutationFn: (data: { response: "approved" | "blocked" | "migrating"; consumer_team_id: string }) =>
       api.acknowledgeProposal(proposal.id, { response: data.response, consumer_team_id: data.consumer_team_id }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["proposals"] });
@@ -72,7 +73,7 @@ function ProposalRow({ proposal }: { proposal: Proposal }) {
           <p className="ml-3.5 mt-0.5 text-[10px] text-t3">
             {proposal.breaking_changes_count} breaking
             {" \u00b7 "}
-            <span className="font-mono">{proposal.proposed_version}</span>
+            <span className="font-mono">{proposal.change_type}</span>
             {" \u00b7 "}
             {formatDate(proposal.proposed_at)}
           </p>
@@ -110,9 +111,9 @@ function ProposalRow({ proposal }: { proposal: Proposal }) {
             <p className="text-[10px] text-red">{ackMutation.error instanceof Error ? ackMutation.error.message : "Acknowledgment failed"}</p>
           )}
           <div className="flex gap-1.5">
-            <ActionBtn label="Approve" color="green" disabled={ackMutation.isPending || !teamId} onClick={() => ackMutation.mutate({ response: "APPROVED", consumer_team_id: teamId })} />
-            <ActionBtn label="Migrating" color="amber" disabled={ackMutation.isPending || !teamId} onClick={() => ackMutation.mutate({ response: "MIGRATING", consumer_team_id: teamId })} />
-            <ActionBtn label="Block" color="red" disabled={ackMutation.isPending || !teamId} onClick={() => ackMutation.mutate({ response: "BLOCKED", consumer_team_id: teamId })} />
+            <ActionBtn label="Approve" color="green" disabled={ackMutation.isPending || !teamId} onClick={() => ackMutation.mutate({ response: "approved", consumer_team_id: teamId })} />
+            <ActionBtn label="Migrating" color="amber" disabled={ackMutation.isPending || !teamId} onClick={() => ackMutation.mutate({ response: "migrating", consumer_team_id: teamId })} />
+            <ActionBtn label="Block" color="red" disabled={ackMutation.isPending || !teamId} onClick={() => ackMutation.mutate({ response: "blocked", consumer_team_id: teamId })} />
           </div>
         </div>
       )}

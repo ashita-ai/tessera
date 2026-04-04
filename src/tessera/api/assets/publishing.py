@@ -5,6 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.api.auth import Auth, RequireWrite
@@ -291,7 +292,16 @@ async def create_contract(
         field_descriptions=contract.field_descriptions,
         field_tags=contract.field_tags,
     )
-    result = await workflow.execute()
+    try:
+        result = await workflow.execute()
+    except IntegrityError as exc:
+        # Concurrent version conflict caught by DB unique constraint on
+        # (asset_id, version). Convert to a clean 409 instead of 500.
+        raise DuplicateError(
+            ErrorCode.VERSION_EXISTS,
+            f"Contract version {version_for_workflow} already exists for this asset. "
+            "A concurrent publish may have created it.",
+        ) from exc
 
     # Handle duplicate proposal: the workflow returns PROPOSAL_CREATED with the
     # existing proposal when one already exists. Convert to the expected HTTP error.

@@ -26,70 +26,75 @@ export interface Asset {
   fqn: string;
   resource_type: string;
   environment: string;
+  guarantee_mode: string;
+  semver_mode: string;
   owner_team_id: string;
   owner_team_name?: string;
   owner_user_id?: string;
   owner_user_name?: string;
-  service_id?: string;
-  service_name?: string;
+  owner_user_email?: string;
   active_contract_version?: string;
-  active_contract_id?: string;
+  metadata: Record<string, unknown>;
+  tags: string[];
   created_at: string;
+  updated_at?: string;
 }
 
 export interface Contract {
   id: string;
   asset_id: string;
+  asset_fqn?: string;
   version: string;
-  schema: Record<string, unknown>;
+  schema_def: Record<string, unknown>;
+  schema_format: string;
   compatibility_mode: string;
+  guarantees?: Record<string, unknown>;
+  field_descriptions: Record<string, string>;
+  field_tags: Record<string, string[]>;
   status: "active" | "deprecated" | "retired";
   published_by: string;
+  publisher_name?: string;
+  published_by_user_id?: string;
   published_at: string;
-  breaking_changes?: BreakingChange[];
+  updated_at?: string;
 }
 
 export interface BreakingChange {
-  kind: string;
-  path: string;
-  message: string;
-  old_value?: unknown;
-  new_value?: unknown;
+  type: string;
+  column?: string;
+  details: Record<string, string | number | boolean | null>;
 }
 
 export interface Proposal {
   id: string;
   asset_id: string;
   asset_fqn?: string;
-  contract_id: string;
-  proposed_version: string;
   change_type: string;
   breaking_changes_count: number;
-  status: "pending" | "approved" | "rejected" | "expired" | "withdrawn";
+  status: "pending" | "approved" | "published" | "rejected" | "expired" | "withdrawn";
   proposed_by: string;
   proposed_at: string;
   total_consumers: number;
   acknowledgment_count: number;
-  acknowledgments?: Acknowledgment[];
 }
 
 export interface Acknowledgment {
   id: string;
   proposal_id: string;
-  team_id: string;
-  team_name?: string;
-  response: "APPROVED" | "BLOCKED" | "MIGRATING";
-  responded_by: string;
-  responded_at: string;
+  consumer_team_id: string;
+  response: "approved" | "blocked" | "migrating";
+  migration_deadline?: string;
   notes?: string;
+  acknowledged_by_user_id?: string;
 }
 
 export interface Team {
   id: string;
   name: string;
+  metadata: Record<string, unknown>;
   created_at: string;
+  updated_at?: string;
   asset_count?: number;
-  member_count?: number;
 }
 
 export interface AuditEvent {
@@ -119,7 +124,6 @@ export interface DashboardStats {
   assets: number;
   contracts: number;
   pending_proposals: number;
-  services: number;
 }
 
 type QueryParams = Record<string, string | number | boolean | undefined>;
@@ -176,9 +180,6 @@ export const api = {
       assets: assets.total,
       contracts: contracts.total,
       pending_proposals: proposals.total,
-      services: await request<PaginatedResponse<Service>>("/services", {}, { limit: 1 })
-        .then((r) => r.total)
-        .catch(() => 0),
     };
   },
 
@@ -203,7 +204,7 @@ export const api = {
   listProposals: (params?: QueryParams) =>
     request<PaginatedResponse<Proposal>>("/proposals", {}, params),
   getProposal: (id: string) => request<Proposal>(`/proposals/${id}`),
-  acknowledgeProposal: (id: string, data: { response: string; consumer_team_id: string; notes?: string }) =>
+  acknowledgeProposal: (id: string, data: { response: "approved" | "blocked" | "migrating"; consumer_team_id: string; notes?: string }) =>
     request<Acknowledgment>(`/proposals/${id}/acknowledge`, {
       method: "POST",
       body: JSON.stringify(data),

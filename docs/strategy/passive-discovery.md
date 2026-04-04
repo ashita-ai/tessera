@@ -55,7 +55,7 @@ Three data sources that could feed passive discovery already exist:
 
 1. **Preflight call logs.** Every `GET /{fqn}/preflight` call is logged as a `preflight.checked` audit event with `consumer_type` and the requesting API key's team. An agent calling preflight is declaring "I'm about to consume this data." That's a dependency signal.
 
-2. **BigQuery connector.** `connectors/bigquery.py` has a working connection to BigQuery and can fetch table schemas. The infrastructure to connect to a warehouse exists. What doesn't exist: reading query logs from that same connection.
+2. **Warehouse query logs (future).** Connecting to warehouse query log APIs (BigQuery `INFORMATION_SCHEMA.JOBS`, Snowflake `ACCESS_HISTORY`) would reveal which services and users actually read which tables. The connector infrastructure was removed in ADR-014 but the pattern is straightforward to reimplement when needed.
 
 3. **Audit trail with actor_type.** Every action records who did it and whether they're human or agent. This gives us a behavioral signal of who interacts with which assets.
 
@@ -336,7 +336,7 @@ WHERE query_start_time > DATEADD(day, -30, CURRENT_TIMESTAMP())
 **Why Snowflake first:**
 - Largest market share among modern cloud warehouses for the target audience
 - `ACCESS_HISTORY` provides column-level detail without query parsing
-- The existing BigQuery connector proves the pattern; Snowflake follows the same shape
+- The connector pattern is straightforward; BigQuery follows the same shape
 
 ### BigQuery Implementation (Second Target)
 
@@ -447,7 +447,7 @@ Add `RegistrationColumnUsageDB`. Populate from Snowflake `ACCESS_HISTORY` and db
 
 ### Phase 6: BigQuery + Additional Connectors
 
-Repeat the connector pattern for BigQuery (with `sqlglot` for column extraction), then Databricks, Redshift. Each additional connector is ~2 weeks once the interface is established.
+Build the BigQuery connector (with `sqlglot` for column extraction), then Databricks, Redshift. Each additional connector is ~2 weeks once the interface is established.
 
 ---
 

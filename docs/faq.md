@@ -2,6 +2,12 @@
 
 ## General
 
+### Why is it called Tessera?
+
+In ancient Rome, a *tessera hospitalis* was a small tablet of bone, ivory, or terracotta that two parties broke in half as a binding contract of mutual obligation — a relationship called *hospitium*. Each party kept one half. When the holders (or even their descendants, generations later) needed to prove the relationship, they fit the pieces together. No central authority required — the match itself was the proof.
+
+That's the idea behind this project. Producers and consumers each hold their side of a service contract. Tessera is the system that makes sure the pieces still fit when someone wants to change the shape.
+
 ### What is Tessera?
 
 Tessera is a service contract coordination platform. It lets producers publish schema contracts for their APIs, services, and data models while consumers register dependencies — so breaking changes require explicit acknowledgment before going live. It works across OpenAPI, GraphQL, gRPC, and dbt through a schema-agnostic contract engine that normalizes everything to JSON Schema.

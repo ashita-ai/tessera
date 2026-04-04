@@ -30,7 +30,7 @@ function toActivity(e: AuditEvent): ActivityItem {
 export function Dashboard() {
   const stats = useQuery({ queryKey: ["stats"], queryFn: () => api.getStats() });
   const proposals = useQuery({ queryKey: ["proposals-pending"], queryFn: () => api.listProposals({ status: "pending", limit: 5 }) });
-  const audit = useQuery({ queryKey: ["audit-recent"], queryFn: () => api.listAuditEvents({ limit: 8 }) });
+  const audit = useQuery({ queryKey: ["audit-recent"], queryFn: () => api.listAuditEvents({ limit: 8 }), retry: false });
 
   const s = stats.data;
   const pending = proposals.data?.results ?? [];
@@ -39,8 +39,7 @@ export function Dashboard() {
   return (
     <div className="animate-enter space-y-5">
       {/* Stats */}
-      <div className="stagger grid grid-cols-4 gap-3">
-        <StatCard label="Services" value={s?.services ?? "\u2014"} href="/services" />
+      <div className="stagger grid grid-cols-3 gap-3">
         <StatCard label="Assets" value={s?.assets ?? "\u2014"} href="/assets" />
         <StatCard label="Contracts" value={s?.contracts ?? "\u2014"} />
         <StatCard label="Proposals" value={s?.pending_proposals ?? "\u2014"} alert={(s?.pending_proposals ?? 0) > 0} href="/proposals" />

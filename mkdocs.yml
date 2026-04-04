@@ -1,5 +1,5 @@
 site_name: Tessera
-site_description: Data contract coordination for warehouses — and the AI agents that query them
+site_description: Service contract coordination — stop breaking each other's APIs
 site_url: https://ashita-ai.github.io/tessera
 repo_url: https://github.com/ashita-ai/tessera
 repo_name: ashita-ai/tessera

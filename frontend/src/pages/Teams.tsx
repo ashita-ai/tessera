@@ -28,13 +28,8 @@ export function Teams() {
               className="rounded-lg border border-line bg-bg-raised p-4 transition-colors hover:border-line-strong"
             >
               <p className="font-mono text-xs font-medium text-t1">{team.name}</p>
-              <div className="mt-2 flex gap-4 text-[11px] text-t3">
-                <span>
-                  <span className="font-medium text-t2">{team.asset_count ?? 0}</span> assets
-                </span>
-                <span>
-                  <span className="font-medium text-t2">{team.member_count ?? 0}</span> members
-                </span>
+              <div className="mt-2 text-[11px] text-t3">
+                <span className="font-medium text-t2">{team.asset_count ?? 0}</span> assets
               </div>
               <p className="mt-2 text-[10px] text-t3">Created {formatDate(team.created_at)}</p>
             </div>
