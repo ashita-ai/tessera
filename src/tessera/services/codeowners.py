@@ -213,13 +213,19 @@ def _glob_to_regex(pattern: str) -> str:
         elif c == "[":
             # Pass character classes through — find the closing `]`.
             j = i + 1
+            negate = False
             if j < n and pattern[j] == "!":
+                negate = True
                 j += 1
             if j < n and pattern[j] == "]":
                 j += 1
             while j < n and pattern[j] != "]":
                 j += 1
-            result.append(pattern[i : j + 1])
+            # Glob uses [!...] for negation; regex uses [^...].
+            class_body = pattern[i + 1 : j + 1]
+            if negate:
+                class_body = "^" + class_body[1:]
+            result.append("[" + class_body)
             i = j
         else:
             result.append(re.escape(c))
