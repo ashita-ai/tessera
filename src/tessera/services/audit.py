@@ -75,6 +75,11 @@ class AuditAction(StrEnum):
     API_KEY_REVOKED = "api_key.revoked"
     API_KEY_USED = "api_key.used"
 
+    # Service actions
+    SERVICE_CREATED = "service.created"
+    SERVICE_UPDATED = "service.updated"
+    SERVICE_DELETED = "service.deleted"
+
     # Sync actions
     DBT_SYNC_UPLOAD = "dbt.sync_upload"
 
