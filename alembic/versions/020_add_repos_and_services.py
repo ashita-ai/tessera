@@ -35,6 +35,9 @@ def _is_sqlite() -> bool:
 def upgrade() -> None:
     schema = None if _is_sqlite() else "core"
 
+    # Helper to qualify table references for ForeignKey on Postgres.
+    fk_prefix = f"{schema}." if schema else ""
+
     # --- repos table ---
     op.create_table(
         "repos",
@@ -43,7 +46,12 @@ def upgrade() -> None:
         sa.Column("git_url", sa.String(500), nullable=False),
         sa.Column("default_branch", sa.String(100), nullable=False, server_default="main"),
         sa.Column("spec_paths", sa.JSON(), nullable=False, server_default="[]"),
-        sa.Column("owner_team_id", sa.Uuid(), sa.ForeignKey("teams.id"), nullable=False),
+        sa.Column(
+            "owner_team_id",
+            sa.Uuid(),
+            sa.ForeignKey(f"{fk_prefix}teams.id"),
+            nullable=False,
+        ),
         sa.Column(
             "sync_enabled",
             sa.Boolean(),
@@ -64,33 +72,31 @@ def upgrade() -> None:
     op.create_index("ix_repos_owner_team_id", "repos", ["owner_team_id"], schema=schema)
     op.create_index("ix_repos_deleted_at", "repos", ["deleted_at"], schema=schema)
 
-    # Partial unique indexes for soft-delete-safe uniqueness
-    if _is_sqlite():
-        op.execute(
-            "CREATE UNIQUE INDEX uq_repo_name_active ON repos (name) " "WHERE deleted_at IS NULL"
-        )
-        op.execute(
-            "CREATE UNIQUE INDEX uq_repo_git_url_active ON repos (git_url) "
-            "WHERE deleted_at IS NULL"
-        )
-    else:
-        op.execute(
-            "CREATE UNIQUE INDEX uq_repo_name_active ON repos (name) " "WHERE deleted_at IS NULL"
-        )
-        op.execute(
-            "CREATE UNIQUE INDEX uq_repo_git_url_active ON repos (git_url) "
-            "WHERE deleted_at IS NULL"
-        )
+    # Partial unique indexes for soft-delete-safe uniqueness.
+    # Schema-qualify the table name on Postgres; bare name on SQLite.
+    repos_ref = f"{schema}.repos" if schema else "repos"
+    op.execute(
+        f"CREATE UNIQUE INDEX uq_repo_name_active ON {repos_ref} (name) WHERE deleted_at IS NULL"
+    )
+    op.execute(
+        f"CREATE UNIQUE INDEX uq_repo_git_url_active ON {repos_ref} (git_url) "
+        f"WHERE deleted_at IS NULL"
+    )
 
     # --- services table ---
     op.create_table(
         "services",
         sa.Column("id", sa.Uuid(), primary_key=True),
         sa.Column("name", sa.String(200), nullable=False),
-        sa.Column("repo_id", sa.Uuid(), sa.ForeignKey("repos.id"), nullable=False),
+        sa.Column("repo_id", sa.Uuid(), sa.ForeignKey(f"{fk_prefix}repos.id"), nullable=False),
         sa.Column("root_path", sa.String(500), nullable=False, server_default="/"),
         sa.Column("otel_service_name", sa.String(200), nullable=True),
-        sa.Column("owner_team_id", sa.Uuid(), sa.ForeignKey("teams.id"), nullable=False),
+        sa.Column(
+            "owner_team_id",
+            sa.Uuid(),
+            sa.ForeignKey(f"{fk_prefix}teams.id"),
+            nullable=False,
+        ),
         sa.Column(
             "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
         ),
@@ -104,16 +110,11 @@ def upgrade() -> None:
     op.create_index("ix_services_deleted_at", "services", ["deleted_at"], schema=schema)
 
     # Partial unique index: (name, repo_id) among non-deleted services
-    if _is_sqlite():
-        op.execute(
-            "CREATE UNIQUE INDEX uq_service_name_repo_active "
-            "ON services (name, repo_id) WHERE deleted_at IS NULL"
-        )
-    else:
-        op.execute(
-            "CREATE UNIQUE INDEX uq_service_name_repo_active "
-            "ON services (name, repo_id) WHERE deleted_at IS NULL"
-        )
+    services_ref = f"{schema}.services" if schema else "services"
+    op.execute(
+        f"CREATE UNIQUE INDEX uq_service_name_repo_active "
+        f"ON {services_ref} (name, repo_id) WHERE deleted_at IS NULL"
+    )
 
     # --- assets.service_id FK ---
     op.add_column(

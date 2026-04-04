@@ -149,6 +149,7 @@ class TeamDB(Base):
     members: Mapped[list["UserDB"]] = relationship(back_populates="team")
     assets: Mapped[list["AssetDB"]] = relationship(back_populates="owner_team")
     repos: Mapped[list["RepoDB"]] = relationship(back_populates="owner_team")
+    services: Mapped[list["ServiceDB"]] = relationship(back_populates="owner_team")
 
 
 class RepoDB(Base):
@@ -241,6 +242,7 @@ class ServiceDB(Base):
 
     # Relationships
     repo: Mapped["RepoDB"] = relationship(back_populates="services", lazy="selectin")
+    owner_team: Mapped["TeamDB"] = relationship(back_populates="services", lazy="selectin")
     assets: Mapped[list["AssetDB"]] = relationship(back_populates="service")
 
 
