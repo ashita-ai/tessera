@@ -159,8 +159,9 @@ async def clone_or_pull(
 
     if (repo_dir / ".git").exists():
         # Pull: fetch + reset
+        # Use -- to separate flags from positional args (prevents argument injection)
         rc, _, stderr = await _run_git(
-            ["fetch", "--depth", "1", auth_url, branch],
+            ["fetch", "--depth", "1", "--", auth_url, branch],
             cwd=str(repo_dir),
         )
         if rc != 0:
@@ -174,8 +175,9 @@ async def clone_or_pull(
             raise RuntimeError(f"git reset failed: {_sanitize_stderr(stderr, token)}")
     else:
         # Clone: shallow clone
+        # Use -- to separate flags from positional args (prevents argument injection)
         rc, _, stderr = await _run_git(
-            ["clone", "--depth", "1", "--branch", branch, auth_url, str(repo_dir)],
+            ["clone", "--depth", "1", "--branch", branch, "--", auth_url, str(repo_dir)],
         )
         if rc != 0:
             # Clean up partial clone
@@ -557,10 +559,13 @@ async def _ensure_asset(
     resource_type: ResourceType,
     metadata: dict[str, Any],
     description: str | None,
-) -> AssetDB:
+) -> tuple[AssetDB, bool]:
     """Find or create an asset by FQN.
 
     If the asset exists, updates its service_id and metadata.
+
+    Returns:
+        Tuple of (asset, created) where created is True if the asset was new.
     """
     result = await session.execute(
         select(AssetDB)
@@ -576,7 +581,7 @@ async def _ensure_asset(
             asset.service_id = service.id
         asset.metadata_ = {**asset.metadata_, **metadata}
         await session.flush()
-        return asset
+        return asset, False
 
     # Create new asset
     asset = AssetDB(
@@ -601,7 +606,7 @@ async def _ensure_asset(
         payload={"fqn": fqn, "service_id": str(service.id), "auto_discovered": True},
     )
 
-    return asset
+    return asset, True
 
 
 async def sync_repo(
@@ -663,7 +668,8 @@ async def sync_repo(
 
     # 4. Parse specs and build contracts
     contracts_to_publish: list[ContractToPublish] = []
-    asset_ids_created: set[UUID] = set()
+    created_asset_ids: set[UUID] = set()
+    updated_asset_ids: set[UUID] = set()
 
     for spec in specs:
         parsed_items = _parse_spec(spec)
@@ -678,7 +684,7 @@ async def sync_repo(
             fqn = f"{service.name}.{item['fqn_suffix']}"
 
             # Ensure asset exists
-            asset = await _ensure_asset(
+            asset, was_created = await _ensure_asset(
                 session,
                 fqn=fqn,
                 service=service,
@@ -687,8 +693,10 @@ async def sync_repo(
                 description=item.get("description"),
             )
 
-            if asset.id not in asset_ids_created:
-                asset_ids_created.add(asset.id)
+            if was_created:
+                created_asset_ids.add(asset.id)
+            else:
+                updated_asset_ids.add(asset.id)
 
             # Queue for publishing
             contracts_to_publish.append(
@@ -701,7 +709,8 @@ async def sync_repo(
             )
 
     result.services_created = len(existing_services) - initial_service_count
-    result.assets_created = len(asset_ids_created)
+    result.assets_created = len(created_asset_ids)
+    result.assets_updated = len(updated_asset_ids)
 
     # 5. Bulk publish contracts
     if contracts_to_publish:
@@ -722,6 +731,11 @@ async def sync_repo(
                     result.errors.append(f"Publish error for {pr.asset_fqn}: {pr.error}")
         except Exception as e:
             result.errors.append(f"Bulk publish failed: {e}")
+            # Still record the commit so we don't retry the same failing
+            # commit in an infinite loop on every poll cycle.
+            repo.last_synced_at = datetime.now(UTC)
+            repo.last_synced_commit = commit_sha
+            await session.flush()
             return result
 
     # 6. Update repo sync state
@@ -738,11 +752,32 @@ async def sync_repo(
 # ---------------------------------------------------------------------------
 
 
+@dataclass
+class _RepoSyncTarget:
+    """Snapshot of repo fields needed for sync scheduling.
+
+    Captures scalar values up front so we don't need to access ORM
+    objects after a potential session rollback (which would expire them
+    and raise MissingGreenlet in async SQLAlchemy).
+    """
+
+    repo_id: UUID
+    name: str
+    owner_team_id: UUID
+    last_synced_at: datetime | None
+
+
 async def _poll_once(session_maker: Any) -> None:
-    """Run one polling cycle: find repos due for sync and sync them."""
+    """Run one polling cycle: find repos due for sync and sync them.
+
+    Each repo gets its own session so that a rollback on one repo
+    cannot expire ORM objects for subsequent repos.
+    """
+    # First, collect the list of repos due for sync.
+    now = datetime.now(UTC)
+    targets: list[_RepoSyncTarget] = []
+
     async with session_maker() as session:
-        # Find repos due for sync
-        now = datetime.now(UTC)
         stmt = (
             select(RepoDB)
             .where(RepoDB.sync_enabled.is_(True))
@@ -754,57 +789,76 @@ async def _poll_once(session_maker: Any) -> None:
         repos = list(result.scalars().all())
 
         for repo in repos:
-            # Check if repo is due for sync
             if repo.last_synced_at is not None:
                 elapsed = (now - repo.last_synced_at).total_seconds()
                 if elapsed < settings.sync_interval:
                     continue
+            targets.append(
+                _RepoSyncTarget(
+                    repo_id=repo.id,
+                    name=repo.name,
+                    owner_team_id=repo.owner_team_id,
+                    last_synced_at=repo.last_synced_at,
+                )
+            )
 
-            # Capture scalar values before any rollback can expire the ORM object
-            repo_name = repo.name
-            repo_id = repo.id
-            owner_team_id = repo.owner_team_id
-
-            logger.info("Background sync starting for repo %s (%s)", repo_name, repo_id)
+    # Process each repo in its own session to isolate failures.
+    for target in targets:
+        async with session_maker() as session:
+            logger.info("Background sync starting for repo %s (%s)", target.name, target.repo_id)
             try:
+                # Re-load the repo in this session
+                repo_result = await session.execute(
+                    select(RepoDB).where(RepoDB.id == target.repo_id)
+                )
+                repo = repo_result.scalar_one_or_none()
+                if repo is None or repo.deleted_at is not None or not repo.sync_enabled:
+                    continue
+
                 sync_result = await asyncio.wait_for(
                     sync_repo(session, repo),
-                    timeout=settings.git_timeout,
+                    timeout=settings.sync_timeout,
                 )
                 await session.commit()
 
                 if sync_result.success:
                     logger.info(
                         "Sync completed for %s: %d specs, %d contracts published",
-                        repo_name,
+                        target.name,
                         sync_result.specs_found,
                         sync_result.contracts_published,
                     )
-                    await _log_sync_event(session, repo_id, owner_team_id, sync_result)
+                    await _log_sync_event(
+                        session, target.repo_id, target.owner_team_id, sync_result
+                    )
                     await session.commit()
                 else:
-                    logger.warning("Sync failed for %s: %s", repo_name, sync_result.errors)
-                    await _log_sync_failed(session, repo_id, owner_team_id, sync_result.errors)
+                    logger.warning("Sync failed for %s: %s", target.name, sync_result.errors)
+                    await _log_sync_failed(
+                        session, target.repo_id, target.owner_team_id, sync_result.errors
+                    )
                     await session.commit()
 
             except TimeoutError:
                 await session.rollback()
-                logger.error("Sync timed out for repo %s", repo_name)
-                await _log_sync_failed(session, repo_id, owner_team_id, ["Sync timed out"])
+                logger.error("Sync timed out for repo %s", target.name)
+                await _log_sync_failed(
+                    session, target.repo_id, target.owner_team_id, ["Sync timed out"]
+                )
                 await session.commit()
             except Exception:
                 await session.rollback()
-                logger.exception("Unexpected error syncing repo %s", repo_name)
+                logger.exception("Unexpected error syncing repo %s", target.name)
                 try:
                     await _log_sync_failed(
                         session,
-                        repo_id,
-                        owner_team_id,
+                        target.repo_id,
+                        target.owner_team_id,
                         ["Unexpected error — see server logs"],
                     )
                     await session.commit()
                 except Exception:
-                    logger.exception("Failed to log sync failure for repo %s", repo_name)
+                    logger.exception("Failed to log sync failure for repo %s", target.name)
 
 
 async def _log_sync_event(

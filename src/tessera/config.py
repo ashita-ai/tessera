@@ -368,6 +368,13 @@ class Settings(BaseSettings):  # type: ignore[misc]
         description="Git operation timeout in seconds.",
         alias="TESSERA_GIT_TIMEOUT",
     )
+    sync_timeout: int = Field(
+        default=600,
+        description="Overall sync operation timeout in seconds. "
+        "Should be larger than git_timeout since a sync involves "
+        "multiple git operations plus DB work.",
+        alias="TESSERA_SYNC_TIMEOUT",
+    )
 
     # ── OTEL Dependency Discovery ─────────────────────────────
 

@@ -645,10 +645,12 @@ class TestCloneOrPull:
             repo_dir, sha = await clone_or_pull(repo, None)
 
         assert sha == "abc123"
-        # Verify clone was called with correct args
+        # Verify clone was called with correct args including -- separator
         clone_call = mock_git.call_args_list[0]
-        assert "clone" in clone_call[0][0]
-        assert "--depth" in clone_call[0][0]
+        clone_args = clone_call[0][0]
+        assert "clone" in clone_args
+        assert "--depth" in clone_args
+        assert "--" in clone_args
 
     async def test_pull_existing_repo(self, tmp_path: Path) -> None:
         """Subsequent sync: fetch + reset."""
@@ -679,9 +681,11 @@ class TestCloneOrPull:
             _, sha = await clone_or_pull(repo, None)
 
         assert sha == "def456"
-        # Verify fetch was called (not clone)
+        # Verify fetch was called (not clone) with -- separator
         fetch_call = mock_git.call_args_list[0]
-        assert "fetch" in fetch_call[0][0]
+        fetch_args = fetch_call[0][0]
+        assert "fetch" in fetch_args
+        assert "--" in fetch_args
 
     async def test_clone_failure_raises(self, tmp_path: Path) -> None:
         """Git clone failure raises RuntimeError."""
@@ -755,6 +759,173 @@ class TestCloneOrPull:
         # The clone command should have the token in the URL
         clone_args = mock_git.call_args_list[0][0][0]
         assert any("x-access-token:ghp_secret_token@" in arg for arg in clone_args)
+
+
+# ---------------------------------------------------------------------------
+# Background worker tests
+# ---------------------------------------------------------------------------
+
+
+class TestSyncRepoPublishFailure:
+    """Tests for publish failure recording commit SHA to prevent infinite retry."""
+
+    async def _setup_repo_with_specs(
+        self,
+        session: AsyncSession,
+        tmp_path: Path,
+        specs: dict[str, str],
+    ) -> tuple[RepoDB, TeamDB]:
+        team = await _create_team(session)
+        repo = await _create_repo(
+            session,
+            team,
+            spec_paths=list({str(Path(p).parent) + "/" for p in specs}),
+        )
+        repo_dir = tmp_path / str(repo.id)
+        repo_dir.mkdir(parents=True)
+        (repo_dir / ".git").mkdir()
+        for rel_path, content in specs.items():
+            full_path = repo_dir / rel_path
+            full_path.parent.mkdir(parents=True, exist_ok=True)
+            full_path.write_text(content)
+        return repo, team
+
+    async def test_publish_failure_still_records_commit(
+        self, test_session: AsyncSession, tmp_path: Path
+    ) -> None:
+        """When bulk_publish raises, last_synced_commit is still recorded."""
+        repo, _ = await self._setup_repo_with_specs(
+            test_session,
+            tmp_path,
+            {"api/openapi.yaml": json.dumps(SAMPLE_OPENAPI)},
+        )
+
+        assert repo.last_synced_commit is None
+
+        with (
+            patch(
+                "tessera.services.repo_sync.clone_or_pull",
+                return_value=(str(tmp_path / str(repo.id)), "fail_sha"),
+            ),
+            patch(
+                "tessera.services.repo_sync.bulk_publish_contracts",
+                side_effect=RuntimeError("publish exploded"),
+            ),
+        ):
+            result = await sync_repo(test_session, repo)
+
+        assert not result.success
+        assert "Bulk publish failed" in result.errors[0]
+        # The commit SHA must be recorded to prevent infinite retry
+        await test_session.refresh(repo)
+        assert repo.last_synced_commit == "fail_sha"
+        assert repo.last_synced_at is not None
+
+
+# ---------------------------------------------------------------------------
+# Input validation tests
+# ---------------------------------------------------------------------------
+
+
+class TestRepoModelValidation:
+    """Tests for Pydantic model validation on RepoCreate/RepoUpdate."""
+
+    def test_git_url_rejects_flag_injection(self) -> None:
+        from tessera.models.repo import RepoCreate
+
+        with pytest.raises(ValueError, match="must start with"):
+            RepoCreate(
+                name="test",
+                git_url="--upload-pack=evil",
+                owner_team_id=uuid4(),
+            )
+
+    def test_git_url_accepts_https(self) -> None:
+        from tessera.models.repo import RepoCreate
+
+        repo = RepoCreate(
+            name="test",
+            git_url="https://github.com/acme/test.git",
+            owner_team_id=uuid4(),
+        )
+        assert repo.git_url == "https://github.com/acme/test.git"
+
+    def test_git_url_accepts_ssh(self) -> None:
+        from tessera.models.repo import RepoCreate
+
+        repo = RepoCreate(
+            name="test",
+            git_url="git@github.com:acme/test.git",
+            owner_team_id=uuid4(),
+        )
+        assert repo.git_url == "git@github.com:acme/test.git"
+
+    def test_branch_rejects_flag_injection(self) -> None:
+        from tessera.models.repo import RepoCreate
+
+        with pytest.raises(ValueError, match="alphanumeric"):
+            RepoCreate(
+                name="test",
+                git_url="https://github.com/acme/test.git",
+                owner_team_id=uuid4(),
+                default_branch="--upload-pack=evil",
+            )
+
+    def test_branch_rejects_dotdot(self) -> None:
+        from tessera.models.repo import RepoCreate
+
+        with pytest.raises(ValueError, match="must not contain"):
+            RepoCreate(
+                name="test",
+                git_url="https://github.com/acme/test.git",
+                owner_team_id=uuid4(),
+                default_branch="main..dev",
+            )
+
+    def test_branch_accepts_slashes(self) -> None:
+        from tessera.models.repo import RepoCreate
+
+        repo = RepoCreate(
+            name="test",
+            git_url="https://github.com/acme/test.git",
+            owner_team_id=uuid4(),
+            default_branch="feature/my-branch",
+        )
+        assert repo.default_branch == "feature/my-branch"
+
+    def test_spec_paths_rejects_traversal(self) -> None:
+        from tessera.models.repo import RepoCreate
+
+        with pytest.raises(ValueError, match="must not contain"):
+            RepoCreate(
+                name="test",
+                git_url="https://github.com/acme/test.git",
+                owner_team_id=uuid4(),
+                spec_paths=["../../etc/passwd"],
+            )
+
+    def test_spec_paths_accepts_normal_paths(self) -> None:
+        from tessera.models.repo import RepoCreate
+
+        repo = RepoCreate(
+            name="test",
+            git_url="https://github.com/acme/test.git",
+            owner_team_id=uuid4(),
+            spec_paths=["api/", "proto/orders.proto"],
+        )
+        assert repo.spec_paths == ["api/", "proto/orders.proto"]
+
+    def test_update_branch_rejects_flag_injection(self) -> None:
+        from tessera.models.repo import RepoUpdate
+
+        with pytest.raises(ValueError, match="alphanumeric"):
+            RepoUpdate(default_branch="--evil")
+
+    def test_update_spec_paths_rejects_traversal(self) -> None:
+        from tessera.models.repo import RepoUpdate
+
+        with pytest.raises(ValueError, match="must not contain"):
+            RepoUpdate(spec_paths=["../../../etc/shadow"])
 
 
 # ---------------------------------------------------------------------------

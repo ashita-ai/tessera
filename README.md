@@ -115,8 +115,59 @@ Force-publish is available for emergencies (admin-only, audit-logged).
 | `TESSERA_SYNC_INTERVAL` | Background repo sync poll interval in seconds (0 to disable) | `60` |
 | `TESSERA_REPO_MAX_SIZE_MB` | Maximum clone size in megabytes | `500` |
 | `TESSERA_GIT_TIMEOUT` | Git operation timeout in seconds | `120` |
+| `TESSERA_SYNC_TIMEOUT` | Overall sync operation timeout in seconds | `600` |
 
 See [configuration docs](https://ashita-ai.github.io/tessera/getting-started/quickstart/) for the full list.
+
+## Git-based repo sync
+
+Register a repository and Tessera automatically discovers spec files, creates services, and publishes contracts. A background worker polls for changes so contracts stay up to date without CI integration.
+
+### Registering a repo
+
+```bash
+curl -X POST http://localhost:8000/api/v1/repos \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "orders-service",
+    "git_url": "https://github.com/acme/orders-service.git",
+    "owner_team_id": "<team-uuid>",
+    "default_branch": "main",
+    "spec_paths": ["api/", "proto/"],
+    "sync_enabled": true
+  }'
+```
+
+### Input validation
+
+| Field | Constraints |
+|-------|-------------|
+| `git_url` | Must start with `https://` or `git@`. Max 500 characters. |
+| `default_branch` | Must start with an alphanumeric character. Allowed characters: `a-z A-Z 0-9 . / _ -`. Must not contain `..`. Max 100 characters. |
+| `spec_paths` | Glob patterns relative to the repo root. Must not contain `..` path components. |
+
+### How sync works
+
+1. **Clone/pull** — First sync does a shallow clone (`--depth 1`). Subsequent syncs fetch and reset to the latest commit. Repos exceeding `TESSERA_REPO_MAX_SIZE_MB` are rejected.
+2. **Spec discovery** — Scans `spec_paths` globs for `.yaml`/`.json` (OpenAPI, detected by `openapi` key), `.proto` (gRPC), and `.graphql`/`.gql` files. Hidden directories and `node_modules`/`vendor` are skipped.
+3. **Service assignment** — Each spec file is assigned to the service whose `root_path` is the longest prefix match. If no service matches, one is auto-created with a name inferred from the directory structure.
+4. **Contract publishing** — Parsed schemas are published via the standard contract engine with backward compatibility mode. Compatible changes auto-publish; breaking changes create proposals.
+
+### Triggering a sync manually
+
+```bash
+curl -X POST http://localhost:8000/api/v1/repos/<repo-uuid>/sync
+```
+
+Returns the full sync result including specs found, contracts published, and any errors.
+
+### Background worker
+
+When `TESSERA_SYNC_INTERVAL` > 0 (default: 60s), a background task polls repos with `sync_enabled=true`. Each repo is synced in its own database transaction so failures are isolated. Set `TESSERA_SYNC_INTERVAL=0` to disable polling entirely.
+
+### Private repos
+
+Set `TESSERA_GIT_TOKEN` to a GitHub personal access token or app installation token. The token is injected into HTTPS clone URLs as `x-access-token`. SSH URLs (`git@...`) are passed through unchanged — ensure the server has the appropriate SSH key.
 
 ## Documentation
 
