@@ -3,6 +3,7 @@ import { cn } from "@/lib/utils";
 
 const NAV = [
   { to: "/", label: "Overview", icon: GraphIcon, end: true },
+  { to: "/repos", label: "Repos", icon: RepoIcon },
   { to: "/services", label: "Services", icon: ServiceIcon },
   { to: "/assets", label: "Assets", icon: AssetIcon },
   { to: "/proposals", label: "Proposals", icon: ProposalIcon },
@@ -52,6 +53,14 @@ function GraphIcon({ className }: { className?: string }) {
     <svg className={className} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
       <circle cx="4" cy="4" r="2" /><circle cx="12" cy="4" r="2" /><circle cx="8" cy="12" r="2" />
       <line x1="5.5" y1="5.5" x2="7" y2="10.5" /><line x1="10.5" y1="5.5" x2="9" y2="10.5" />
+    </svg>
+  );
+}
+
+function RepoIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+      <path d="M5 2v10M5 12a2 2 0 1 0 0 4M11 2v6M11 8a2 2 0 1 0 0 4M11 12l-6 2" />
     </svg>
   );
 }
