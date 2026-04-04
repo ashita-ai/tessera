@@ -9,7 +9,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.api.auth import Auth, RequireAdmin, RequireRead, RequireWrite
@@ -167,8 +167,6 @@ async def list_inferred(
     query = query.where(and_(*filters))
 
     # Count total matching rows
-    from sqlalchemy import func
-
     count_query = (
         select(func.count(InferredDependencyDB.id))
         .join(AssetDB, InferredDependencyDB.asset_id == AssetDB.id)

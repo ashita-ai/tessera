@@ -541,12 +541,14 @@ async def compute_coverage_report(
     if report.total_assets == 0:
         return report
 
-    # Assets with at least one active registration
+    # Assets with at least one active registration (scoped to non-deleted assets)
     registered_result = await session.execute(
         select(func.count(func.distinct(ContractDB.asset_id)))
         .join(RegistrationDB, RegistrationDB.contract_id == ContractDB.id)
+        .join(AssetDB, ContractDB.asset_id == AssetDB.id)
         .where(
             and_(
+                AssetDB.deleted_at.is_(None),
                 RegistrationDB.deleted_at.is_(None),
                 RegistrationDB.status == RegistrationStatus.ACTIVE,
             )
@@ -554,21 +556,27 @@ async def compute_coverage_report(
     )
     report.assets_with_registrations = registered_result.scalar() or 0
 
-    # Assets with pending inferred dependencies (but no registrations)
-    inferred_only_result = await session.execute(
-        select(func.count(func.distinct(InferredDependencyDB.asset_id))).where(
+    # Non-deleted assets with pending inferred dependencies (but no registrations)
+    registered_asset_ids = (
+        select(func.distinct(ContractDB.asset_id))
+        .join(RegistrationDB, RegistrationDB.contract_id == ContractDB.id)
+        .join(AssetDB, ContractDB.asset_id == AssetDB.id)
+        .where(
             and_(
+                AssetDB.deleted_at.is_(None),
+                RegistrationDB.deleted_at.is_(None),
+                RegistrationDB.status == RegistrationStatus.ACTIVE,
+            )
+        )
+    )
+    inferred_only_result = await session.execute(
+        select(func.count(func.distinct(InferredDependencyDB.asset_id)))
+        .join(AssetDB, InferredDependencyDB.asset_id == AssetDB.id)
+        .where(
+            and_(
+                AssetDB.deleted_at.is_(None),
                 InferredDependencyDB.status == InferredDependencyStatus.PENDING,
-                InferredDependencyDB.asset_id.not_in(
-                    select(func.distinct(ContractDB.asset_id))
-                    .join(RegistrationDB, RegistrationDB.contract_id == ContractDB.id)
-                    .where(
-                        and_(
-                            RegistrationDB.deleted_at.is_(None),
-                            RegistrationDB.status == RegistrationStatus.ACTIVE,
-                        )
-                    )
-                ),
+                InferredDependencyDB.asset_id.not_in(registered_asset_ids),
             )
         )
     )
