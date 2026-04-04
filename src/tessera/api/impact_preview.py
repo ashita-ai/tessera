@@ -48,6 +48,7 @@ class ImpactPreviewResponse(BaseModel):
     guarantee_changes: list[dict[str, Any]]
     affected_consumers: list[dict[str, Any]]
     affected_downstream: list[dict[str, Any]]
+    unconfirmed_consumers: list[dict[str, Any]]
     suggested_version: str
     version_reason: str
     would_create_proposal: bool

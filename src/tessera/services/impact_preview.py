@@ -28,6 +28,7 @@ from tessera.models.enums import (
     RegistrationStatus,
 )
 from tessera.services.affected_parties import get_affected_parties
+from tessera.services.discovery import get_pending_inferences_for_asset
 from tessera.services.migration_suggester import suggest_migrations
 from tessera.services.schema_diff import (
     diff_guarantees,
@@ -69,6 +70,7 @@ class ImpactPreviewResult:
     guarantee_changes: list[dict[str, Any]]
     affected_consumers: list[dict[str, Any]]
     affected_downstream: list[dict[str, Any]]
+    unconfirmed_consumers: list[dict[str, Any]]
     suggested_version: str
     version_reason: str
     would_create_proposal: bool
@@ -85,6 +87,7 @@ class ImpactPreviewResult:
             "guarantee_changes": self.guarantee_changes,
             "affected_consumers": self.affected_consumers,
             "affected_downstream": self.affected_downstream,
+            "unconfirmed_consumers": self.unconfirmed_consumers,
             "suggested_version": self.suggested_version,
             "version_reason": self.version_reason,
             "would_create_proposal": self.would_create_proposal,
@@ -224,7 +227,10 @@ async def compute_impact_preview(
             for s in suggestions
         ]
 
-    # Step 7: Determine if a proposal would be created
+    # Step 7: Get unconfirmed consumers from passive discovery
+    unconfirmed_consumers = await get_pending_inferences_for_asset(session, asset.id)
+
+    # Step 8: Determine if a proposal would be created
     has_consumers = len(registrations) > 0
     would_create_proposal = is_breaking and has_consumers
 
@@ -235,6 +241,7 @@ async def compute_impact_preview(
         guarantee_changes=guarantee_changes_list,
         affected_consumers=affected_consumers,
         affected_downstream=affected_downstream,
+        unconfirmed_consumers=unconfirmed_consumers,
         suggested_version=version_suggestion.suggested_version,
         version_reason=version_suggestion.reason,
         would_create_proposal=would_create_proposal,
