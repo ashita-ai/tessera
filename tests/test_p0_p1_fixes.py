@@ -259,10 +259,11 @@ class TestSoftDeletedRegistrationExclusion:
 
 
 class TestAffectedPartiesPreFiltering:
-    """P1-3: Affected parties query uses metadata pre-filtering instead of full scan."""
+    """P1-3: Affected parties reads exclusively from AssetDependencyDB table."""
 
-    async def test_metadata_depends_on_detected(self, test_session: AsyncSession) -> None:
-        """Assets with metadata.depends_on referencing the changed asset are found."""
+    async def test_dependency_table_row_detected(self, test_session: AsyncSession) -> None:
+        """Assets with AssetDependencyDB rows referencing the changed asset are found."""
+        from tessera.db import AssetDependencyDB
         from tessera.services.affected_parties import get_affected_parties
 
         team = TeamDB(name=f"affected-{uuid4().hex[:8]}")
@@ -274,14 +275,21 @@ class TestAffectedPartiesPreFiltering:
         downstream = AssetDB(
             fqn="warehouse.downstream.table",
             owner_team_id=other_team.id,
-            metadata_={"depends_on": ["warehouse.upstream.table"]},
         )
         unrelated = AssetDB(
             fqn="warehouse.unrelated.table",
             owner_team_id=other_team.id,
-            metadata_={"depends_on": ["warehouse.something.else"]},
         )
         test_session.add_all([upstream, downstream, unrelated])
+        await test_session.flush()
+
+        # Only downstream has a dependency row — unrelated does not
+        test_session.add(
+            AssetDependencyDB(
+                dependent_asset_id=downstream.id,
+                dependency_asset_id=upstream.id,
+            )
+        )
         await test_session.flush()
 
         affected_teams, affected_assets = await get_affected_parties(test_session, upstream.id)

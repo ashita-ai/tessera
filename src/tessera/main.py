@@ -29,12 +29,14 @@ from tessera.api import (
     bulk,
     contracts,
     dependencies,
+    discovery,
     impact,
     impact_preview,
     pending_proposals,
     preflight,
     proposals,
     registrations,
+    repos,
     schemas,
     search,
     services,
@@ -222,6 +224,7 @@ api_v1.include_router(contracts.router, prefix="/contracts", tags=["contracts"])
 api_v1.include_router(registrations.router, prefix="/registrations", tags=["registrations"])
 api_v1.include_router(proposals.router, prefix="/proposals", tags=["proposals"])
 api_v1.include_router(pending_proposals.router, tags=["proposals"])
+api_v1.include_router(repos.router, prefix="/repos", tags=["repos"])
 api_v1.include_router(services.router, prefix="/services", tags=["services"])
 api_v1.include_router(schemas.router, prefix="/schemas", tags=["schemas"])
 api_v1.include_router(sync.router, prefix="/sync", tags=["sync"])
@@ -230,6 +233,7 @@ api_v1.include_router(search.router)
 api_v1.include_router(webhooks.router)
 api_v1.include_router(audit.router)
 api_v1.include_router(preflight.router, prefix="/assets", tags=["preflight"])
+api_v1.include_router(discovery.router, prefix="/discovery", tags=["discovery"])
 api_v1.include_router(bulk.router, prefix="/bulk", tags=["bulk"])
 
 app.include_router(api_v1)

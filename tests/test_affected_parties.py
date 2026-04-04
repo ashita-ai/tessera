@@ -356,11 +356,11 @@ class TestObjections:
 
 
 class TestGetAffectedPartiesService:
-    """Test the get_affected_parties service function directly."""
+    """Test the get_affected_parties service function via dependency table."""
 
     @pytest.mark.asyncio
-    async def test_affected_parties_from_metadata_depends_on(self, client: AsyncClient) -> None:
-        """Test that affected parties are discovered from metadata.depends_on field."""
+    async def test_affected_parties_from_dependency_table(self, client: AsyncClient) -> None:
+        """Test that affected parties are discovered from AssetDependencyDB rows."""
         owner_team = (await client.post("/api/v1/teams", json={"name": "meta-owner"})).json()
         downstream_team = (
             await client.post("/api/v1/teams", json={"name": "meta-affected"})
@@ -381,14 +381,20 @@ class TestGetAffectedPartiesService:
             json={"schema": schema_v1, "compatibility_mode": "backward"},
         )
 
-        # Create downstream asset with metadata.depends_on
+        # Create downstream asset and register an explicit dependency
+        downstream = (
+            await client.post(
+                "/api/v1/assets",
+                json={
+                    "fqn": "db.model.meta_model",
+                    "owner_team_id": downstream_team["id"],
+                },
+            )
+        ).json()
+
         await client.post(
-            "/api/v1/assets",
-            json={
-                "fqn": "db.model.meta_model",
-                "owner_team_id": downstream_team["id"],
-                "metadata": {"depends_on": ["db.source.meta_src"]},
-            },
+            f"/api/v1/assets/{downstream['id']}/dependencies",
+            json={"depends_on_asset_id": upstream["id"]},
         )
 
         # Publish breaking change
@@ -405,7 +411,6 @@ class TestGetAffectedPartiesService:
         proposal_id = data["proposal"]["id"]
 
         proposal = (await client.get(f"/api/v1/proposals/{proposal_id}")).json()
-        # Should find the downstream asset via metadata.depends_on
         assert len(proposal["affected_assets"]) >= 1
         affected_fqns = [a["asset_fqn"] for a in proposal["affected_assets"]]
         assert "db.model.meta_model" in affected_fqns

@@ -93,6 +93,7 @@ Force-publish is available for emergencies (admin-only, audit-logged).
 - **AI agent integration** — Agents register as consumers, check contracts before modifying schemas, and participate in the proposal workflow
 - **Webhooks** — Signed delivery (HMAC-SHA256) with SSRF protection, retry with backoff, delivery tracking
 - **API keys** — Scoped (read, write, admin), revocable, expiring. Supports agent identity with separate rate limit tiers
+- **Passive dependency discovery** — Mines preflight audit signals to infer which teams consume which assets, with confidence scoring and a confirm/reject workflow to promote inferences to registrations
 - **Audit log** — Append-only history of every publish, proposal, acknowledgment, force-approve, and consumption event
 - **Web UI** — Browse assets, view contract history, manage proposals and teams
 

@@ -568,9 +568,11 @@ def version() -> None:
     console.print("tessera 0.1.0")
 
 
-# Import and register dbt subcommand at the end to avoid circular imports
+# Import and register subcommands at the end to avoid circular imports
+from tessera.cli.admin import app as admin_app  # noqa: E402
 from tessera.cli.dbt import app as dbt_app  # noqa: E402
 
+app.add_typer(admin_app, name="admin")
 app.add_typer(dbt_app, name="dbt")
 
 
