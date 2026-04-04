@@ -19,6 +19,14 @@ from tessera.services.batch import (
     fetch_asset_counts_by_user,
     fetch_team_names,
 )
+from tessera.services.codeowners import (
+    CodeownersParseResult,
+    CodeownersRule,
+    TeamSuggestion,
+    parse_codeowners,
+    suggest_owners,
+    suggest_owners_bulk,
+)
 from tessera.services.contract_publisher import (
     ContractPublishingWorkflow,
     PublishAction,
@@ -142,4 +150,11 @@ __all__ = [
     # Migration suggester
     "MigrationSuggestion",
     "suggest_migrations",
+    # CODEOWNERS parser
+    "CodeownersParseResult",
+    "CodeownersRule",
+    "TeamSuggestion",
+    "parse_codeowners",
+    "suggest_owners",
+    "suggest_owners_bulk",
 ]
