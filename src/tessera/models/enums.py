@@ -146,6 +146,22 @@ class InferredDependencyStatus(StrEnum):
     EXPIRED = "expired"  # Stale inference — no recent audit signals
 
 
+class OtelBackendType(StrEnum):
+    """Supported OTEL trace backend types."""
+
+    JAEGER = "jaeger"
+    TEMPO = "tempo"
+    DATADOG = "datadog"
+
+
+class DependencySource(StrEnum):
+    """How a dependency was discovered."""
+
+    MANUAL = "manual"  # Explicitly registered by a human or API call
+    OTEL = "otel"  # Discovered via OTEL trace data
+    INFERRED = "inferred"  # Inferred from audit signals
+
+
 class SlackNotificationEventType(StrEnum):
     """Event types that can trigger Slack notifications."""
 

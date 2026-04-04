@@ -5,7 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
-from tessera.models.enums import DependencyType
+from tessera.models.enums import DependencySource, DependencyType
 
 
 class DependencyCreate(BaseModel):
@@ -24,4 +24,8 @@ class Dependency(BaseModel):
     dependent_asset_id: UUID
     dependency_asset_id: UUID
     dependency_type: DependencyType
+    source: DependencySource = DependencySource.MANUAL
+    confidence: float | None = None
+    last_observed_at: datetime | None = None
+    call_count: int | None = None
     created_at: datetime
