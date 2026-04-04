@@ -67,6 +67,12 @@ async def create_contract(
     published_by: UUID = Query(..., description="Team ID of the publisher"),
     published_by_user_id: UUID | None = Query(None, description="User ID who published"),
     force: bool = Query(False, description="Force publish even if breaking (creates audit trail)"),
+    force_reason: str | None = Query(
+        None,
+        description="Required when force=True. Explains why the breaking change is being forced.",
+        min_length=10,
+        max_length=500,
+    ),
     require_audit_pass: bool = Query(
         False, description="Require most recent audit to pass before publishing"
     ),
@@ -93,6 +99,14 @@ async def create_contract(
 
     Returns either a Contract (if published) or a Proposal (if breaking).
     """
+    # Require a reason when force-publishing
+    if force and not force_reason:
+        raise BadRequestError(
+            "force_reason is required when force=True. "
+            "Explain why this breaking change must bypass consumer acknowledgment.",
+            code=ErrorCode.INVALID_INPUT,
+        )
+
     # Verify asset exists and is not soft-deleted
     asset_result = await session.execute(
         select(AssetDB).where(AssetDB.id == asset_id).where(AssetDB.deleted_at.is_(None))
@@ -288,6 +302,7 @@ async def create_contract(
         published_by_user_id=published_by_user_id,
         guarantees=contract.guarantees.model_dump() if contract.guarantees else None,
         force=force,
+        force_reason=force_reason,
         audit_warning=audit_warning,
         field_descriptions=contract.field_descriptions,
         field_tags=contract.field_tags,

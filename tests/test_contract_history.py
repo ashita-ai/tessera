@@ -155,7 +155,8 @@ class TestContractDiff:
 
         # Force publish breaking change to create v2
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}&force=true",
+            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}&force=true"
+            "&force_reason=Removing email field as part of PII cleanup migration",
             json={
                 "version": "2.0.0",
                 "schema": {
