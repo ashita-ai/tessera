@@ -30,6 +30,7 @@ from tessera.api import (
     contracts,
     dependencies,
     discovery,
+    graph,
     impact,
     impact_preview,
     otel,
@@ -237,6 +238,7 @@ api_v1.include_router(webhooks.router)
 api_v1.include_router(audit.router)
 api_v1.include_router(preflight.router, prefix="/assets", tags=["preflight"])
 api_v1.include_router(discovery.router, prefix="/discovery", tags=["discovery"])
+api_v1.include_router(graph.router, prefix="/graph", tags=["graph"])
 api_v1.include_router(otel.router, prefix="/otel", tags=["otel"])
 api_v1.include_router(bulk.router, prefix="/bulk", tags=["bulk"])
 
