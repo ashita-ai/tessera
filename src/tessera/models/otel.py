@@ -83,6 +83,7 @@ class OtelDependency(BaseModel):
     confidence: float | None = None
     last_observed_at: datetime | None = None
     call_count: int | None = None
+    otel_config_id: UUID | None = None
     created_at: datetime
 
 

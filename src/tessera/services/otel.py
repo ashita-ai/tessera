@@ -5,10 +5,14 @@ service-to-service dependency edges and reconciles them against
 manually declared dependencies.
 """
 
+import asyncio
+import ipaddress
 import logging
 import math
+import socket
 import time
 from datetime import UTC, datetime
+from urllib.parse import urlparse
 from uuid import UUID
 
 import httpx
@@ -32,6 +36,57 @@ from tessera.models.otel import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+async def validate_otel_endpoint_host(url: str) -> tuple[bool, str]:
+    """Validate that an OTEL endpoint URL does not target internal/private hosts.
+
+    Performs async DNS resolution and rejects non-global IPs to prevent SSRF
+    attacks targeting cloud metadata services, localhost, or private networks.
+
+    Args:
+        url: The endpoint URL to validate.
+
+    Returns:
+        Tuple of (is_valid, error_message). If valid, error_message is empty.
+    """
+    try:
+        parsed = urlparse(url)
+        if not parsed.hostname:
+            return False, "Endpoint URL must have a hostname"
+
+        loop = asyncio.get_running_loop()
+        addrinfo = await asyncio.wait_for(
+            loop.getaddrinfo(
+                parsed.hostname,
+                parsed.port or (443 if parsed.scheme == "https" else 80),
+                family=socket.AF_UNSPEC,
+            ),
+            timeout=5.0,
+        )
+
+        for family, _, _, _, sockaddr in addrinfo:
+            ip_str = sockaddr[0]
+            try:
+                ip_obj = ipaddress.ip_address(ip_str)
+                if not ip_obj.is_global:
+                    logger.warning(
+                        "OTEL endpoint URL %s resolves to non-global IP %s",
+                        url,
+                        ip_obj,
+                    )
+                    return False, f"Endpoint URL resolves to blocked IP range ({ip_obj})"
+            except ValueError:
+                continue
+
+        return True, ""
+    except TimeoutError:
+        return False, "DNS resolution timed out for endpoint URL"
+    except socket.gaierror:
+        logger.warning("Could not resolve OTEL endpoint hostname: %s", parsed.hostname)
+        return True, ""
+    except Exception as exc:
+        return False, f"Invalid endpoint URL: {exc}"
 
 
 def compute_confidence(call_count: int, syncs_seen: int, total_syncs: int) -> float:
@@ -106,8 +161,7 @@ async def fetch_jaeger_dependencies(
     results: list[ServiceEdge] = []
     for edge in edges_raw:
         call_count_val = edge.get("callCount", 0)
-        # mypy: edge values are typed as object; cast through str for safety
-        cc = int(str(call_count_val)) if call_count_val is not None else 0
+        cc = int(float(str(call_count_val))) if call_count_val is not None else 0
         results.append(
             ServiceEdge(
                 parent=str(edge["parent"]),
@@ -190,12 +244,13 @@ async def upsert_otel_dependency(
     call_count: int,
     confidence: float,
     now: datetime,
+    config_id: UUID,
 ) -> tuple[AssetDependencyDB, bool]:
     """Create or update an OTEL-discovered dependency edge.
 
-    If a dependency already exists:
-    - source='otel': update call_count, confidence, last_observed_at
-    - source='manual': only update last_observed_at (confirms the manual registration)
+    Looks up existing OTEL-sourced dependencies only. MANUAL dependencies are
+    separate rows (enabled by the unique constraint including ``source``) so
+    the reconciliation report can identify edges confirmed by both sources.
 
     Args:
         session: Database session.
@@ -204,6 +259,7 @@ async def upsert_otel_dependency(
         call_count: Observed call count.
         confidence: Computed confidence score.
         now: Current timestamp.
+        config_id: The OTEL sync config that discovered this edge.
 
     Returns:
         Tuple of (dependency, was_created).
@@ -214,6 +270,7 @@ async def upsert_otel_dependency(
                 AssetDependencyDB.dependent_asset_id == dependent_asset_id,
                 AssetDependencyDB.dependency_asset_id == dependency_asset_id,
                 AssetDependencyDB.dependency_type == DependencyType.CONSUMES,
+                AssetDependencyDB.source == DependencySource.OTEL,
                 AssetDependencyDB.deleted_at.is_(None),
             )
         )
@@ -222,9 +279,9 @@ async def upsert_otel_dependency(
 
     if existing is not None:
         existing.last_observed_at = now
-        if existing.source == DependencySource.OTEL:
-            existing.call_count = call_count
-            existing.confidence = confidence
+        existing.call_count = call_count
+        existing.confidence = confidence
+        existing.otel_config_id = config_id
         await session.flush()
         return existing, False
 
@@ -236,6 +293,7 @@ async def upsert_otel_dependency(
         confidence=confidence,
         last_observed_at=now,
         call_count=call_count,
+        otel_config_id=config_id,
     )
     session.add(dep)
     await session.flush()
@@ -268,6 +326,7 @@ async def mark_stale_dependencies(
         select(AssetDependencyDB).where(
             and_(
                 AssetDependencyDB.source == DependencySource.OTEL,
+                AssetDependencyDB.otel_config_id == config.id,
                 AssetDependencyDB.deleted_at.is_(None),
                 AssetDependencyDB.last_observed_at.isnot(None),
                 AssetDependencyDB.last_observed_at < cutoff,
@@ -359,6 +418,7 @@ async def run_sync(
             call_count=edge.call_count,
             confidence=confidence,
             now=now,
+            config_id=config.id,
         )
         if was_created:
             created_count += 1

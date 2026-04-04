@@ -26,6 +26,7 @@ from tessera.services.otel import (
     resolve_service_name,
     run_sync,
     upsert_otel_dependency,
+    validate_otel_endpoint_host,
 )
 
 # ── Confidence scoring ────────────────────────────────────────
@@ -162,6 +163,21 @@ class TestFetchJaegerDependencies:
         with pytest.raises(httpx.HTTPStatusError):
             await fetch_jaeger_dependencies(config, http_client=mock_client)
 
+    @pytest.mark.asyncio
+    async def test_handles_float_call_count(self, config: OtelSyncConfigDB) -> None:
+        """callCount as a JSON float (e.g. 150.0) should parse without error."""
+        mock_response = httpx.Response(
+            200,
+            json=[{"parent": "svc-a", "child": "svc-b", "callCount": 150.0}],
+            request=httpx.Request("GET", "http://jaeger:16686/api/dependencies"),
+        )
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.get = AsyncMock(return_value=mock_response)
+
+        edges = await fetch_jaeger_dependencies(config, http_client=mock_client)
+        assert len(edges) == 1
+        assert edges[0].call_count == 150
+
 
 # ── Service resolution ────────────────────────────────────────
 
@@ -233,6 +249,18 @@ async def test_upsert_creates_new_dependency(test_session) -> None:
     test_session.add(team)
     await test_session.flush()
 
+    config = OtelSyncConfigDB(
+        name="upsert-config",
+        backend_type=OtelBackendType.JAEGER,
+        endpoint_url="http://jaeger:16686",
+        lookback_seconds=86400,
+        poll_interval_seconds=3600,
+        min_call_count=10,
+        enabled=True,
+    )
+    test_session.add(config)
+    await test_session.flush()
+
     asset_a = AssetDB(fqn="svc-a.api", owner_team_id=team.id)
     asset_b = AssetDB(fqn="svc-b.api", owner_team_id=team.id)
     test_session.add_all([asset_a, asset_b])
@@ -240,13 +268,20 @@ async def test_upsert_creates_new_dependency(test_session) -> None:
 
     now = datetime.now(UTC)
     dep, created = await upsert_otel_dependency(
-        test_session, asset_a.id, asset_b.id, call_count=500, confidence=0.8, now=now
+        test_session,
+        asset_a.id,
+        asset_b.id,
+        call_count=500,
+        confidence=0.8,
+        now=now,
+        config_id=config.id,
     )
 
     assert created is True
     assert dep.source == DependencySource.OTEL
     assert dep.confidence == 0.8
     assert dep.call_count == 500
+    assert dep.otel_config_id == config.id
 
 
 @pytest.mark.asyncio
@@ -254,6 +289,18 @@ async def test_upsert_updates_existing_otel_dependency(test_session) -> None:
     """Should update call_count and confidence for existing OTEL deps."""
     team = TeamDB(name="team-upsert2")
     test_session.add(team)
+    await test_session.flush()
+
+    config = OtelSyncConfigDB(
+        name="upsert2-config",
+        backend_type=OtelBackendType.JAEGER,
+        endpoint_url="http://jaeger:16686",
+        lookback_seconds=86400,
+        poll_interval_seconds=3600,
+        min_call_count=10,
+        enabled=True,
+    )
+    test_session.add(config)
     await test_session.flush()
 
     asset_a = AssetDB(fqn="svc-a2.api", owner_team_id=team.id)
@@ -264,14 +311,26 @@ async def test_upsert_updates_existing_otel_dependency(test_session) -> None:
     now = datetime.now(UTC)
     # First upsert creates
     dep1, created1 = await upsert_otel_dependency(
-        test_session, asset_a.id, asset_b.id, call_count=100, confidence=0.5, now=now
+        test_session,
+        asset_a.id,
+        asset_b.id,
+        call_count=100,
+        confidence=0.5,
+        now=now,
+        config_id=config.id,
     )
     assert created1 is True
 
     # Second upsert updates
     later = now + timedelta(hours=1)
     dep2, created2 = await upsert_otel_dependency(
-        test_session, asset_a.id, asset_b.id, call_count=500, confidence=0.9, now=later
+        test_session,
+        asset_a.id,
+        asset_b.id,
+        call_count=500,
+        confidence=0.9,
+        now=later,
+        config_id=config.id,
     )
     assert created2 is False
     assert dep2.id == dep1.id
@@ -281,10 +340,22 @@ async def test_upsert_updates_existing_otel_dependency(test_session) -> None:
 
 
 @pytest.mark.asyncio
-async def test_upsert_does_not_overwrite_manual_source(test_session) -> None:
-    """Should only update last_observed_at for manual deps, not source/confidence."""
+async def test_upsert_creates_otel_row_alongside_manual(test_session) -> None:
+    """OTEL upsert should create a separate OTEL row when a manual dep exists."""
     team = TeamDB(name="team-manual")
     test_session.add(team)
+    await test_session.flush()
+
+    config = OtelSyncConfigDB(
+        name="manual-config",
+        backend_type=OtelBackendType.JAEGER,
+        endpoint_url="http://jaeger:16686",
+        lookback_seconds=86400,
+        poll_interval_seconds=3600,
+        min_call_count=10,
+        enabled=True,
+    )
+    test_session.add(config)
     await test_session.flush()
 
     asset_a = AssetDB(fqn="svc-manual-a.api", owner_team_id=team.id)
@@ -302,15 +373,26 @@ async def test_upsert_does_not_overwrite_manual_source(test_session) -> None:
     test_session.add(manual_dep)
     await test_session.flush()
 
-    # OTEL upsert should not overwrite source
+    # OTEL upsert should create a new OTEL row, not touch the manual one
     now = datetime.now(UTC)
     dep, created = await upsert_otel_dependency(
-        test_session, asset_a.id, asset_b.id, call_count=999, confidence=0.99, now=now
+        test_session,
+        asset_a.id,
+        asset_b.id,
+        call_count=999,
+        confidence=0.99,
+        now=now,
+        config_id=config.id,
     )
-    assert created is False
-    assert dep.source == DependencySource.MANUAL
-    assert dep.call_count is None  # Manual dep's call_count not overwritten
-    assert dep.last_observed_at == now  # But last_observed_at IS updated
+    assert created is True
+    assert dep.source == DependencySource.OTEL
+    assert dep.call_count == 999
+    assert dep.otel_config_id == config.id
+
+    # Manual dep should be untouched
+    await test_session.refresh(manual_dep)
+    assert manual_dep.source == DependencySource.MANUAL
+    assert manual_dep.call_count is None
 
 
 # ── Stale detection ───────────────────────────────────────────
@@ -350,6 +432,7 @@ async def test_mark_stale_dependencies(test_session) -> None:
         confidence=0.8,
         last_observed_at=old_time,
         call_count=100,
+        otel_config_id=config.id,
     )
     test_session.add(dep)
     await test_session.flush()
@@ -396,6 +479,7 @@ async def test_mark_stale_skips_recent_dependencies(test_session) -> None:
         confidence=0.8,
         last_observed_at=recent,
         call_count=100,
+        otel_config_id=config.id,
     )
     test_session.add(dep)
     await test_session.flush()
@@ -584,7 +668,7 @@ async def test_reconciliation_report(test_session) -> None:
             last_observed_at=datetime.now(UTC),
         )
     )
-    # Both manual and OTEL: a → d (two separate rows, same edge)
+    # Both manual and OTEL: a → d (two separate rows, same edge, different source)
     test_session.add(
         AssetDependencyDB(
             dependent_asset_id=asset_a.id,
@@ -597,7 +681,7 @@ async def test_reconciliation_report(test_session) -> None:
         AssetDependencyDB(
             dependent_asset_id=asset_a.id,
             dependency_asset_id=asset_d.id,
-            dependency_type=DependencyType.REFERENCES,  # Different type to avoid unique constraint
+            dependency_type=DependencyType.CONSUMES,
             source=DependencySource.OTEL,
             confidence=0.95,
             call_count=10000,
@@ -610,6 +694,7 @@ async def test_reconciliation_report(test_session) -> None:
 
     assert len(report.declared_only) >= 1
     assert len(report.observed_only) >= 1
+    assert len(report.both) >= 1
 
     # Check that a→b is in declared_only
     declared_pairs = {
@@ -622,6 +707,12 @@ async def test_reconciliation_report(test_session) -> None:
         (item.dependent_asset_id, item.dependency_asset_id) for item in report.observed_only
     }
     assert (asset_c.id, asset_d.id) in observed_pairs
+
+    # Check that a→d is in both (confirmed by both sources)
+    both_pairs = {(item.dependent_asset_id, item.dependency_asset_id) for item in report.both}
+    assert (asset_a.id, asset_d.id) in both_pairs
+    confirmed = next(i for i in report.both if i.dependent_asset_id == asset_a.id)
+    assert confirmed.status == "confirmed"
 
 
 # ── API endpoint tests ────────────────────────────────────────
@@ -855,3 +946,104 @@ async def test_reconciliation_endpoint(client: AsyncClient) -> None:
     assert "declared_only" in data
     assert "observed_only" in data
     assert "both" in data
+
+
+# ── Contradictory filter guard ────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_list_otel_dependencies_contradictory_filters(client: AsyncClient) -> None:
+    """Combining stale=true with min_confidence > 0.05 should return 400."""
+    response = await client.get(
+        "/api/v1/otel/dependencies",
+        params={"stale": "true", "min_confidence": "0.3"},
+    )
+    assert response.status_code == 400
+    assert "stale" in response.json()["error"]["message"].lower()
+
+
+# ── Stale scoping isolation ───────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_mark_stale_scoped_to_config(test_session) -> None:
+    """Stale marking should only affect deps belonging to the triggering config."""
+    team = TeamDB(name="team-scope")
+    test_session.add(team)
+    await test_session.flush()
+
+    asset_a = AssetDB(fqn="scope-a.api", owner_team_id=team.id)
+    asset_b = AssetDB(fqn="scope-b.api", owner_team_id=team.id)
+    test_session.add_all([asset_a, asset_b])
+    await test_session.flush()
+
+    config_a = OtelSyncConfigDB(
+        name="scope-config-a",
+        backend_type=OtelBackendType.JAEGER,
+        endpoint_url="http://jaeger:16686",
+        lookback_seconds=86400,  # 24 hours
+        poll_interval_seconds=3600,
+        min_call_count=10,
+        enabled=True,
+    )
+    config_b = OtelSyncConfigDB(
+        name="scope-config-b",
+        backend_type=OtelBackendType.JAEGER,
+        endpoint_url="http://jaeger2:16686",
+        lookback_seconds=3600,  # 1 hour
+        poll_interval_seconds=3600,
+        min_call_count=10,
+        enabled=True,
+    )
+    test_session.add_all([config_a, config_b])
+    await test_session.flush()
+
+    # Dep discovered by config_a, observed 5 hours ago
+    old_time = datetime.now(UTC) - timedelta(hours=5)
+    dep = AssetDependencyDB(
+        dependent_asset_id=asset_a.id,
+        dependency_asset_id=asset_b.id,
+        dependency_type=DependencyType.CONSUMES,
+        source=DependencySource.OTEL,
+        confidence=0.8,
+        last_observed_at=old_time,
+        call_count=100,
+        otel_config_id=config_a.id,
+    )
+    test_session.add(dep)
+    await test_session.flush()
+
+    # Running stale marking from config_b should NOT affect config_a's dep
+    now = datetime.now(UTC)
+    stale_count = await mark_stale_dependencies(test_session, config_b, now)
+    assert stale_count == 0
+
+    await test_session.refresh(dep)
+    assert dep.confidence == 0.8  # Unchanged
+
+
+# ── SSRF host validation ──────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_validate_otel_endpoint_rejects_localhost() -> None:
+    """Should reject URLs targeting localhost."""
+    is_valid, msg = await validate_otel_endpoint_host("http://127.0.0.1:16686")
+    assert is_valid is False
+    assert "blocked" in msg.lower()
+
+
+@pytest.mark.asyncio
+async def test_validate_otel_endpoint_rejects_metadata_service() -> None:
+    """Should reject AWS IMDS endpoint."""
+    is_valid, msg = await validate_otel_endpoint_host("http://169.254.169.254/latest/meta-data/")
+    assert is_valid is False
+    assert "blocked" in msg.lower()
+
+
+@pytest.mark.asyncio
+async def test_validate_otel_endpoint_rejects_private_ip() -> None:
+    """Should reject RFC 1918 private addresses."""
+    is_valid, msg = await validate_otel_endpoint_host("http://10.0.0.1:16686")
+    assert is_valid is False
+    assert "blocked" in msg.lower()

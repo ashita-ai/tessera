@@ -4,6 +4,7 @@ Provides CRUD for OTEL sync configs, manual sync trigger,
 OTEL-discovered dependency listing, and reconciliation.
 """
 
+import logging
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -35,7 +36,13 @@ from tessera.models.otel import (
 )
 from tessera.services import audit
 from tessera.services.audit import AuditAction
-from tessera.services.otel import build_reconciliation_report, run_sync
+from tessera.services.otel import (
+    build_reconciliation_report,
+    run_sync,
+    validate_otel_endpoint_host,
+)
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -70,6 +77,10 @@ async def create_otel_config(
 
     Requires WRITE scope.
     """
+    is_valid, err_msg = await validate_otel_endpoint_host(body.endpoint_url)
+    if not is_valid:
+        raise BadRequestError(err_msg, code=ErrorCode.INVALID_ENDPOINT_URL)
+
     db_config = OtelSyncConfigDB(
         name=body.name,
         backend_type=body.backend_type,
@@ -185,6 +196,11 @@ async def update_otel_config(
     config = result.scalar_one_or_none()
     if not config:
         raise NotFoundError(ErrorCode.OTEL_CONFIG_NOT_FOUND, "OTEL config not found")
+
+    if body.endpoint_url is not None:
+        is_valid, err_msg = await validate_otel_endpoint_host(body.endpoint_url)
+        if not is_valid:
+            raise BadRequestError(err_msg, code=ErrorCode.INVALID_ENDPOINT_URL)
 
     changes: dict[str, object] = {}
     if body.name is not None:
@@ -313,8 +329,9 @@ async def trigger_sync(
             action=AuditAction.OTEL_SYNC_FAILED,
             payload={"error": str(exc)},
         )
+        logger.error("OTEL sync failed for config %s: %s", config_id, exc, exc_info=True)
         raise BadRequestError(
-            f"OTEL sync failed: {exc}",
+            "OTEL sync failed. Check server logs for details.",
             code=ErrorCode.OTEL_SYNC_FAILED,
         )
 
@@ -357,6 +374,13 @@ async def list_otel_dependencies(
 
     Requires READ scope.
     """
+    if stale is True and min_confidence is not None and min_confidence > 0.05:
+        raise BadRequestError(
+            "Cannot combine stale=true with min_confidence > 0.05. "
+            "Stale dependencies have confidence <= 0.05.",
+            code=ErrorCode.INVALID_INPUT,
+        )
+
     base_query = select(AssetDependencyDB).where(
         AssetDependencyDB.source == DependencySource.OTEL,
         AssetDependencyDB.deleted_at.is_(None),

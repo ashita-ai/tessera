@@ -523,11 +523,16 @@ class AssetDependencyDB(Base):
         DateTime(timezone=True), nullable=True, index=True
     )
 
+    otel_config_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("otel_sync_configs.id"), nullable=True, index=True
+    )
+
     __table_args__ = (
         UniqueConstraint(
             "dependent_asset_id",
             "dependency_asset_id",
             "dependency_type",
+            "source",
             name="uq_dependency_edge",
         ),
         # Composite index for impact analysis: "what depends on this asset?"
