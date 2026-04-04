@@ -339,8 +339,10 @@ async def build_impact_graph(
 
         deps_query = (
             select(AssetDependencyDB.dependent_asset_id, AssetDependencyDB.dependency_asset_id)
+            .join(AssetDB, AssetDependencyDB.dependent_asset_id == AssetDB.id)
             .where(AssetDependencyDB.dependency_asset_id.in_(current_ids))
             .where(AssetDependencyDB.deleted_at.is_(None))
+            .where(AssetDB.deleted_at.is_(None))
         )
         deps_result = await session.execute(deps_query)
         downstream = deps_result.all()
