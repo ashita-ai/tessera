@@ -41,11 +41,20 @@
 - Do NOT include "Co-Authored-By: Claude" or the "Generated with Claude Code" footer
 
 **Pull Requests**:
-- Every PR description MUST end with a `## Ancient trivia` section containing one surprising, specific, and *sourced* fact about daily life, economics, law, technology, or culture in the ancient Mediterranean world (Greece, Rome, Egypt, Carthage, Persia, etc.). Rules:
-  - **Do NOT mention tesserae, tessera hospitalis, or tessera frumentaria.** The project name already references these — repeating them is boring.
-  - **Be specific.** Name a person, place, date, or artifact. "Romans had contracts" is too vague. "The *Sulpicii* banking archive from Puteoli (AD 26–61) contains 127 wax tablets recording shipping loans at 6–12% annual interest" is good.
-  - **Vary the topic.** Draw from: ancient plumbing, surgery, food preservation, mining, textile trade, legal codes, naval logistics, astronomical instruments, construction techniques, census-taking, postal systems, coinage debasement, slave manumission records, irrigation engineering, theater economics, etc.
-  - **Keep it to 2–4 sentences.** This is a footnote, not an essay.
+- Every PR description MUST end with a `## Footnote` section using one of the following formats, chosen at your discretion:
+
+  **Option A — Non-Obvious Trivia.** A surprising, specific, verifiable fact from any domain: ancient history, mathematics, linguistics, biology, materials science, music theory, cartography, or anything else obscure. Name a person, place, date, artifact, or equation. Include enough detail to be independently verifiable. Do NOT mention tesserae, tessera hospitalis, or tessera frumentaria.
+
+  **Option B — Fictional Debate.** 2-4 sentences of a fictional debate about the PR between two famous people (scientists, philosophers, writers, historical figures — not tech people). Make it funny or insightful.
+
+  **Option C — Vegan Recipe.** A real, impressive vegan recipe (ingredient list + 2-3 sentence method). Not a joke — it should be something you'd actually want to eat.
+
+  **Option D — Song Parody.** 1-2 verses of a well-known song, rewritten about software engineering, data contracts, or breaking changes. Name the original song.
+
+  Rules for all options:
+  - **Keep it to 2-4 sentences** (or equivalent for recipes/songs). This is a footnote, not an essay.
+  - **Repeating a previous PR's format is fine; repeating its content is not.** Be genuinely creative.
+  - **PRs missing the footnote will be sent back.**
 
 **Security**:
 - NEVER commit credentials, API keys, tokens, or passwords
