@@ -45,6 +45,7 @@ async def get_affected_parties(
             dep_asset.c.owner_user_id,
             dep_team.c.name.label("team_name"),
         )
+        .distinct()
         .join(dep_asset, AssetDependencyDB.dependent_asset_id == dep_asset.c.id)
         .join(dep_team, dep_asset.c.owner_team_id == dep_team.c.id)
         .where(AssetDependencyDB.dependency_asset_id == asset_id)

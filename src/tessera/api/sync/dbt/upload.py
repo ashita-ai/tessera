@@ -217,10 +217,13 @@ async def _sync_asset_dependencies(
             continue
         resolved[dep_asset.id] = _dependency_type_for_node_id(node_id)
 
-    # Fetch all existing dependency rows for this asset (including soft-deleted)
+    # Fetch existing dbt-managed dependency rows for this asset (including soft-deleted).
+    # Only touch TRANSFORMS/CONSUMES rows so manually-created dependencies are preserved.
+    dbt_managed_types = [DependencyType.TRANSFORMS, DependencyType.CONSUMES]
     existing_result = await session.execute(
         select(AssetDependencyDB).where(
             AssetDependencyDB.dependent_asset_id == asset.id,
+            AssetDependencyDB.dependency_type.in_(dbt_managed_types),
         )
     )
     existing_rows = {

@@ -14,8 +14,12 @@ console = Console()
 err_console = Console(stderr=True)
 
 
-async def _run_backfill() -> dict[str, int]:
-    """Execute the dependency backfill against the database."""
+async def _run_backfill(*, dry_run: bool = False) -> dict[str, int]:
+    """Execute the dependency backfill against the database.
+
+    When dry_run is True, the transaction is rolled back instead of committed
+    so the returned counts reflect what *would* be created without writing.
+    """
 
     from sqlalchemy import select
 
@@ -87,7 +91,10 @@ async def _run_backfill() -> dict[str, int]:
                 existing_edges.add(edge_key)
                 counts["created"] += 1
 
-        await session.commit()
+        if dry_run:
+            await session.rollback()
+        else:
+            await session.commit()
 
     return counts
 
@@ -105,12 +112,8 @@ def backfill_dependencies(
     """
     if dry_run:
         console.print("[yellow]Dry run mode — no changes will be written[/yellow]")
-        # For dry run, we'd need a separate path that doesn't commit.
-        # For simplicity, just run the real thing — it's idempotent.
-        console.print("[dim]Dry run not yet implemented. Run without --dry-run.[/dim]")
-        return
 
-    counts = asyncio.run(_run_backfill())
+    counts = asyncio.run(_run_backfill(dry_run=dry_run))
 
     console.print(f"[green]Created:[/green] {counts['created']} dependency rows")
     console.print(f"[dim]Skipped (already exist):[/dim] {counts['skipped_exists']}")
