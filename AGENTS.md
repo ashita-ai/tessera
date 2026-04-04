@@ -41,7 +41,11 @@
 - Do NOT include "Co-Authored-By: Claude" or the "Generated with Claude Code" footer
 
 **Pull Requests**:
-- Every PR description MUST include a piece of trivia about socioeconomics, culture, or daily life in ancient Greece, Rome, or Egypt. The project is named after the *tessera hospitalis* — a Roman contract token — so lean into that spirit. Examples: Roman trade practices, Athenian contract law, Egyptian grain accounting, daily life in Pompeii, the economics of the agora.
+- Every PR description MUST end with a `## Ancient trivia` section containing one surprising, specific, and *sourced* fact about daily life, economics, law, technology, or culture in the ancient Mediterranean world (Greece, Rome, Egypt, Carthage, Persia, etc.). Rules:
+  - **Do NOT mention tesserae, tessera hospitalis, or tessera frumentaria.** The project name already references these — repeating them is boring.
+  - **Be specific.** Name a person, place, date, or artifact. "Romans had contracts" is too vague. "The *Sulpicii* banking archive from Puteoli (AD 26–61) contains 127 wax tablets recording shipping loans at 6–12% annual interest" is good.
+  - **Vary the topic.** Draw from: ancient plumbing, surgery, food preservation, mining, textile trade, legal codes, naval logistics, astronomical instruments, construction techniques, census-taking, postal systems, coinage debasement, slave manumission records, irrigation engineering, theater economics, etc.
+  - **Keep it to 2–4 sentences.** This is a footnote, not an essay.
 
 **Security**:
 - NEVER commit credentials, API keys, tokens, or passwords
