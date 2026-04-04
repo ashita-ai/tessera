@@ -189,7 +189,11 @@ class TestFieldMetadataCarryForward:
         # Publish v2: remove remove_field (force publish since breaking)
         v2_resp = await client.post(
             f"/api/v1/assets/{asset_id}/contracts",
-            params={"published_by": team_id, "force": True},
+            params={
+                "published_by": team_id,
+                "force": True,
+                "force_reason": "Removing remove_field as part of schema cleanup",
+            },
             json={
                 "schema": {
                     "type": "object",
