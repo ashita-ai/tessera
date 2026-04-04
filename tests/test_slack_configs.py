@@ -307,6 +307,28 @@ class TestUpdateSlackConfig:
         assert resp.json()["has_webhook_url"] is True
         assert resp.json()["has_bot_token"] is False
 
+    async def test_update_rejects_both_auth_methods(self, client):
+        """Rejects update with both webhook_url and bot_token."""
+        team = await _create_team(client)
+
+        with patch("tessera.api.slack_configs.validate_webhook_url", new_callable=AsyncMock) as m:
+            m.return_value = (True, "")
+            create_resp = await client.post(
+                "/api/v1/slack/configs",
+                json=_slack_config_body(team["id"]),
+            )
+        assert create_resp.status_code == 201
+        config_id = create_resp.json()["id"]
+
+        resp = await client.patch(
+            f"/api/v1/slack/configs/{config_id}",
+            json={
+                "webhook_url": "https://hooks.slack.com/services/T/B/new",
+                "bot_token": "xoxb-also-this",
+            },
+        )
+        assert resp.status_code == 422
+
     async def test_update_not_found(self, client):
         """Returns 404 for non-existent config."""
         resp = await client.patch(

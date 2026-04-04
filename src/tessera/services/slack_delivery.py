@@ -85,7 +85,7 @@ async def _deliver_via_webhook(
         return DeliveryResult(success=False, error="Slack webhook request timed out")
     except Exception as e:
         logger.error("Slack webhook delivery failed: %s", e, exc_info=True)
-        return DeliveryResult(success=False, error=str(e))
+        return DeliveryResult(success=False, error="Webhook delivery failed — check server logs")
 
 
 async def _deliver_via_bot_token(
@@ -135,4 +135,4 @@ async def _deliver_via_bot_token(
         return DeliveryResult(success=False, error="Slack API request timed out")
     except Exception as e:
         logger.error("Slack bot token delivery failed: %s", e, exc_info=True)
-        return DeliveryResult(success=False, error=str(e))
+        return DeliveryResult(success=False, error="Bot token delivery failed — check server logs")

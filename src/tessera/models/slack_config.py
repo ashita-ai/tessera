@@ -1,12 +1,18 @@
 """Pydantic models for Slack configuration."""
 
+from __future__ import annotations
+
 import re
 from datetime import datetime
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from tessera.models.enums import SlackNotificationEventType
+
+if TYPE_CHECKING:
+    from tessera.db.models import SlackConfigDB
 
 _VALID_EVENT_TYPES = {e.value for e in SlackNotificationEventType}
 _CHANNEL_ID_RE = re.compile(r"^C[A-Z0-9]+$")
@@ -26,7 +32,7 @@ class SlackConfigCreate(BaseModel):
     enabled: bool = True
 
     @model_validator(mode="after")
-    def validate_auth_and_events(self) -> "SlackConfigCreate":
+    def validate_auth_and_events(self) -> SlackConfigCreate:
         """Validate that exactly one auth method is provided and event types are valid."""
         has_webhook = self.webhook_url is not None and self.webhook_url.strip() != ""
         has_token = self.bot_token is not None and self.bot_token.strip() != ""
@@ -66,8 +72,13 @@ class SlackConfigUpdate(BaseModel):
     enabled: bool | None = None
 
     @model_validator(mode="after")
-    def validate_update_fields(self) -> "SlackConfigUpdate":
+    def validate_update_fields(self) -> SlackConfigUpdate:
         """Validate update fields when provided."""
+        has_webhook = self.webhook_url is not None
+        has_token = self.bot_token is not None
+        if has_webhook and has_token:
+            raise ValueError("Provide either webhook_url or bot_token, not both")
+
         if self.channel_id is not None and not _CHANNEL_ID_RE.match(self.channel_id):
             raise ValueError(
                 f"channel_id must match Slack format (C followed by alphanumeric), "
@@ -121,19 +132,19 @@ class SlackConfigResponse(BaseModel):
     updated_at: datetime | None = None
 
     @classmethod
-    def from_db(cls, db: object) -> "SlackConfigResponse":
+    def from_db(cls, db: SlackConfigDB) -> SlackConfigResponse:
         """Create a response from a DB model, masking secrets."""
         return cls(
-            id=db.id,  # type: ignore[attr-defined]
-            team_id=db.team_id,  # type: ignore[attr-defined]
-            channel_id=db.channel_id,  # type: ignore[attr-defined]
-            channel_name=db.channel_name,  # type: ignore[attr-defined]
-            has_webhook_url=db.webhook_url is not None,  # type: ignore[attr-defined]
-            has_bot_token=db.bot_token is not None,  # type: ignore[attr-defined]
-            notify_on=db.notify_on,  # type: ignore[attr-defined]
-            enabled=db.enabled,  # type: ignore[attr-defined]
-            created_at=db.created_at,  # type: ignore[attr-defined]
-            updated_at=db.updated_at,  # type: ignore[attr-defined]
+            id=db.id,
+            team_id=db.team_id,
+            channel_id=db.channel_id,
+            channel_name=db.channel_name,
+            has_webhook_url=db.webhook_url is not None,
+            has_bot_token=db.bot_token is not None,
+            notify_on=db.notify_on,
+            enabled=db.enabled,
+            created_at=db.created_at,
+            updated_at=db.updated_at,
         )
 
 
