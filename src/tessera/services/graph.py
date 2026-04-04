@@ -1,9 +1,7 @@
 """Service dependency graph construction.
 
 Aggregates asset-level dependencies into service-level edges for visualization.
-Two data sources:
-  1. Declared dependencies (asset_dependencies table) — always available
-  2. OTEL-observed dependencies — future (#415), stubbed as empty for now
+Currently uses declared dependencies (asset_dependencies table).
 """
 
 from datetime import UTC, datetime, timedelta
@@ -188,7 +186,7 @@ async def _load_service_edges(
             source=row.source_service_id,
             target=row.target_service_id,
             dependency_type=str(row.dependency_type),
-            source_type="manual",  # All current deps are manual; OTEL comes with #415
+            source_type="manual",
             confidence=None,
             call_count=None,
             asset_level_edges=row.edge_count,
@@ -200,8 +198,6 @@ async def _load_service_edges(
 async def build_service_graph(
     session: AsyncSession,
     team_id: UUID | None = None,
-    min_confidence: float = 0.0,  # noqa: ARG001 — reserved for OTEL (#415)
-    include_unregistered: bool = False,  # noqa: ARG001 — reserved for OTEL (#415)
 ) -> ServiceGraphResponse:
     """Build the full service dependency graph.
 
@@ -245,7 +241,7 @@ async def build_service_graph(
     return ServiceGraphResponse(
         nodes=nodes,
         edges=edges,
-        unregistered_services=[],  # OTEL not yet implemented (#415)
+        unregistered_services=[],
         metadata=GraphMetadata(
             node_count=len(nodes),
             edge_count=len(edges),
@@ -262,8 +258,16 @@ async def build_neighborhood(
     """Build a 1-hop subgraph around the given service.
 
     Returns the service, its direct upstream dependencies, and its direct
-    downstream dependents.
+    downstream dependents. Raises NotFoundError if the service does not exist.
     """
+    svc_result = await session.execute(
+        select(ServiceDB.id).where(ServiceDB.id == service_id).where(ServiceDB.deleted_at.is_(None))
+    )
+    if svc_result.scalar_one_or_none() is None:
+        from tessera.api.errors import ErrorCode, NotFoundError
+
+        raise NotFoundError(ErrorCode.SERVICE_NOT_FOUND, "Service not found")
+
     all_edges = await _load_service_edges(session)
 
     # Find all services connected to this one (1-hop)

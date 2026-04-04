@@ -340,6 +340,14 @@ class TestNeighborhood:
         assert node_names == {"order-service", "payment-service"}
         assert data["metadata"]["edge_count"] == 1
 
+    async def test_neighborhood_of_nonexistent_service(self, client: AsyncClient, test_engine):
+        """Non-existent service returns 404."""
+        await _seed_graph(test_engine)
+        resp = await client.get(
+            "/api/v1/graph/services/00000000-0000-0000-0000-000000000001/neighborhood"
+        )
+        assert resp.status_code == 404
+
     async def test_neighborhood_of_isolated_service(self, client: AsyncClient, test_engine):
         """A service with no edges returns only itself."""
         session_maker = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)

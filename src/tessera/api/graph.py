@@ -1,8 +1,7 @@
 """Service dependency graph API endpoints.
 
 Read-only API returning service-to-service dependency graph for visualization.
-Aggregates declared (and future OTEL-observed) dependencies into a graph-friendly
-format with caching.
+Aggregates declared dependencies into a graph-friendly format with caching.
 """
 
 from uuid import UUID
@@ -24,18 +23,9 @@ GRAPH_CACHE_TTL = 60
 graph_cache = CacheService(prefix="graph", ttl=GRAPH_CACHE_TTL)
 
 
-def _graph_cache_key(
-    team_id: UUID | None,
-    min_confidence: float,
-    include_unregistered: bool,
-) -> str:
+def _graph_cache_key(team_id: UUID | None) -> str:
     """Build a deterministic cache key for the full graph endpoint."""
-    parts = [
-        f"team={team_id or 'all'}",
-        f"conf={min_confidence}",
-        f"unreg={include_unregistered}",
-    ]
-    return "services:" + ":".join(parts)
+    return f"services:team={team_id or 'all'}"
 
 
 @router.get(
@@ -51,12 +41,6 @@ async def get_service_graph(
     request: Request,
     auth: Auth,
     team_id: UUID | None = Query(None, description="Filter to services owned by this team"),
-    min_confidence: float = Query(
-        0.0, ge=0.0, le=1.0, description="Minimum confidence for OTEL edges"
-    ),
-    include_unregistered: bool = Query(
-        False, description="Include OTEL-observed services not yet registered"
-    ),
     _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
 ) -> ServiceGraphResponse:
@@ -66,17 +50,12 @@ async def get_service_graph(
     When team_id is provided, the graph is scoped to that team's services plus
     their direct neighbors.
     """
-    cache_key = _graph_cache_key(team_id, min_confidence, include_unregistered)
+    cache_key = _graph_cache_key(team_id)
     cached = await graph_cache.get(cache_key)
     if cached is not None:
         return ServiceGraphResponse.model_validate(cached)
 
-    graph = await build_service_graph(
-        session,
-        team_id=team_id,
-        min_confidence=min_confidence,
-        include_unregistered=include_unregistered,
-    )
+    graph = await build_service_graph(session, team_id=team_id)
 
     await graph_cache.set(cache_key, graph.model_dump(mode="json"))
     return graph
@@ -88,6 +67,7 @@ async def get_service_graph(
     responses={
         401: {"description": "Authentication required"},
         403: {"description": "Forbidden — insufficient permissions"},
+        404: {"description": "Service not found"},
     },
 )
 @limit_read
