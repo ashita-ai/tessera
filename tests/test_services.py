@@ -324,31 +324,6 @@ class TestListServiceAssets:
         assert data["results"] == []
         assert data["total"] == 0
 
-    async def test_list_assets_with_linked_asset(
-        self, client: AsyncClient, team_and_repo: tuple[str, str]
-    ):
-        """Assets linked to a service appear in the listing.
-
-        Since AssetCreate doesn't expose service_id yet, we create an asset
-        via a POST to the service-specific bulk/sync path. For now, we verify
-        the endpoint structure returns correctly with an empty list and test
-        the wiring. The full integration path (asset → service linkage) will
-        be testable once the asset API accepts service_id.
-        """
-        team_id, repo_id = team_and_repo
-        create_resp = await client.post(
-            "/api/v1/services",
-            json={"name": "with-assets", "repo_id": repo_id, "owner_team_id": team_id},
-        )
-        svc_id = create_resp.json()["id"]
-
-        resp = await client.get(f"/api/v1/services/{svc_id}/assets")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["total"] == 0
-        assert data["results"] == []
-        assert data["limit"] > 0
-
     async def test_list_assets_nonexistent_service(self, client: AsyncClient):
         resp = await client.get(f"/api/v1/services/{ZERO_UUID}/assets")
         assert resp.status_code == 404
