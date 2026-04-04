@@ -123,4 +123,4 @@ See [configuration docs](https://ashita-ai.github.io/tessera/getting-started/qui
 
 ## License
 
-MIT
+Apache License 2.0

@@ -7,18 +7,32 @@ interface PaginatedResponse<T> {
   limit: number;
 }
 
+export interface Repo {
+  id: string;
+  name: string;
+  git_url: string;
+  default_branch: string;
+  spec_paths: string[];
+  owner_team_id: string;
+  sync_enabled: boolean;
+  codeowners_path?: string;
+  last_synced_at?: string;
+  last_synced_commit?: string;
+  created_at: string;
+  updated_at?: string;
+  services_count?: number;
+}
+
 export interface Service {
   id: string;
   name: string;
-  owner_team_id: string;
-  owner_team_name?: string;
-  repo_url: string;
-  spec_paths: string[];
+  repo_id: string;
+  root_path: string;
   otel_service_name?: string;
-  poll_interval_seconds: number;
-  last_synced_at?: string;
-  asset_count?: number;
+  owner_team_id: string;
   created_at: string;
+  updated_at?: string;
+  asset_count?: number;
 }
 
 export interface Asset {
@@ -126,6 +140,40 @@ export interface DashboardStats {
   pending_proposals: number;
 }
 
+export interface GraphNode {
+  id: string;
+  label: string;
+  type: "service" | "asset";
+  team_id?: string;
+  team_name?: string;
+  resource_type?: string;
+  has_breaking_proposal?: boolean;
+  sync_status?: "synced" | "pending" | "error" | "never";
+}
+
+export interface GraphEdge {
+  source: string;
+  target: string;
+  dependency_type: string;
+  confidence?: number;
+  source_label?: string;
+}
+
+export interface GraphData {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}
+
+export interface Lineage {
+  asset_id: string;
+  asset_fqn: string;
+  owner_team_id: string;
+  owner_team_name: string;
+  upstream: { asset_id: string; asset_fqn: string; dependency_type: string; owner_team: string }[];
+  downstream: { team_id: string; team_name: string; registrations: { contract_id: string; status: string; pinned_version?: string }[] }[];
+  downstream_assets: { asset_id: string; asset_fqn: string; dependency_type: string; owner_team: string }[];
+}
+
 type QueryParams = Record<string, string | number | boolean | undefined>;
 
 async function request<T>(
@@ -183,11 +231,22 @@ export const api = {
     };
   },
 
-  // Services (future — these will call the endpoints from Spec-006)
+  // Repos
+  listRepos: (params?: QueryParams) =>
+    request<PaginatedResponse<Repo>>("/repos", {}, params),
+  getRepo: (id: string) => request<Repo>(`/repos/${id}`),
+  createRepo: (data: { name: string; git_url: string; owner_team_id: string; default_branch?: string; spec_paths?: string[]; codeowners_path?: string; sync_enabled?: boolean }) =>
+    request<Repo>("/repos", { method: "POST", body: JSON.stringify(data) }),
+  triggerRepoSync: (id: string) =>
+    request<{ status: string; message: string }>(`/repos/${id}/sync`, { method: "POST" }),
+
+  // Services
   listServices: (params?: QueryParams) =>
     request<PaginatedResponse<Service>>("/services", {}, params),
   getService: (id: string) => request<Service>(`/services/${id}`),
-  createService: (data: Partial<Service>) =>
+  listServiceAssets: (id: string, params?: QueryParams) =>
+    request<PaginatedResponse<Asset>>(`/services/${id}/assets`, {}, params),
+  createService: (data: { name: string; repo_id: string; owner_team_id: string; root_path?: string; otel_service_name?: string }) =>
     request<Service>("/services", { method: "POST", body: JSON.stringify(data) }),
 
   // Assets
@@ -215,11 +274,66 @@ export const api = {
     request<PaginatedResponse<Team>>("/teams", {}, params),
   getTeam: (id: string) => request<Team>(`/teams/${id}`),
 
-  // Dependencies
+  // Dependencies & Lineage
   listDependencies: (assetId: string, params?: QueryParams) =>
     request<PaginatedResponse<Dependency>>(`/assets/${assetId}/dependencies`, {}, params),
+  getLineage: (assetId: string) =>
+    request<Lineage>(`/assets/${assetId}/lineage`),
 
   // Audit
   listAuditEvents: (params?: QueryParams) =>
     request<PaginatedResponse<AuditEvent>>("/audit/events", {}, params),
+
+  // Graph — aggregates assets + dependencies into a renderable graph
+  async getGraphData(): Promise<GraphData> {
+    const [assets, proposals] = await Promise.all([
+      request<PaginatedResponse<Asset>>("/assets", {}, { limit: 200 }),
+      request<PaginatedResponse<Proposal>>("/proposals", {}, { status: "pending", limit: 200 }),
+    ]);
+
+    const breakingAssetIds = new Set(
+      proposals.results
+        .filter((p) => p.breaking_changes_count > 0)
+        .map((p) => p.asset_id),
+    );
+
+    const nodes: GraphNode[] = assets.results.map((a) => ({
+      id: a.id,
+      label: a.fqn.split(".").pop() ?? a.fqn,
+      type: "asset" as const,
+      team_id: a.owner_team_id,
+      team_name: a.owner_team_name,
+      resource_type: a.resource_type,
+      has_breaking_proposal: breakingAssetIds.has(a.id),
+      sync_status: "synced" as const,
+    }));
+
+    // Fetch dependencies for all assets in parallel (batched)
+    const depResults = await Promise.all(
+      assets.results.map((a) =>
+        request<PaginatedResponse<Dependency>>(`/assets/${a.id}/dependencies`, {}, { limit: 100 })
+          .catch(() => ({ results: [] as Dependency[], total: 0, offset: 0, limit: 100 })),
+      ),
+    );
+
+    const edges: GraphEdge[] = [];
+    const seen = new Set<string>();
+    for (const depPage of depResults) {
+      for (const dep of depPage.results) {
+        const key = `${dep.dependent_asset_id}->${dep.dependency_asset_id}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          edges.push({
+            source: dep.dependent_asset_id,
+            target: dep.dependency_asset_id,
+            dependency_type: dep.dependency_type,
+            confidence: dep.confidence,
+            source_label: dep.source,
+          });
+        }
+      }
+    }
+
+    return { nodes, edges };
+  },
 };

@@ -1,8 +1,10 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { Service } from "@/lib/api";
-import { formatDate } from "@/lib/utils";
+import { CardGridSkeleton } from "@/components/shared/Skeleton";
+import { EmptyState } from "@/components/shared/EmptyState";
 
 export function Services() {
   const [showRegister, setShowRegister] = useState(false);
@@ -30,18 +32,19 @@ export function Services() {
       </div>
 
       {isError ? (
-        <div className="rounded-lg border border-line bg-bg-raised px-6 py-10 text-center">
-          <p className="text-[13px] text-t2">Service registry not available</p>
-          <p className="mt-1.5 text-[11px] text-t3">
-            <span className="font-mono text-accent">POST /api/v1/services</span> endpoint has not been implemented yet.
-          </p>
-        </div>
+        <EmptyState
+          title="Service registry not available"
+          description="The service API endpoint has not been implemented yet."
+        />
       ) : isLoading ? (
-        <div className="py-16 text-center text-[11px] text-t3">Loading...</div>
+        <CardGridSkeleton />
       ) : services.length === 0 ? (
-        <div className="rounded-lg border border-line bg-bg-raised px-6 py-10 text-center">
-          <p className="text-[11px] text-t3">No services registered</p>
-        </div>
+        <EmptyState
+          title="No services registered"
+          description="Register a service to start tracking API specs and dependencies."
+          actionLabel="Register service"
+          onAction={() => setShowRegister(true)}
+        />
       ) : (
         <div className="stagger grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {services.map((svc) => (
@@ -59,23 +62,18 @@ export function Services() {
 
 function ServiceCard({ service }: { service: Service }) {
   return (
-    <div className="group rounded-lg border border-line bg-bg-raised p-4 transition-colors hover:border-line-strong">
+    <Link
+      to={`/services/${service.id}`}
+      className="group rounded-lg border border-line bg-bg-raised p-4 transition-colors hover:border-line-strong"
+    >
       <div className="flex items-start justify-between">
         <p className="font-mono text-xs font-medium text-t1">{service.name}</p>
-        {service.last_synced_at && (
-          <span className="rounded-full bg-green/10 px-1.5 py-px text-[10px] font-medium text-green">
-            synced
-          </span>
-        )}
       </div>
-      {service.owner_team_name && (
-        <p className="mt-0.5 text-[10px] text-t3">{service.owner_team_name}</p>
-      )}
 
       <div className="mt-3 space-y-1 text-[11px]">
         <div className="flex items-center gap-2">
-          <span className="w-8 shrink-0 text-t3">repo</span>
-          <span className="truncate font-mono text-[10px] text-t2">{service.repo_url}</span>
+          <span className="w-8 shrink-0 text-t3">path</span>
+          <span className="truncate font-mono text-[10px] text-t2">{service.root_path}</span>
         </div>
         {service.otel_service_name && (
           <div className="flex items-center gap-2">
@@ -88,21 +86,16 @@ function ServiceCard({ service }: { service: Service }) {
           <span className="text-t2">{service.asset_count ?? 0}</span>
         </div>
       </div>
-
-      {service.last_synced_at && (
-        <p className="mt-3 border-t border-line/50 pt-2 text-[10px] text-t3">
-          Synced {formatDate(service.last_synced_at)}
-        </p>
-      )}
-    </div>
+    </Link>
   );
 }
 
 function RegisterModal({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
-  const [repoUrl, setRepoUrl] = useState("");
-  const [specPaths, setSpecPaths] = useState("");
+  const [repoId, setRepoId] = useState("");
+  const [teamId, setTeamId] = useState("");
+  const [rootPath, setRootPath] = useState("/");
   const [otelName, setOtelName] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -110,8 +103,9 @@ function RegisterModal({ onClose }: { onClose: () => void }) {
     mutationFn: () =>
       api.createService({
         name,
-        repo_url: repoUrl,
-        spec_paths: specPaths.split(",").map((s) => s.trim()).filter(Boolean),
+        repo_id: repoId,
+        owner_team_id: teamId,
+        root_path: rootPath || "/",
         otel_service_name: otelName || undefined,
       }),
     onSuccess: () => {
@@ -124,8 +118,8 @@ function RegisterModal({ onClose }: { onClose: () => void }) {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    if (!name.trim() || !repoUrl.trim()) {
-      setError("Service name and repository URL are required.");
+    if (!name.trim() || !repoId.trim() || !teamId.trim()) {
+      setError("Service name, repository ID, and team ID are required.");
       return;
     }
     mutation.mutate();
@@ -137,12 +131,13 @@ function RegisterModal({ onClose }: { onClose: () => void }) {
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
         <div className="w-full max-w-md rounded-lg border border-line bg-bg-raised p-5 shadow-2xl">
           <p className="text-[13px] font-medium text-t1">Register service</p>
-          <p className="mt-1 text-[11px] text-t3">Point Tessera at a git repository containing API specs.</p>
+          <p className="mt-1 text-[11px] text-t3">Register a deployable unit within a repository.</p>
 
           <form className="mt-4 space-y-3" onSubmit={handleSubmit}>
             <Field label="Service name" placeholder="e.g., order-service" value={name} onChange={setName} />
-            <Field label="Git repository URL" placeholder="https://github.com/org/repo" value={repoUrl} onChange={setRepoUrl} />
-            <Field label="Spec file paths" placeholder="api/openapi.yaml, proto/" hint="Comma-separated paths to OpenAPI, protobuf, or GraphQL specs" value={specPaths} onChange={setSpecPaths} />
+            <Field label="Repository ID" placeholder="UUID of the parent repository" value={repoId} onChange={setRepoId} />
+            <Field label="Owner team ID" placeholder="UUID of the owning team" value={teamId} onChange={setTeamId} />
+            <Field label="Root path" placeholder="/" hint="Path within the repository for this service" value={rootPath} onChange={setRootPath} />
             <Field label="OTEL service name" placeholder="order-service" hint="Matches the service.name attribute in your OTEL traces" value={otelName} onChange={setOtelName} />
 
             {error && <p className="text-[11px] text-red">{error}</p>}
