@@ -130,4 +130,4 @@ If you later try to remove `email` (a breaking change), Tessera will:
 
 ## License
 
-Tessera is open source under the MIT License.
+Tessera is open source under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0).
