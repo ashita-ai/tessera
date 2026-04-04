@@ -328,6 +328,30 @@ class Settings(BaseSettings):  # type: ignore[misc]
         "Prevents stale connections from accumulating.",
     )
 
+    # ── OTEL Dependency Discovery ─────────────────────────────
+
+    otel_enabled: bool = Field(
+        default=False,
+        description="Enable OTEL-based dependency discovery. "
+        "When False, OTEL config CRUD endpoints still work but sync is a no-op.",
+        alias="TESSERA_OTEL_ENABLED",
+    )
+    otel_poll_interval: int = Field(
+        default=3600,
+        description="Default polling interval in seconds for OTEL backends.",
+        alias="TESSERA_OTEL_POLL_INTERVAL",
+    )
+    otel_min_confidence: float = Field(
+        default=0.3,
+        description="Minimum confidence score to create an OTEL-discovered dependency edge.",
+        alias="TESSERA_OTEL_MIN_CONFIDENCE",
+    )
+    otel_stale_multiplier: int = Field(
+        default=3,
+        description="Mark OTEL dependency stale after N * lookback_seconds without observation.",
+        alias="TESSERA_OTEL_STALE_MULTIPLIER",
+    )
+
     @model_validator(mode="after")
     def validate_production_config(self) -> "Settings":
         """Validate configuration is safe for production deployment.

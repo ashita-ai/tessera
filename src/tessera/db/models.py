@@ -59,9 +59,11 @@ from tessera.models.enums import (
     ChangeType,
     CompatibilityMode,
     ContractStatus,
+    DependencySource,
     DependencyType,
     GuaranteeMode,
     InferredDependencyStatus,
+    OtelBackendType,
     ProposalStatus,
     RegistrationStatus,
     ResourceType,
@@ -508,6 +510,14 @@ class AssetDependencyDB(Base):
     dependency_type: Mapped[DependencyType] = mapped_column(
         Enum(DependencyType), default=DependencyType.CONSUMES
     )
+    source: Mapped[str] = mapped_column(
+        String(50), nullable=False, default=DependencySource.MANUAL, index=True
+    )
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    last_observed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    call_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True
@@ -522,6 +532,7 @@ class AssetDependencyDB(Base):
         ),
         # Composite index for impact analysis: "what depends on this asset?"
         Index("idx_dependency_target_active", "dependency_asset_id", "deleted_at"),
+        Index("idx_dependency_source", "source"),
     )
 
 
@@ -697,5 +708,37 @@ class InferredDependencyDB(Base):
             "consumer_team_id",
             "source",
             name="uq_inferred_dep_asset_team_source",
+        ),
+    )
+
+
+class OtelSyncConfigDB(Base):
+    """Configuration for an OTEL trace backend used for dependency discovery.
+
+    Each row represents a connection to an observability backend (Jaeger, Tempo,
+    Datadog) that Tessera queries periodically to discover service-to-service
+    dependency edges from trace data.
+    """
+
+    __tablename__ = "otel_sync_configs"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    backend_type: Mapped[OtelBackendType] = mapped_column(Enum(OtelBackendType), nullable=False)
+    endpoint_url: Mapped[str] = mapped_column(String(500), nullable=False)
+    auth_header: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    lookback_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=86400)
+    poll_interval_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=3600)
+    min_call_count: Mapped[int] = mapped_column(Integer, nullable=False, default=10)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_sync_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    __table_args__ = (
+        Index(
+            "uq_otel_config_name",
+            "name",
+            unique=True,
         ),
     )
