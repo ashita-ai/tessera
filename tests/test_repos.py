@@ -362,14 +362,17 @@ class TestTriggerSync:
     """Tests for POST /api/v1/repos/{id}/sync."""
 
     async def test_trigger_sync(self, client: AsyncClient):
-        """Trigger sync returns 202."""
+        """Trigger sync returns 202 with sync result."""
         team_id = await _create_team(client)
         repo = await _create_repo(client, team_id)
 
         resp = await client.post(f"/api/v1/repos/{repo['id']}/sync")
         assert resp.status_code == 202
         data = resp.json()
-        assert data["status"] == "accepted"
+        # Sync will fail because there's no real git repo, but
+        # the endpoint still returns 202 with a result payload
+        assert data["status"] in ("completed", "failed")
+        assert "repo_id" in data
 
     async def test_trigger_sync_not_found(self, client: AsyncClient):
         """Triggering sync on nonexistent repo should 404."""
@@ -503,3 +506,103 @@ class TestAuthScopes:
         """POST /repos/{id}/sync without auth should 401."""
         resp = await auth_client.post(f"/api/v1/repos/{_ZERO_UUID}/sync")
         assert resp.status_code == 401
+
+
+class TestPerRepoAuthAPI:
+    """Tests for per-repo git_token/ssh_key in API responses."""
+
+    async def test_create_repo_with_git_token(self, client: AsyncClient):
+        """Creating a repo with git_token should show has_git_token=True."""
+        team_id = await _create_team(client)
+        data = await _create_repo(
+            client,
+            team_id,
+            name="token-repo",
+            git_url="https://github.com/org/token-repo.git",
+            git_token="ghp_secret123",
+        )
+        assert data["has_git_token"] is True
+        assert data["has_ssh_key"] is False
+        assert "git_token" not in data
+        assert "ssh_key" not in data
+
+    async def test_create_repo_with_ssh_key(self, client: AsyncClient):
+        """Creating a repo with ssh_key should show has_ssh_key=True."""
+        team_id = await _create_team(client)
+        data = await _create_repo(
+            client,
+            team_id,
+            name="ssh-repo",
+            git_url="git@github.com:org/ssh-repo.git",
+            ssh_key="ssh-ed25519-fake-test-key-data-not-real",
+        )
+        assert data["has_ssh_key"] is True
+        assert "ssh_key" not in data
+
+    async def test_create_repo_no_credentials(self, client: AsyncClient):
+        """Creating a repo without credentials shows both has_* as False."""
+        team_id = await _create_team(client)
+        data = await _create_repo(client, team_id)
+        assert data["has_git_token"] is False
+        assert data["has_ssh_key"] is False
+
+    async def test_update_repo_git_token(self, client: AsyncClient):
+        """Updating git_token on a repo should reflect in has_git_token."""
+        team_id = await _create_team(client)
+        data = await _create_repo(
+            client,
+            team_id,
+            name="update-token-repo",
+            git_url="https://github.com/org/update-token.git",
+        )
+        assert data["has_git_token"] is False
+
+        resp = await client.patch(
+            f"/api/v1/repos/{data['id']}",
+            json={"git_token": "ghp_new_token"},
+        )
+        assert resp.status_code == 200
+        updated = resp.json()
+        assert updated["has_git_token"] is True
+        assert "git_token" not in updated
+
+
+class TestSyncHistoryAPI:
+    """Tests for GET /repos/{id}/sync/history and /repos/{id}/sync/latest."""
+
+    async def test_sync_history_empty(self, client: AsyncClient):
+        """History returns empty list when no syncs have happened."""
+        team_id = await _create_team(client)
+        data = await _create_repo(
+            client,
+            team_id,
+            name="no-sync-repo",
+            git_url="https://github.com/org/no-sync.git",
+        )
+        resp = await client.get(f"/api/v1/repos/{data['id']}/sync/history")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["results"] == []
+        assert body["total"] == 0
+
+    async def test_sync_latest_404_when_no_events(self, client: AsyncClient):
+        """Latest returns 404 when no syncs have happened."""
+        team_id = await _create_team(client)
+        data = await _create_repo(
+            client,
+            team_id,
+            name="no-sync-repo-2",
+            git_url="https://github.com/org/no-sync-2.git",
+        )
+        resp = await client.get(f"/api/v1/repos/{data['id']}/sync/latest")
+        assert resp.status_code == 404
+
+    async def test_sync_history_nonexistent_repo(self, client: AsyncClient):
+        """History for a nonexistent repo should 404."""
+        resp = await client.get(f"/api/v1/repos/{_ZERO_UUID}/sync/history")
+        assert resp.status_code == 404
+
+    async def test_sync_latest_nonexistent_repo(self, client: AsyncClient):
+        """Latest for a nonexistent repo should 404."""
+        resp = await client.get(f"/api/v1/repos/{_ZERO_UUID}/sync/latest")
+        assert resp.status_code == 404

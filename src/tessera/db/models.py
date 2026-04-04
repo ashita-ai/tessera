@@ -175,6 +175,8 @@ class RepoDB(Base):
     )
     sync_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     codeowners_path: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    git_token: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    ssh_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_synced_commit: Mapped[str | None] = mapped_column(String(40), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
@@ -783,3 +785,34 @@ class OtelSyncConfigDB(Base):
             unique=True,
         ),
     )
+
+
+class SyncEventDB(Base):
+    """Record of a single repo sync execution.
+
+    Tracks the outcome (success/failure), metrics (specs found, contracts
+    published, etc.), and timing for each sync — whether triggered by the
+    background worker or manually via the API.
+    """
+
+    __tablename__ = "sync_events"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    repo_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("repos.id"), nullable=False, index=True)
+    success: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    commit_sha: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    specs_found: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    contracts_published: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    proposals_created: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    services_created: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    assets_created: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    assets_updated: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    errors: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    triggered_by: Mapped[str] = mapped_column(String(20), nullable=False, default="worker")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    __table_args__ = (Index("ix_sync_events_repo_created", "repo_id", "created_at"),)
+
+    # Relationships
+    repo: Mapped["RepoDB"] = relationship(lazy="selectin")

@@ -1,5 +1,6 @@
 """FastAPI application entry point."""
 
+import asyncio
 import logging
 import time
 from collections.abc import AsyncGenerator
@@ -162,7 +163,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Bootstrap admin user if configured
     await bootstrap_admin_user()
 
+    # Start background repo sync worker
+    sync_task = None
+    if settings.sync_interval > 0:
+        from tessera.services.repo_sync import start_background_worker
+
+        sync_task = await start_background_worker()
+
     yield
+
+    # Cancel background worker on shutdown
+    if sync_task is not None:
+        sync_task.cancel()
+        try:
+            await sync_task
+        except asyncio.CancelledError:
+            pass
+
     # Clean up database connections on shutdown
     await dispose_engine()
 

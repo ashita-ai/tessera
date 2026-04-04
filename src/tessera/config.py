@@ -340,6 +340,49 @@ class Settings(BaseSettings):  # type: ignore[misc]
         "Prevents stale connections from accumulating.",
     )
 
+    # ── Repo Sync ──────────────────────────────────────────────
+
+    repo_dir: str = Field(
+        default="./data/repos",
+        description="Directory for cloned repositories.",
+        alias="TESSERA_REPO_DIR",
+    )
+    git_token: str | None = Field(
+        default=None,
+        description="Git auth token for private repos. "
+        "Injected into HTTPS clone URLs as x-access-token.",
+        alias="TESSERA_GIT_TOKEN",
+    )
+    sync_interval: int = Field(
+        default=60,
+        description="Background worker poll interval in seconds.",
+        alias="TESSERA_SYNC_INTERVAL",
+    )
+    repo_max_size_mb: int = Field(
+        default=500,
+        description="Maximum clone size in megabytes.",
+        alias="TESSERA_REPO_MAX_SIZE_MB",
+    )
+    git_timeout: int = Field(
+        default=120,
+        description="Git operation timeout in seconds.",
+        alias="TESSERA_GIT_TIMEOUT",
+    )
+    sync_timeout: int = Field(
+        default=600,
+        description="Overall sync operation timeout in seconds. "
+        "Should be larger than git_timeout since a sync involves "
+        "multiple git operations plus DB work.",
+        alias="TESSERA_SYNC_TIMEOUT",
+    )
+    sync_concurrency: int = Field(
+        default=4,
+        ge=1,
+        le=32,
+        description="Maximum repos to sync concurrently in the background worker.",
+        alias="TESSERA_SYNC_CONCURRENCY",
+    )
+
     # ── OTEL Dependency Discovery ─────────────────────────────
 
     otel_enabled: bool = Field(
