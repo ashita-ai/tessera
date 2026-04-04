@@ -22,7 +22,7 @@ Tessera supports JSON Schema, Avro, OpenAPI, and GraphQL. All formats are normal
 
 ### Is Tessera open source?
 
-Yes. Tessera is released under the MIT License.
+Yes. Tessera is released under the Apache License 2.0.
 
 ### Does Tessera replace my data warehouse or ETL tool?
 
