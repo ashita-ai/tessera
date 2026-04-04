@@ -1,6 +1,18 @@
 # Tessera Docker Image
 # Using slim-bookworm for duckdb compatibility (pre-built wheels available)
 
+# Stage 1: Build React frontend
+FROM node:20-slim AS frontend-builder
+
+WORKDIR /frontend
+
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+
+COPY frontend/ ./
+# Vite outputs to ../src/tessera/static/dist relative to frontend/
+RUN npm run build
+
 FROM python:3.11-slim-bookworm AS builder
 
 # Install build dependencies
@@ -17,6 +29,8 @@ WORKDIR /app
 # Copy project files
 COPY pyproject.toml uv.lock README.md ./
 COPY src/ ./src/
+# Overlay the compiled frontend into the static directory
+COPY --from=frontend-builder /src/tessera/static/dist ./src/tessera/static/dist
 COPY examples/ ./examples/
 COPY scripts/ ./scripts/
 COPY tests/fixtures/ ./tests/fixtures/
