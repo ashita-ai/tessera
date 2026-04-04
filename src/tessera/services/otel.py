@@ -84,7 +84,7 @@ async def validate_otel_endpoint_host(url: str) -> tuple[bool, str]:
         return False, "DNS resolution timed out for endpoint URL"
     except socket.gaierror:
         logger.warning("Could not resolve OTEL endpoint hostname: %s", parsed.hostname)
-        return True, ""
+        return False, "Could not resolve endpoint hostname"
     except Exception as exc:
         return False, f"Invalid endpoint URL: {exc}"
 

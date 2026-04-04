@@ -29,6 +29,21 @@ from tessera.services.otel import (
     validate_otel_endpoint_host,
 )
 
+
+@pytest.fixture(autouse=True)
+def _bypass_ssrf_validation_in_api(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Patch SSRF validation at the API layer so test URLs like jaeger:16686 pass.
+
+    Direct SSRF unit tests import and call validate_otel_endpoint_host from
+    tessera.services.otel, so they still exercise the real implementation.
+    """
+
+    async def _allow_all(url: str) -> tuple[bool, str]:
+        return True, ""
+
+    monkeypatch.setattr("tessera.api.otel.validate_otel_endpoint_host", _allow_all)
+
+
 # ── Confidence scoring ────────────────────────────────────────
 
 
@@ -1047,3 +1062,58 @@ async def test_validate_otel_endpoint_rejects_private_ip() -> None:
     is_valid, msg = await validate_otel_endpoint_host("http://10.0.0.1:16686")
     assert is_valid is False
     assert "blocked" in msg.lower()
+
+
+@pytest.mark.asyncio
+async def test_validate_otel_endpoint_rejects_unresolvable_host() -> None:
+    """Should reject hostnames that fail DNS resolution (SSRF bypass prevention)."""
+    is_valid, msg = await validate_otel_endpoint_host(
+        "http://this-host-does-not-exist-98zx7q.example.invalid:16686"
+    )
+    assert is_valid is False
+    assert "resolve" in msg.lower()
+
+
+# ── FK cascade: delete config with dependencies ──────────────
+
+
+@pytest.mark.asyncio
+async def test_delete_otel_config_with_dependencies(test_session) -> None:
+    """Deleting an OTEL config should SET NULL on referencing dependencies, not 500."""
+    team = TeamDB(name="team-cascade")
+    test_session.add(team)
+    await test_session.flush()
+
+    config = OtelSyncConfigDB(
+        name="cascade-test",
+        backend_type=OtelBackendType.JAEGER,
+        endpoint_url="http://jaeger:16686",
+    )
+    test_session.add(config)
+    await test_session.flush()
+
+    asset_a = AssetDB(fqn="cascade-a.api", owner_team_id=team.id)
+    asset_b = AssetDB(fqn="cascade-b.api", owner_team_id=team.id)
+    test_session.add_all([asset_a, asset_b])
+    await test_session.flush()
+
+    dep, created = await upsert_otel_dependency(
+        test_session,
+        asset_a.id,
+        asset_b.id,
+        call_count=100,
+        confidence=0.7,
+        now=datetime.now(UTC),
+        config_id=config.id,
+    )
+    assert created is True
+    assert dep.otel_config_id == config.id
+
+    # Delete the config — should not raise IntegrityError
+    await test_session.delete(config)
+    await test_session.flush()
+
+    # Dependency row should still exist with otel_config_id set to NULL
+    await test_session.refresh(dep)
+    assert dep.otel_config_id is None
+    assert dep.dependent_asset_id == asset_a.id

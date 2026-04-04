@@ -21,7 +21,7 @@ if "REDIS_URL" not in os.environ:
 
 import pytest  # noqa: E402
 from httpx import ASGITransport, AsyncClient  # noqa: E402
-from sqlalchemy import text  # noqa: E402
+from sqlalchemy import event, text  # noqa: E402
 from sqlalchemy.ext.asyncio import (  # noqa: E402
     AsyncSession,
     async_sessionmaker,
@@ -59,6 +59,16 @@ async def test_engine():
         echo=False,
         connect_args=connect_args,
     )
+
+    if _USE_SQLITE:
+        # SQLite does not enforce FK constraints by default; enable them so
+        # ON DELETE SET NULL / CASCADE behaves the same as PostgreSQL.
+        @event.listens_for(engine.sync_engine, "connect")
+        def _set_sqlite_pragma(dbapi_conn, _connection_record):
+            cursor = dbapi_conn.cursor()
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
+
     yield engine
     await engine.dispose()
 
