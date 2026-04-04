@@ -73,12 +73,6 @@ export interface Contract {
   updated_at?: string;
 }
 
-export interface BreakingChange {
-  type: string;
-  column?: string;
-  details: Record<string, string | number | boolean | null>;
-}
-
 export interface Proposal {
   id: string;
   asset_id: string;
@@ -174,6 +168,7 @@ export interface Lineage {
   downstream_assets: { asset_id: string; asset_fqn: string; dependency_type: string; owner_team: string }[];
 }
 
+
 type QueryParams = Record<string, string | number | boolean | undefined>;
 
 async function request<T>(
@@ -254,11 +249,6 @@ export const api = {
     request<PaginatedResponse<Asset>>("/assets", {}, params),
   getAsset: (id: string) => request<Asset>(`/assets/${id}`),
 
-  // Contracts
-  listContracts: (params?: QueryParams) =>
-    request<PaginatedResponse<Contract>>("/contracts", {}, params),
-  getContract: (id: string) => request<Contract>(`/contracts/${id}`),
-
   // Proposals
   listProposals: (params?: QueryParams) =>
     request<PaginatedResponse<Proposal>>("/proposals", {}, params),
@@ -273,6 +263,8 @@ export const api = {
   listTeams: (params?: QueryParams) =>
     request<PaginatedResponse<Team>>("/teams", {}, params),
   getTeam: (id: string) => request<Team>(`/teams/${id}`),
+  createTeam: (data: { name: string; metadata?: Record<string, unknown> }) =>
+    request<Team>("/teams", { method: "POST", body: JSON.stringify(data) }),
 
   // Dependencies & Lineage
   listDependencies: (assetId: string, params?: QueryParams) =>

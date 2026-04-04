@@ -59,6 +59,13 @@ function ProposalRow({ proposal }: { proposal: Proposal }) {
 
   const [teamId, setTeamId] = React.useState("");
 
+  const teamsQuery = useQuery({
+    queryKey: ["teams"],
+    queryFn: () => api.listTeams({ limit: 200 }),
+  });
+
+  const teams = teamsQuery.data?.results ?? [];
+
   return (
     <div className="rounded-lg border border-line bg-bg-raised p-4 transition-colors hover:border-line-strong">
       <div className="flex items-start justify-between gap-4">
@@ -100,13 +107,18 @@ function ProposalRow({ proposal }: { proposal: Proposal }) {
 
       {proposal.status === "pending" && (
         <div className="ml-3.5 mt-3 space-y-2 border-t border-line/40 pt-2.5">
-          <input
-            type="text"
-            placeholder="Consumer team ID"
+          <select
             value={teamId}
             onChange={(e) => setTeamId(e.target.value)}
-            className="w-full rounded-md border border-line bg-bg-surface px-2 py-1 font-mono text-[10px] text-t1 placeholder:text-t3 focus:border-accent focus:outline-none"
-          />
+            className="w-full rounded-md border border-line bg-bg-surface px-2 py-1 font-mono text-[10px] text-t1 focus:border-accent focus:outline-none"
+          >
+            <option value="" disabled className="text-t3">
+              {teamsQuery.isLoading ? "Loading teams..." : "Select your team"}
+            </option>
+            {teams.map((t) => (
+              <option key={t.id} value={t.id}>{t.name}</option>
+            ))}
+          </select>
           {ackMutation.isError && (
             <p className="text-[10px] text-red">{ackMutation.error instanceof Error ? ackMutation.error.message : "Acknowledgment failed"}</p>
           )}
