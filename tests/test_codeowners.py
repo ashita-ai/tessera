@@ -485,3 +485,190 @@ class TestMalformedFiles:
         rules = parse_codeowners(content)
         suggestions = suggest_owners(rules, "a/b/c/d/e/file.py")
         assert len(suggestions) == 1
+
+
+# ---------------------------------------------------------------------------
+# _glob_to_regex — character class and mixed-operator coverage
+# ---------------------------------------------------------------------------
+
+
+class TestGlobToRegexBranches:
+    """Tests that exercise _glob_to_regex branches unreachable through fnmatch.
+
+    _pattern_matches only routes through _glob_to_regex when the pattern
+    contains ``**``, so we combine ``**`` with each operator to hit every branch.
+    """
+
+    def test_character_class_with_doublestar(self) -> None:
+        """[ch] class inside a ** pattern routes through _glob_to_regex."""
+        assert _pattern_matches("src/**/*.[ch]", "src/lib/main.c") is True
+        assert _pattern_matches("src/**/*.[ch]", "src/lib/main.h") is True
+        assert _pattern_matches("src/**/*.[ch]", "src/lib/main.o") is False
+
+    def test_negated_character_class(self) -> None:
+        """[!...] negation class inside a ** pattern."""
+        assert _pattern_matches("src/**/*.[!o]", "src/lib/main.c") is True
+        assert _pattern_matches("src/**/*.[!o]", "src/lib/main.o") is False
+
+    def test_character_class_with_leading_bracket(self) -> None:
+        """A class whose first char is ``]`` — []] matches a literal ``]``."""
+        # Pattern: match files named "x]" two+ dirs deep via **.
+        assert _pattern_matches("a/**/x[]]", "a/b/x]") is True
+        assert _pattern_matches("a/**/x[]]", "a/b/xz") is False
+
+    def test_question_mark_with_doublestar(self) -> None:
+        """? single-char match via _glob_to_regex (needs **)."""
+        assert _pattern_matches("docs/**/file?.md", "docs/api/file1.md") is True
+        assert _pattern_matches("docs/**/file?.md", "docs/api/fileAB.md") is False
+
+    def test_single_star_with_doublestar(self) -> None:
+        """Single * (match non-slash) combined with ** in same pattern."""
+        assert _pattern_matches("src/**/*.test.js", "src/a/b/foo.test.js") is True
+        assert _pattern_matches("src/**/*.test.js", "src/a/b/foo.test.ts") is False
+
+    def test_doublestar_at_end(self) -> None:
+        """``**`` at end of pattern matches everything remaining."""
+        assert _pattern_matches("vendor/**", "vendor/lib.py") is True
+        assert _pattern_matches("vendor/**", "vendor/deep/nested/file.py") is True
+        assert _pattern_matches("vendor/**", "other/lib.py") is False
+
+    def test_literal_chars_escaped(self) -> None:
+        """Literal dots and other regex-special chars are escaped."""
+        assert _pattern_matches("src/**/config.json", "src/app/config.json") is True
+        assert _pattern_matches("src/**/config.json", "src/app/configXjson") is False
+
+
+# ---------------------------------------------------------------------------
+# _build_team_entries
+# ---------------------------------------------------------------------------
+
+
+class TestBuildTeamEntries:
+    """Direct tests for the team entry builder."""
+
+    def test_builds_normalized_entries(self) -> None:
+        tid = uuid4()
+        entries = _build_team_entries([(tid, "My Cool Team")])
+        assert len(entries) == 1
+        assert entries[0].team_id == tid
+        assert entries[0].raw_name == "My Cool Team"
+        assert entries[0].normalized == "my-cool-team"
+
+    def test_empty_input(self) -> None:
+        assert _build_team_entries([]) == []
+
+    def test_preserves_order(self) -> None:
+        ids = [uuid4() for _ in range(3)]
+        names = ["alpha", "beta", "gamma"]
+        entries = _build_team_entries(list(zip(ids, names)))
+        assert [e.raw_name for e in entries] == names
+
+
+# ---------------------------------------------------------------------------
+# resolve_owner — additional edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestResolveOwnerEdgeCases:
+    """Edge cases not covered by TestResolveOwner."""
+
+    def test_at_prefixed_owner_without_org(self) -> None:
+        """@team-name (no org/) should still resolve."""
+        tid = uuid4()
+        teams = _build_team_entries([(tid, "backend-team")])
+        resolved_id, _, confidence = resolve_owner("@backend-team", teams)
+        assert resolved_id == tid
+        assert confidence == "exact"
+
+    def test_reverse_substring_match(self) -> None:
+        """Team name is a substring of the owner string → fuzzy match."""
+        tid = uuid4()
+        teams = _build_team_entries([(tid, "api")])
+        resolved_id, _, confidence = resolve_owner("@org/api-team", teams)
+        assert resolved_id == tid
+        assert confidence == "fuzzy"
+
+    def test_empty_teams_list(self) -> None:
+        tid, name, confidence = resolve_owner("@org/anything", [])
+        assert tid is None
+        assert name is None
+        assert confidence is None
+
+    def test_at_sign_with_slash_is_not_email(self) -> None:
+        """@org/user contains '@' and '/' — should NOT be treated as email."""
+        tid = uuid4()
+        teams = _build_team_entries([(tid, "user")])
+        resolved_id, _, _ = resolve_owner("@org/user", teams)
+        assert resolved_id == tid
+
+
+# ---------------------------------------------------------------------------
+# suggest_owners_bulk — additional scenarios
+# ---------------------------------------------------------------------------
+
+
+class TestSuggestOwnersBulkEdgeCases:
+    """Additional bulk evaluation scenarios."""
+
+    def test_multiple_distinct_patterns_collected(self) -> None:
+        """Different paths matching different rules produce distinct suggestions."""
+        team_a = uuid4()
+        team_b = uuid4()
+        teams: list[tuple[UUID, str]] = [
+            (team_a, "api-team"),
+            (team_b, "web-team"),
+        ]
+        rules = parse_codeowners("/api/ @org/api-team\n/web/ @org/web-team\n")
+        result = suggest_owners_bulk(rules, ["api/routes.py", "web/index.tsx"], teams)
+        assert len(result.suggestions) == 2
+        owners = {s.raw_owner for s in result.suggestions}
+        assert owners == {"@org/api-team", "@org/web-team"}
+        assert result.unresolved_owners == []
+
+    def test_mixed_resolved_and_unresolved(self) -> None:
+        tid = uuid4()
+        teams: list[tuple[UUID, str]] = [(tid, "known-team")]
+        rules = parse_codeowners("/a/ @org/known-team\n/b/ @org/mystery-team\n")
+        result = suggest_owners_bulk(rules, ["a/f.py", "b/f.py"], teams)
+        assert len(result.suggestions) == 2
+        resolved = [s for s in result.suggestions if s.suggested_team_id is not None]
+        assert len(resolved) == 1
+        assert resolved[0].suggested_team_id == tid
+        assert "@org/mystery-team" in result.unresolved_owners
+
+    def test_unresolved_owners_are_sorted(self) -> None:
+        rules = parse_codeowners("/a/ @z-team\n/b/ @a-team\n")
+        result = suggest_owners_bulk(rules, ["a/f.py", "b/f.py"])
+        assert result.unresolved_owners == ["@a-team", "@z-team"]
+
+
+# ---------------------------------------------------------------------------
+# Pattern matching — additional edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestPatternMatchingEdgeCases:
+    """Edge cases for CODEOWNERS glob matching."""
+
+    def test_root_anchored_specific_file(self) -> None:
+        """/Makefile matches only at root."""
+        assert _pattern_matches("/Makefile", "Makefile") is True
+        assert _pattern_matches("/Makefile", "sub/Makefile") is False
+
+    def test_doublestar_slash_prefix(self) -> None:
+        """**/foo matches foo at any depth."""
+        assert _pattern_matches("**/foo.py", "foo.py") is True
+        assert _pattern_matches("**/foo.py", "a/foo.py") is True
+        assert _pattern_matches("**/foo.py", "a/b/c/foo.py") is True
+
+    def test_middle_doublestar(self) -> None:
+        """a/**/z matches a/z and a/b/c/z."""
+        assert _pattern_matches("a/**/z.txt", "a/z.txt") is True
+        assert _pattern_matches("a/**/z.txt", "a/b/z.txt") is True
+        assert _pattern_matches("a/**/z.txt", "a/b/c/z.txt") is True
+        assert _pattern_matches("a/**/z.txt", "b/c/z.txt") is False
+
+    def test_bare_directory_no_slash(self) -> None:
+        """A pattern like 'docs' (no slash) matches basename."""
+        assert _pattern_matches("docs", "docs") is True
+        assert _pattern_matches("docs", "src/docs") is True
