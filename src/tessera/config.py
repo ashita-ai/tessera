@@ -375,6 +375,13 @@ class Settings(BaseSettings):  # type: ignore[misc]
         "multiple git operations plus DB work.",
         alias="TESSERA_SYNC_TIMEOUT",
     )
+    sync_concurrency: int = Field(
+        default=4,
+        ge=1,
+        le=32,
+        description="Maximum repos to sync concurrently in the background worker.",
+        alias="TESSERA_SYNC_CONCURRENCY",
+    )
 
     # ── OTEL Dependency Discovery ─────────────────────────────
 

@@ -8,10 +8,15 @@ and contracts through the contract publisher.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
 import shutil
+import stat
+import tempfile
+import time
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -23,7 +28,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.config import settings
-from tessera.db import AssetDB, RepoDB, ServiceDB
+from tessera.db import AssetDB, RepoDB, ServiceDB, SyncEventDB
 from tessera.models.enums import CompatibilityMode, ResourceType
 from tessera.services import audit
 from tessera.services.audit import AuditAction
@@ -81,6 +86,30 @@ def _sanitize_stderr(stderr: str, token: str | None) -> str:
     return stderr
 
 
+@contextlib.asynccontextmanager
+async def _ssh_key_env(ssh_key: str) -> AsyncIterator[dict[str, str]]:
+    """Write an SSH deploy key to a temp file and yield GIT_SSH_COMMAND env vars.
+
+    The temp file is created with mode 0600 (owner-only read/write) and
+    deleted on exit.
+    """
+    fd, key_path = tempfile.mkstemp(prefix="tessera_ssh_", suffix=".pem")
+    try:
+        os.write(fd, ssh_key.encode("utf-8"))
+        if not ssh_key.endswith("\n"):
+            os.write(fd, b"\n")
+        os.close(fd)
+        os.chmod(key_path, stat.S_IRUSR | stat.S_IWUSR)  # 0600
+        yield {
+            "GIT_SSH_COMMAND": (
+                f"ssh -i {key_path} -o StrictHostKeyChecking=accept-new -o IdentitiesOnly=yes"
+            ),
+        }
+    finally:
+        with contextlib.suppress(OSError):
+            os.unlink(key_path)
+
+
 def _inject_token(git_url: str, token: str | None) -> str:
     """Inject auth token into HTTPS git URL.
 
@@ -96,6 +125,7 @@ async def _run_git(
     args: list[str],
     cwd: str | None = None,
     timeout: int | None = None,
+    extra_env: dict[str, str] | None = None,
 ) -> tuple[int, str, str]:
     """Run a git subprocess asynchronously.
 
@@ -103,6 +133,7 @@ async def _run_git(
         args: Git command arguments (without the leading ``git``).
         cwd: Working directory.
         timeout: Timeout in seconds.
+        extra_env: Additional environment variables merged into the subprocess env.
 
     Returns:
         Tuple of (return_code, stdout, stderr).
@@ -110,12 +141,16 @@ async def _run_git(
     timeout = timeout or settings.git_timeout
     cmd = ["git"] + args
 
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+    if extra_env:
+        env.update(extra_env)
+
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         cwd=cwd,
-        env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+        env=env,
     )
     try:
         stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=timeout)
@@ -123,6 +158,13 @@ async def _run_git(
         proc.kill()
         await proc.communicate()
         return -1, "", f"Git operation timed out after {timeout}s"
+    except BaseException:
+        # CancelledError (from an outer asyncio.wait_for) or any other
+        # interruption — kill the subprocess before re-raising so we
+        # don't leak orphaned git processes.
+        proc.kill()
+        await proc.communicate()
+        raise
 
     return (
         proc.returncode or 0,
@@ -134,15 +176,20 @@ async def _run_git(
 async def clone_or_pull(
     repo: RepoDB,
     token: str | None = None,
+    ssh_key: str | None = None,
 ) -> tuple[str, str]:
     """Clone or pull a repository, returning (repo_dir, commit_sha).
 
     First sync: shallow clone (``--depth 1``).
     Subsequent syncs: ``git fetch --depth 1`` + ``git reset --hard FETCH_HEAD``.
 
+    For SSH URLs (``git@``), uses the provided *ssh_key* via a temporary file
+    and ``GIT_SSH_COMMAND``.  For HTTPS URLs, injects the *token* into the URL.
+
     Args:
         repo: The repository database model.
-        token: Optional git auth token.
+        token: Optional git auth token (HTTPS only).
+        ssh_key: Optional PEM-encoded SSH deploy key (SSH URLs only).
 
     Returns:
         Tuple of (local_repo_path, HEAD_commit_sha).
@@ -154,36 +201,45 @@ async def clone_or_pull(
     base_dir.mkdir(parents=True, exist_ok=True)
     repo_dir = base_dir / str(repo.id)
 
-    auth_url = _inject_token(repo.git_url, token)
+    is_ssh = repo.git_url.startswith("git@")
+    auth_url = repo.git_url if is_ssh else _inject_token(repo.git_url, token)
     branch = repo.default_branch
+    use_ssh = is_ssh and ssh_key is not None
 
-    if (repo_dir / ".git").exists():
-        # Pull: fetch + reset
-        # Use -- to separate flags from positional args (prevents argument injection)
-        rc, _, stderr = await _run_git(
-            ["fetch", "--depth", "1", "--", auth_url, branch],
-            cwd=str(repo_dir),
-        )
-        if rc != 0:
-            raise RuntimeError(f"git fetch failed: {_sanitize_stderr(stderr, token)}")
+    async def _do_clone_or_pull(extra_env: dict[str, str] | None) -> None:
+        """Run the actual git clone/fetch+reset commands."""
+        if (repo_dir / ".git").exists():
+            rc, _, stderr = await _run_git(
+                ["fetch", "--depth", "1", "--", auth_url, branch],
+                cwd=str(repo_dir),
+                extra_env=extra_env,
+            )
+            if rc != 0:
+                raise RuntimeError(f"git fetch failed: {_sanitize_stderr(stderr, token)}")
 
-        rc, _, stderr = await _run_git(
-            ["reset", "--hard", "FETCH_HEAD"],
-            cwd=str(repo_dir),
-        )
-        if rc != 0:
-            raise RuntimeError(f"git reset failed: {_sanitize_stderr(stderr, token)}")
+            rc, _, stderr = await _run_git(
+                ["reset", "--hard", "FETCH_HEAD"],
+                cwd=str(repo_dir),
+                extra_env=extra_env,
+            )
+            if rc != 0:
+                raise RuntimeError(f"git reset failed: {_sanitize_stderr(stderr, token)}")
+        else:
+            rc, _, stderr = await _run_git(
+                ["clone", "--depth", "1", "--branch", branch, "--", auth_url, str(repo_dir)],
+                extra_env=extra_env,
+            )
+            if rc != 0:
+                if repo_dir.exists():
+                    shutil.rmtree(repo_dir, ignore_errors=True)
+                raise RuntimeError(f"git clone failed: {_sanitize_stderr(stderr, token)}")
+
+    if use_ssh:
+        assert ssh_key is not None  # for mypy
+        async with _ssh_key_env(ssh_key) as env:
+            await _do_clone_or_pull(env)
     else:
-        # Clone: shallow clone
-        # Use -- to separate flags from positional args (prevents argument injection)
-        rc, _, stderr = await _run_git(
-            ["clone", "--depth", "1", "--branch", branch, "--", auth_url, str(repo_dir)],
-        )
-        if rc != 0:
-            # Clean up partial clone
-            if repo_dir.exists():
-                shutil.rmtree(repo_dir, ignore_errors=True)
-            raise RuntimeError(f"git clone failed: {_sanitize_stderr(stderr, token)}")
+        await _do_clone_or_pull(None)
 
     # Validate repo size
     max_bytes = settings.repo_max_size_mb * 1024 * 1024
@@ -248,8 +304,8 @@ def _classify_spec_file(file_path: Path, content: str) -> str | None:
                 parsed = yaml.safe_load(content)
             if isinstance(parsed, dict) and "openapi" in parsed:
                 return "openapi"
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Could not parse %s as YAML/JSON: %s", file_path, e)
 
     return None
 
@@ -287,6 +343,12 @@ def discover_specs(repo_dir: str, spec_paths: list[str]) -> list[DiscoveredSpec]
 
         for candidate in candidates:
             if not candidate.is_file():
+                continue
+
+            # Reject symlinks — a cloned repo could contain symlinks
+            # pointing outside the repo directory, allowing reads of
+            # arbitrary host files.
+            if candidate.is_symlink():
                 continue
 
             rel_path = str(candidate.relative_to(root))
@@ -361,6 +423,9 @@ def assign_spec_to_service(
 
     for svc in services:
         root = svc.root_path.strip("/")
+        # Normalize "." (from Path(".").str()) to empty string for matching
+        if root == ".":
+            root = ""
         if root == "" or root == "/":
             # Root service matches everything, but only as a fallback
             if best_match is None:
@@ -418,7 +483,8 @@ async def _ensure_service(
 
     # Auto-create service
     service_name = _infer_service_name(spec_path)
-    root_path = str(Path(spec_path).parent) or "/"
+    parent = str(Path(spec_path).parent)
+    root_path = "/" if parent == "." else parent
 
     # Check for name collision within the repo
     for svc in existing_services:
@@ -541,13 +607,38 @@ def _parse_spec(spec: DiscoveredSpec) -> list[dict[str, Any]]:
             )
 
     elif spec.spec_type == "graphql":
-        # GraphQL SDL files can't be parsed by our introspection parser.
-        # Log a warning — full SDL support requires the graphql-core library.
-        logger.info(
-            "GraphQL SDL file %s detected but SDL parsing is not yet supported. "
-            "Use the /api/v1/sync/graphql endpoint with an introspection response instead.",
-            spec.file_path,
-        )
+        try:
+            from tessera.services.graphql import (
+                parse_graphql_introspection,
+                sdl_to_introspection,
+            )
+
+            introspection = sdl_to_introspection(spec.content)
+            gql_result = parse_graphql_introspection(introspection)
+            if gql_result.errors:
+                for err in gql_result.errors:
+                    logger.warning("GraphQL parse error in %s: %s", spec.file_path, err)
+
+            for op in gql_result.operations:
+                results.append(
+                    {
+                        "fqn_suffix": f"graphql.{op.operation_type}_{op.name}",
+                        "resource_type": ResourceType.GRAPHQL_QUERY,
+                        "schema_def": op.combined_schema,
+                        "metadata": {
+                            "graphql_source": {
+                                "schema_name": gql_result.schema_name,
+                                "operation_name": op.name,
+                                "operation_type": op.operation_type,
+                            },
+                            "sync_source": spec.file_path,
+                        },
+                        "guarantees": op.guarantees,
+                        "description": op.description,
+                    }
+                )
+        except ValueError as e:
+            logger.warning("Failed to parse GraphQL SDL %s: %s", spec.file_path, e)
 
     return results
 
@@ -574,6 +665,11 @@ async def _ensure_asset(
         .where(AssetDB.deleted_at.is_(None))
     )
     asset = result.scalar_one_or_none()
+
+    # Merge description into metadata so it's persisted (AssetDB has no
+    # dedicated description column).
+    if description:
+        metadata = {**metadata, "description": description}
 
     if asset is not None:
         # Update if needed
@@ -619,20 +715,24 @@ async def sync_repo(
     This is the core orchestrator called by both the manual trigger endpoint
     and the background polling worker.
 
+    Token priority: explicit *token* arg > ``repo.git_token`` > ``settings.git_token``.
+    SSH key: ``repo.ssh_key`` (no global fallback — deploy keys are per-repo).
+
     Args:
         session: Database session (caller manages the transaction).
         repo: The repository to sync.
-        token: Optional git auth token override. Falls back to settings.git_token.
+        token: Optional git auth token override.
 
     Returns:
         SyncResult with details of what happened.
     """
-    token = token or settings.git_token
+    effective_token = token or repo.git_token or settings.git_token
+    ssh_key: str | None = repo.ssh_key
     result = SyncResult(repo_id=repo.id, success=False)
 
     # 1. Clone or pull
     try:
-        repo_dir, commit_sha = await clone_or_pull(repo, token)
+        repo_dir, commit_sha = await clone_or_pull(repo, effective_token, ssh_key)
     except RuntimeError as e:
         result.errors.append(str(e))
         return result
@@ -748,6 +848,42 @@ async def sync_repo(
 
 
 # ---------------------------------------------------------------------------
+# Sync event persistence
+# ---------------------------------------------------------------------------
+
+
+async def save_sync_event(
+    session: AsyncSession,
+    result: SyncResult,
+    *,
+    duration_seconds: float | None = None,
+    triggered_by: str = "worker",
+) -> SyncEventDB:
+    """Persist a sync result as a SyncEventDB row.
+
+    Called from both the manual trigger endpoint and the background worker
+    so that sync history is consistently recorded regardless of entry point.
+    """
+    event = SyncEventDB(
+        repo_id=result.repo_id,
+        success=result.success,
+        commit_sha=result.commit_sha,
+        specs_found=result.specs_found,
+        contracts_published=result.contracts_published,
+        proposals_created=result.proposals_created,
+        services_created=result.services_created,
+        assets_created=result.assets_created,
+        assets_updated=result.assets_updated,
+        errors=result.errors,
+        duration_seconds=duration_seconds,
+        triggered_by=triggered_by,
+    )
+    session.add(event)
+    await session.flush()
+    return event
+
+
+# ---------------------------------------------------------------------------
 # Background polling worker
 # ---------------------------------------------------------------------------
 
@@ -765,6 +901,8 @@ class _RepoSyncTarget:
     name: str
     owner_team_id: UUID
     last_synced_at: datetime | None
+    git_token: str | None
+    ssh_key: str | None
 
 
 async def _poll_once(session_maker: Any) -> None:
@@ -799,21 +937,26 @@ async def _poll_once(session_maker: Any) -> None:
                     name=repo.name,
                     owner_team_id=repo.owner_team_id,
                     last_synced_at=repo.last_synced_at,
+                    git_token=repo.git_token,
+                    ssh_key=repo.ssh_key,
                 )
             )
 
-    # Process each repo in its own session to isolate failures.
-    for target in targets:
-        async with session_maker() as session:
+    # Process repos concurrently, bounded by sync_concurrency.
+    semaphore = asyncio.Semaphore(settings.sync_concurrency)
+
+    async def _sync_one(target: _RepoSyncTarget) -> None:
+        async with semaphore, session_maker() as session:
             logger.info("Background sync starting for repo %s (%s)", target.name, target.repo_id)
+            t0 = time.monotonic()
+            sync_result: SyncResult | None = None
             try:
-                # Re-load the repo in this session
                 repo_result = await session.execute(
                     select(RepoDB).where(RepoDB.id == target.repo_id)
                 )
                 repo = repo_result.scalar_one_or_none()
                 if repo is None or repo.deleted_at is not None or not repo.sync_enabled:
-                    continue
+                    return
 
                 sync_result = await asyncio.wait_for(
                     sync_repo(session, repo),
@@ -821,35 +964,70 @@ async def _poll_once(session_maker: Any) -> None:
                 )
                 await session.commit()
 
+                duration = time.monotonic() - t0
                 if sync_result.success:
                     logger.info(
-                        "Sync completed for %s: %d specs, %d contracts published",
+                        "Sync completed for %s: %d specs, %d contracts published (%.1fs)",
                         target.name,
                         sync_result.specs_found,
                         sync_result.contracts_published,
+                        duration,
                     )
-                    await _log_sync_event(
-                        session, target.repo_id, target.owner_team_id, sync_result
-                    )
-                    await session.commit()
                 else:
                     logger.warning("Sync failed for %s: %s", target.name, sync_result.errors)
-                    await _log_sync_failed(
-                        session, target.repo_id, target.owner_team_id, sync_result.errors
-                    )
-                    await session.commit()
+
+                # Persist sync event + audit log in one commit.
+                await save_sync_event(
+                    session,
+                    sync_result,
+                    duration_seconds=duration,
+                    triggered_by="worker",
+                )
+                await _log_sync_event(
+                    session, target.repo_id, target.owner_team_id, sync_result
+                ) if sync_result.success else await _log_sync_failed(
+                    session, target.repo_id, target.owner_team_id, sync_result.errors
+                )
+                await session.commit()
 
             except TimeoutError:
                 await session.rollback()
+                duration = time.monotonic() - t0
                 logger.error("Sync timed out for repo %s", target.name)
-                await _log_sync_failed(
-                    session, target.repo_id, target.owner_team_id, ["Sync timed out"]
+                timeout_result = SyncResult(
+                    repo_id=target.repo_id,
+                    success=False,
+                    errors=["Sync timed out"],
                 )
-                await session.commit()
+                try:
+                    await save_sync_event(
+                        session,
+                        timeout_result,
+                        duration_seconds=duration,
+                        triggered_by="worker",
+                    )
+                    await _log_sync_failed(
+                        session, target.repo_id, target.owner_team_id, ["Sync timed out"]
+                    )
+                    await session.commit()
+                except Exception:
+                    logger.exception("Failed to save sync event for repo %s", target.name)
             except Exception:
                 await session.rollback()
+                duration = time.monotonic() - t0
                 logger.exception("Unexpected error syncing repo %s", target.name)
+                error_result = SyncResult(
+                    repo_id=target.repo_id,
+                    success=False,
+                    errors=["Unexpected error — see server logs"],
+                )
                 try:
+                    await save_sync_event(
+                        session,
+                        error_result,
+                        duration_seconds=duration,
+                        triggered_by="worker",
+                    )
                     await _log_sync_failed(
                         session,
                         target.repo_id,
@@ -858,7 +1036,12 @@ async def _poll_once(session_maker: Any) -> None:
                     )
                     await session.commit()
                 except Exception:
-                    logger.exception("Failed to log sync failure for repo %s", target.name)
+                    logger.exception("Failed to save sync event for repo %s", target.name)
+
+    await asyncio.gather(
+        *[_sync_one(t) for t in targets],
+        return_exceptions=True,
+    )
 
 
 async def _log_sync_event(

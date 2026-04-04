@@ -4,12 +4,17 @@ Parses GraphQL introspection responses and SDL schemas, converting them
 to Tessera assets with JSON Schema contracts.
 """
 
+from __future__ import annotations
+
+import logging
 from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel
 
 from tessera.models.enums import ResourceType
+
+logger = logging.getLogger(__name__)
 
 
 class GraphQLOperation(BaseModel):
@@ -457,3 +462,44 @@ def operations_to_assets(
         )
 
     return assets
+
+
+# ---------------------------------------------------------------------------
+# SDL → introspection bridge
+# ---------------------------------------------------------------------------
+
+
+def sdl_to_introspection(sdl_text: str) -> dict[str, Any]:
+    """Convert a GraphQL SDL string to the introspection format.
+
+    Uses ``graphql-core``'s ``build_schema()`` to parse SDL, then
+    ``introspection_from_schema()`` to produce the standard introspection
+    dict that :func:`parse_graphql_introspection` expects.
+
+    Args:
+        sdl_text: Raw GraphQL SDL content (e.g. from a ``.graphql`` file).
+
+    Returns:
+        Introspection dict with a top-level ``__schema`` key.
+
+    Raises:
+        ValueError: If the SDL cannot be parsed.
+    """
+    try:
+        from graphql import build_schema, introspection_from_schema
+    except ImportError as e:
+        raise ImportError(
+            "graphql-core is required for SDL parsing. Install it with: pip install graphql-core"
+        ) from e
+
+    try:
+        schema = build_schema(sdl_text)
+    except Exception as e:
+        raise ValueError(f"Invalid GraphQL SDL: {e}") from e
+
+    result: dict[str, Any] = dict(introspection_from_schema(schema))
+    # introspection_from_schema returns {"__schema": {...}} directly
+    if "__schema" not in result:
+        # Defensive: wrap if the library returns the schema dict directly
+        return {"__schema": result}
+    return result

@@ -18,18 +18,22 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tessera.db import AssetDB, RepoDB, ServiceDB, TeamDB
+from tessera.db import AssetDB, RepoDB, ServiceDB, SyncEventDB, TeamDB
 from tessera.models.enums import ResourceType
+from tessera.models.repo import Repo, SyncEvent
 from tessera.services.repo_sync import (
     DiscoveredSpec,
+    SyncResult,
     _classify_spec_file,
     _infer_service_name,
     _inject_token,
     _parse_spec,
+    _ssh_key_env,
     assign_spec_to_service,
     clone_or_pull,
     discover_specs,
     generate_fqn,
+    save_sync_event,
     sync_repo,
 )
 
@@ -379,14 +383,16 @@ class TestParseSpec:
         assert items[0]["fqn_suffix"] == "grpc.OrderService_CreateOrder"
         assert items[0]["resource_type"] == ResourceType.GRPC_SERVICE
 
-    def test_parse_graphql_logs_warning(self) -> None:
+    def test_parse_graphql_spec(self) -> None:
         spec = DiscoveredSpec(
             file_path="schema.graphql",
             spec_type="graphql",
             content="type Query { hello: String }",
         )
         items = _parse_spec(spec)
-        assert len(items) == 0  # SDL not supported yet
+        assert len(items) >= 1
+        assert items[0]["resource_type"] == ResourceType.GRAPHQL_QUERY
+        assert "graphql." in items[0]["fqn_suffix"]
 
     def test_parse_invalid_openapi_returns_empty(self) -> None:
         spec = DiscoveredSpec(
@@ -951,3 +957,234 @@ class TestBackgroundWorker:
         repos = list(result.scalars().all())
         repo_ids = {r.id for r in repos}
         assert repo.id not in repo_ids
+
+
+# ---------------------------------------------------------------------------
+# Per-repo auth tests
+# ---------------------------------------------------------------------------
+
+
+class TestPerRepoAuth:
+    """Tests for per-repo git_token / ssh_key support."""
+
+    def test_repo_response_masks_credentials(self) -> None:
+        """Repo response model exposes has_git_token/has_ssh_key, not plaintext."""
+        repo_db = MagicMock()
+        repo_db.id = uuid4()
+        repo_db.name = "test"
+        repo_db.git_url = "https://github.com/org/repo.git"
+        repo_db.default_branch = "main"
+        repo_db.spec_paths = []
+        repo_db.owner_team_id = uuid4()
+        repo_db.sync_enabled = True
+        repo_db.codeowners_path = None
+        repo_db.last_synced_at = None
+        repo_db.last_synced_commit = None
+        repo_db.created_at = "2026-01-01T00:00:00Z"
+        repo_db.updated_at = None
+        repo_db.git_token = "ghp_secret123"
+        # Use a non-real key format to avoid tripping detect-private-key hook
+        repo_db.ssh_key = "ssh-ed25519-fake-test-key-data-not-real"
+
+        model = Repo.model_validate(repo_db)
+        dumped = model.model_dump()
+
+        assert dumped["has_git_token"] is True
+        assert dumped["has_ssh_key"] is True
+        assert "git_token" not in dumped
+        assert "ssh_key" not in dumped
+
+    def test_repo_response_no_credentials(self) -> None:
+        """When no credentials are set, has_* fields are False."""
+        repo_db = MagicMock()
+        repo_db.id = uuid4()
+        repo_db.name = "test"
+        repo_db.git_url = "https://github.com/org/repo.git"
+        repo_db.default_branch = "main"
+        repo_db.spec_paths = []
+        repo_db.owner_team_id = uuid4()
+        repo_db.sync_enabled = True
+        repo_db.codeowners_path = None
+        repo_db.last_synced_at = None
+        repo_db.last_synced_commit = None
+        repo_db.created_at = "2026-01-01T00:00:00Z"
+        repo_db.updated_at = None
+        repo_db.git_token = None
+        repo_db.ssh_key = None
+
+        model = Repo.model_validate(repo_db)
+        dumped = model.model_dump()
+
+        assert dumped["has_git_token"] is False
+        assert dumped["has_ssh_key"] is False
+
+    async def test_ssh_key_env_creates_temp_file(self) -> None:
+        """_ssh_key_env writes key to a 0600 temp file and cleans up on exit."""
+        import os
+        import stat
+
+        # Use a non-real key to avoid tripping detect-private-key hook
+        fake_key = "ssh-ed25519-fake-test-key-data-not-real"
+        key_path: str | None = None
+
+        async with _ssh_key_env(fake_key) as env:
+            assert "GIT_SSH_COMMAND" in env
+            ssh_cmd = env["GIT_SSH_COMMAND"]
+            assert "-i " in ssh_cmd
+            assert "StrictHostKeyChecking=accept-new" in ssh_cmd
+            assert "IdentitiesOnly=yes" in ssh_cmd
+
+            # Extract key path from the command
+            key_path = ssh_cmd.split("-i ")[1].split(" ")[0]
+            assert os.path.exists(key_path)
+
+            # Verify permissions are 0600
+            file_stat = os.stat(key_path)
+            mode = stat.S_IMODE(file_stat.st_mode)
+            assert mode == 0o600
+
+            # Verify content
+            with open(key_path) as f:
+                content = f.read()
+            assert "fake-test-key" in content
+
+        # Verify cleanup
+        assert key_path is not None
+        assert not os.path.exists(key_path)
+
+    async def test_token_priority_chain(self, test_session: AsyncSession) -> None:
+        """sync_repo uses: explicit token > repo.git_token > settings.git_token."""
+        team = await _create_team(test_session)
+        repo = await _create_repo(
+            test_session,
+            team,
+            git_token="repo-level-token",
+        )
+
+        captured_urls: list[str] = []
+
+        async def mock_run_git(args, **kwargs):
+            # Capture the URL used in clone/fetch
+            for arg in args:
+                if "github.com" in arg:
+                    captured_urls.append(arg)
+            if "rev-parse" in args:
+                return 0, "abc123", ""
+            return 0, "", ""
+
+        with (
+            patch("tessera.services.repo_sync._run_git", side_effect=mock_run_git),
+            patch("tessera.services.repo_sync._dir_size", return_value=100),
+        ):
+            await sync_repo(test_session, repo)
+            # The repo-level token should be used (injected into URL)
+            assert any("repo-level-token" in url for url in captured_urls)
+
+
+# ---------------------------------------------------------------------------
+# Sync event persistence tests
+# ---------------------------------------------------------------------------
+
+
+class TestSyncEventPersistence:
+    """Tests for save_sync_event and SyncEvent model."""
+
+    async def test_save_sync_event_success(self, test_session: AsyncSession) -> None:
+        """save_sync_event persists a successful sync result."""
+        team = await _create_team(test_session)
+        repo = await _create_repo(test_session, team)
+
+        result = SyncResult(
+            repo_id=repo.id,
+            success=True,
+            commit_sha="abc123def456",
+            specs_found=3,
+            contracts_published=2,
+            proposals_created=1,
+            services_created=1,
+            assets_created=2,
+            assets_updated=1,
+        )
+
+        event = await save_sync_event(
+            test_session,
+            result,
+            duration_seconds=5.2,
+            triggered_by="manual",
+        )
+
+        assert event.repo_id == repo.id
+        assert event.success is True
+        assert event.commit_sha == "abc123def456"
+        assert event.specs_found == 3
+        assert event.contracts_published == 2
+        assert event.proposals_created == 1
+        assert event.services_created == 1
+        assert event.assets_created == 2
+        assert event.assets_updated == 1
+        assert event.duration_seconds == pytest.approx(5.2)
+        assert event.triggered_by == "manual"
+        assert event.created_at is not None
+
+    async def test_save_sync_event_failure(self, test_session: AsyncSession) -> None:
+        """save_sync_event persists a failed sync result with errors."""
+        team = await _create_team(test_session)
+        repo = await _create_repo(test_session, team)
+
+        result = SyncResult(
+            repo_id=repo.id,
+            success=False,
+            errors=["git clone failed: timeout"],
+        )
+
+        event = await save_sync_event(
+            test_session,
+            result,
+            duration_seconds=120.0,
+            triggered_by="worker",
+        )
+
+        assert event.success is False
+        assert event.errors == ["git clone failed: timeout"]
+        assert event.triggered_by == "worker"
+
+    async def test_sync_event_model_validates(self, test_session: AsyncSession) -> None:
+        """SyncEvent pydantic model validates from SyncEventDB."""
+        team = await _create_team(test_session)
+        repo = await _create_repo(test_session, team)
+
+        result = SyncResult(repo_id=repo.id, success=True, specs_found=1)
+        event = await save_sync_event(test_session, result, duration_seconds=0.5)
+        await test_session.refresh(event)
+
+        model = SyncEvent.model_validate(event)
+        assert model.repo_id == repo.id
+        assert model.success is True
+        assert model.specs_found == 1
+
+    async def test_multiple_events_per_repo(self, test_session: AsyncSession) -> None:
+        """Multiple sync events can be recorded for the same repo."""
+        team = await _create_team(test_session)
+        repo = await _create_repo(test_session, team)
+
+        for i in range(3):
+            result = SyncResult(
+                repo_id=repo.id,
+                success=i % 2 == 0,
+                specs_found=i,
+            )
+            await save_sync_event(test_session, result, duration_seconds=float(i))
+
+        events = (
+            (
+                await test_session.execute(
+                    select(SyncEventDB)
+                    .where(SyncEventDB.repo_id == repo.id)
+                    .order_by(SyncEventDB.created_at)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+        assert len(events) == 3

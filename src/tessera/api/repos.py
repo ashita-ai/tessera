@@ -1,5 +1,6 @@
 """Repo CRUD API endpoints."""
 
+import time
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -17,8 +18,8 @@ from tessera.api.errors import (
 from tessera.api.pagination import PaginationParams, pagination_params
 from tessera.api.rate_limit import limit_read, limit_write
 from tessera.api.types import PaginatedResponse
-from tessera.db import RepoDB, ServiceDB, TeamDB, get_session
-from tessera.models.repo import Repo, RepoCreate, RepoUpdate
+from tessera.db import RepoDB, ServiceDB, SyncEventDB, TeamDB, get_session
+from tessera.models.repo import Repo, RepoCreate, RepoUpdate, SyncEvent
 from tessera.services import audit
 from tessera.services.audit import AuditAction
 
@@ -78,6 +79,8 @@ async def create_repo(
         owner_team_id=repo.owner_team_id,
         sync_enabled=repo.sync_enabled,
         codeowners_path=repo.codeowners_path,
+        git_token=repo.git_token,
+        ssh_key=repo.ssh_key,
     )
     session.add(db_repo)
     try:
@@ -209,6 +212,12 @@ async def update_repo(
     if update.sync_enabled is not None:
         repo.sync_enabled = update.sync_enabled
         changed["sync_enabled"] = update.sync_enabled
+    if update.git_token is not None:
+        repo.git_token = update.git_token
+        changed["git_token"] = "***"  # Never log plaintext
+    if update.ssh_key is not None:
+        repo.ssh_key = update.ssh_key
+        changed["ssh_key"] = "***"  # Never log plaintext
 
     await session.flush()
     await session.refresh(repo)
@@ -274,7 +283,7 @@ async def trigger_repo_sync(
 
     Requires write scope. Runs sync synchronously and returns the result.
     """
-    from tessera.services.repo_sync import sync_repo
+    from tessera.services.repo_sync import save_sync_event, sync_repo
 
     repo = await _get_active_repo(session, repo_id)
 
@@ -287,7 +296,17 @@ async def trigger_repo_sync(
         payload={"name": repo.name},
     )
 
+    t0 = time.monotonic()
     sync_result = await sync_repo(session, repo)
+    duration = time.monotonic() - t0
+
+    # Persist the sync event for history queries.
+    await save_sync_event(
+        session,
+        sync_result,
+        duration_seconds=duration,
+        triggered_by="manual",
+    )
 
     if sync_result.success:
         await audit.log_event(
@@ -325,3 +344,76 @@ async def trigger_repo_sync(
         "errors": sync_result.errors,
         "warnings": sync_result.warnings,
     }
+
+
+@router.get(
+    "/{repo_id}/sync/history",
+    response_model=PaginatedResponse[SyncEvent],
+    responses={k: _E[k] for k in (401, 403, 404)},
+)
+@limit_read
+async def get_sync_history(
+    request: Request,
+    repo_id: UUID,
+    auth: Auth,
+    params: PaginationParams = Depends(pagination_params),
+    _: None = RequireRead,
+    session: AsyncSession = Depends(get_session),
+) -> PaginatedResponse[dict[str, object]]:
+    """List sync events for a repository, newest first.
+
+    Requires read scope.
+    """
+    await _get_active_repo(session, repo_id)
+
+    base_query = select(SyncEventDB).where(SyncEventDB.repo_id == repo_id)
+
+    count_query = select(func.count()).select_from(base_query.subquery())
+    total = (await session.execute(count_query)).scalar() or 0
+
+    query = (
+        base_query.order_by(SyncEventDB.created_at.desc()).limit(params.limit).offset(params.offset)
+    )
+    result = await session.execute(query)
+    events = list(result.scalars().all())
+
+    results: list[dict[str, object]] = [SyncEvent.model_validate(e).model_dump() for e in events]
+
+    return {
+        "results": results,
+        "total": total,
+        "limit": params.limit,
+        "offset": params.offset,
+    }
+
+
+@router.get(
+    "/{repo_id}/sync/latest",
+    response_model=SyncEvent,
+    responses={k: _E[k] for k in (401, 403, 404)},
+)
+@limit_read
+async def get_latest_sync(
+    request: Request,
+    repo_id: UUID,
+    auth: Auth,
+    _: None = RequireRead,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, object]:
+    """Get the most recent sync event for a repository.
+
+    Requires read scope. Returns 404 if no sync has occurred yet.
+    """
+    await _get_active_repo(session, repo_id)
+
+    result = await session.execute(
+        select(SyncEventDB)
+        .where(SyncEventDB.repo_id == repo_id)
+        .order_by(SyncEventDB.created_at.desc())
+        .limit(1)
+    )
+    event = result.scalar_one_or_none()
+    if not event:
+        raise NotFoundError(ErrorCode.NOT_FOUND, "No sync events found for this repository")
+
+    return SyncEvent.model_validate(event).model_dump()

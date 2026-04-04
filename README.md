@@ -116,6 +116,7 @@ Force-publish is available for emergencies (admin-only, audit-logged).
 | `TESSERA_REPO_MAX_SIZE_MB` | Maximum clone size in megabytes | `500` |
 | `TESSERA_GIT_TIMEOUT` | Git operation timeout in seconds | `120` |
 | `TESSERA_SYNC_TIMEOUT` | Overall sync operation timeout in seconds | `600` |
+| `TESSERA_SYNC_CONCURRENCY` | Max repos to sync concurrently in background worker | `4` |
 
 See [configuration docs](https://ashita-ai.github.io/tessera/getting-started/quickstart/) for the full list.
 

@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import PurePosixPath
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
 
 # Branch names must match git's ref format rules (no .., no leading -,
 # alphanumeric plus . / _ -)
@@ -22,6 +22,8 @@ class RepoCreate(BaseModel):
     spec_paths: list[str] = Field(default_factory=list)
     codeowners_path: str | None = Field(None, max_length=200)
     sync_enabled: bool = True
+    git_token: str | None = Field(None, max_length=500)
+    ssh_key: str | None = None
 
     @field_validator("name")
     @classmethod
@@ -77,6 +79,8 @@ class RepoUpdate(BaseModel):
     spec_paths: list[str] | None = None
     codeowners_path: str | None = Field(None, max_length=200)
     sync_enabled: bool | None = None
+    git_token: str | None = Field(None, max_length=500)
+    ssh_key: str | None = None
 
     @field_validator("default_branch")
     @classmethod
@@ -126,3 +130,39 @@ class Repo(BaseModel):
     last_synced_commit: str | None = None
     created_at: datetime
     updated_at: datetime | None = None
+    # Never expose plaintext credentials — only report whether they are set.
+    git_token: str | None = Field(None, exclude=True)
+    ssh_key: str | None = Field(None, exclude=True)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def has_git_token(self) -> bool:
+        """Whether a per-repo git token is configured."""
+        return self.git_token is not None and len(self.git_token) > 0
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def has_ssh_key(self) -> bool:
+        """Whether a per-repo SSH deploy key is configured."""
+        return self.ssh_key is not None and len(self.ssh_key) > 0
+
+
+class SyncEvent(BaseModel):
+    """Sync event response entity — one record per sync execution."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    repo_id: UUID
+    success: bool
+    commit_sha: str | None = None
+    specs_found: int = 0
+    contracts_published: int = 0
+    proposals_created: int = 0
+    services_created: int = 0
+    assets_created: int = 0
+    assets_updated: int = 0
+    errors: list[str] = Field(default_factory=list)
+    duration_seconds: float | None = None
+    triggered_by: str = "worker"
+    created_at: datetime
