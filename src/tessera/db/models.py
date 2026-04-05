@@ -512,8 +512,8 @@ class AssetDependencyDB(Base):
     dependency_type: Mapped[DependencyType] = mapped_column(
         Enum(DependencyType), default=DependencyType.CONSUMES
     )
-    source: Mapped[str] = mapped_column(
-        String(50), nullable=False, default=DependencySource.MANUAL, index=True
+    source: Mapped[DependencySource] = mapped_column(
+        Enum(DependencySource), nullable=False, default=DependencySource.MANUAL, index=True
     )
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     last_observed_at: Mapped[datetime | None] = mapped_column(

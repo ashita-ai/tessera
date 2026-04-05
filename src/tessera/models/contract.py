@@ -176,6 +176,16 @@ class Contract(ContractBase):
             return {}
         return dict(v)
 
+    @field_validator("guarantees", mode="before")
+    @classmethod
+    def coerce_guarantees(cls, v: Any) -> Any:
+        """Coerce a raw dict from the DB into a Guarantees model."""
+        if v is None:
+            return None
+        if isinstance(v, dict):
+            return Guarantees(**v)
+        return v
+
     status: ContractStatus = ContractStatus.ACTIVE
     published_at: datetime
     published_by: UUID

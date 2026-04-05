@@ -117,10 +117,19 @@ Producers using the old schema produce valid new data.
 
 ### Full
 
-Both backward and forward compatible.
+Both backward and forward compatible. A change is breaking under full mode if it would be breaking under **either** backward or forward mode (the union of both sets). Changes that are benign under both backward and forward modes remain non-breaking.
 
 **Breaking changes:**
-- Any schema change
+- Remove property (backward)
+- Add property (forward)
+- Rename property (both)
+- Change type incompatibly (both)
+- Narrow type (backward) or widen type (forward)
+- Add required field (backward) or remove required field (forward)
+- Remove enum value (backward) or add enum value (forward)
+- Tighten constraint (backward) or relax constraint (forward)
+- Remove default (backward) or add default (forward)
+- Remove nullable (backward) or add nullable (forward)
 
 ### None
 

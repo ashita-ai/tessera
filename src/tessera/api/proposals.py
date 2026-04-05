@@ -62,7 +62,6 @@ from tessera.services import (
 )
 from tessera.services.audit import AuditAction
 from tessera.services.schema_validator import SchemaValidationError, validate_schema_or_raise
-from tessera.services.slack import notify_proposal_acknowledged, notify_proposal_approved
 from tessera.services.slack_dispatcher import dispatch_slack_notifications
 from tessera.services.webhooks import (
     send_contract_published,
@@ -887,21 +886,27 @@ async def acknowledge_proposal(
             actor_team_id=consumer_team.id,
             actor_team_name=consumer_team.name,
         )
-        # Send Slack notification
-        await notify_proposal_acknowledged(
-            asset_fqn=asset.fqn,
-            consumer_team=consumer_team.name,
-            response="blocked",
-            notes=ack.notes,
-        )
-        # Dispatch per-team Slack notifications for proposal_resolved (rejected)
+        # Dispatch per-team Slack notifications for acknowledgment + rejection
         affected_team_ids = [
             t["team_id"] for t in (proposal.affected_teams or []) if "team_id" in t
         ]
+        team_uuids = [UUID(tid) if isinstance(tid, str) else tid for tid in affected_team_ids]
+        await dispatch_slack_notifications(
+            session=session,
+            event_type="proposal.acknowledged",
+            team_ids=team_uuids,
+            payload={
+                "asset_fqn": asset.fqn,
+                "consumer_team": consumer_team.name,
+                "response": "blocked",
+                "notes": ack.notes,
+                "proposal_id": str(proposal_id),
+            },
+        )
         await dispatch_slack_notifications(
             session=session,
             event_type="proposal.resolved",
-            team_ids=[UUID(tid) if isinstance(tid, str) else tid for tid in affected_team_ids],
+            team_ids=team_uuids,
             payload={
                 "asset_fqn": asset.fqn,
                 "version": "pending",
@@ -927,12 +932,20 @@ async def acknowledge_proposal(
         acknowledged_count=ack_count,
     )
 
-    # Send Slack notification for acknowledgment
-    await notify_proposal_acknowledged(
-        asset_fqn=asset.fqn,
-        consumer_team=consumer_team.name,
-        response=str(ack.response),
-        notes=ack.notes,
+    # Dispatch per-team Slack notification for acknowledgment
+    affected_team_ids = [t["team_id"] for t in (proposal.affected_teams or []) if "team_id" in t]
+    team_uuids = [UUID(tid) if isinstance(tid, str) else tid for tid in affected_team_ids]
+    await dispatch_slack_notifications(
+        session=session,
+        event_type="proposal.acknowledged",
+        team_ids=team_uuids,
+        payload={
+            "asset_fqn": asset.fqn,
+            "consumer_team": consumer_team.name,
+            "response": str(ack.response),
+            "notes": ack.notes,
+            "proposal_id": str(proposal_id),
+        },
     )
 
     # Check for auto-approval (all consumers acknowledged, none blocked)
@@ -954,20 +967,11 @@ async def acknowledge_proposal(
             asset_fqn=asset.fqn,
             status="approved",
         )
-        # Send Slack notification for approval
-        # Note: We don't have version here, would need to get from proposal
-        await notify_proposal_approved(
-            asset_fqn=asset.fqn,
-            version="pending",  # Version is determined at publish time
-        )
         # Dispatch per-team Slack notifications for proposal_resolved (approved)
-        affected_team_ids = [
-            t["team_id"] for t in (proposal.affected_teams or []) if "team_id" in t
-        ]
         await dispatch_slack_notifications(
             session=session,
             event_type="proposal.resolved",
-            team_ids=[UUID(tid) if isinstance(tid, str) else tid for tid in affected_team_ids],
+            team_ids=team_uuids,
             payload={
                 "asset_fqn": asset.fqn,
                 "version": "pending",

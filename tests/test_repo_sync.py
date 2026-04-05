@@ -39,9 +39,6 @@ from tessera.services.repo_sync import (
     sync_repo,
 )
 
-pytestmark = pytest.mark.asyncio
-
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -453,6 +450,7 @@ class TestParseSpec:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 class TestSyncRepo:
     """Integration tests for the full sync_repo flow with mocked git."""
 
@@ -670,6 +668,7 @@ class TestSyncRepo:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 class TestCloneOrPull:
     async def test_clone_new_repo(self, tmp_path: Path) -> None:
         """First sync: shallow clone."""
@@ -816,6 +815,7 @@ class TestCloneOrPull:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 class TestSyncRepoPublishFailure:
     """Tests for publish failure recording commit SHA to prevent infinite retry."""
 
@@ -983,6 +983,7 @@ class TestRepoModelValidation:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 class TestBackgroundWorker:
     async def test_poll_skips_disabled_repos(self, test_session: AsyncSession) -> None:
         """Repos with sync_enabled=False are not synced."""
@@ -1062,6 +1063,7 @@ class TestPerRepoAuth:
         assert dumped["has_git_token"] is False
         assert dumped["has_ssh_key"] is False
 
+    @pytest.mark.asyncio
     async def test_ssh_key_env_creates_temp_file(self) -> None:
         """_ssh_key_env writes key to a 0600 temp file and cleans up on exit."""
         import os
@@ -1096,6 +1098,7 @@ class TestPerRepoAuth:
         assert key_path is not None
         assert not os.path.exists(key_path)
 
+    @pytest.mark.asyncio
     async def test_token_priority_chain(self, test_session: AsyncSession) -> None:
         """sync_repo uses: explicit token > repo.git_token > settings.git_token."""
         team = await _create_team(test_session)
@@ -1130,6 +1133,7 @@ class TestPerRepoAuth:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 class TestSyncEventPersistence:
     """Tests for save_sync_event and SyncEvent model."""
 
@@ -1234,6 +1238,7 @@ class TestSyncEventPersistence:
         assert len(events) == 3
 
 
+@pytest.mark.asyncio
 class TestLogSyncFailedSlackNotification:
     """Tests for Slack dispatch in _log_sync_failed."""
 
