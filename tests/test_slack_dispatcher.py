@@ -230,3 +230,40 @@ class TestDispatchSlackNotifications:
                     "proposal_id": str(uuid4()),
                 },
             )
+
+    async def test_dispatches_proposal_acknowledged(self, test_session):
+        """Sends proposal.acknowledged notification to subscribed team."""
+        team, _config = await _create_team_and_config(
+            test_session,
+            notify_on=["proposal.acknowledged"],
+        )
+
+        with (
+            patch("tessera.services.slack_dispatcher.settings") as mock_settings,
+            patch(
+                "tessera.services.slack_dispatcher.deliver_slack_message",
+                new_callable=AsyncMock,
+            ) as mock_deliver,
+        ):
+            mock_settings.slack_enabled = True
+            mock_settings.tessera_base_url = "https://test.example.com"
+            mock_deliver.return_value = AsyncMock(success=True)
+
+            await dispatch_slack_notifications(
+                session=test_session,
+                event_type="proposal.acknowledged",
+                team_ids=[team.id],
+                payload={
+                    "asset_fqn": "analytics.users",
+                    "consumer_team": "marketing",
+                    "response": "approved",
+                    "notes": "All good",
+                    "proposal_id": str(uuid4()),
+                },
+            )
+
+            mock_deliver.assert_called_once()
+            call_args = mock_deliver.call_args
+            message = call_args[1].get("message") or call_args[0][1]
+            assert "marketing" in message["text"]
+            assert "approved" in message["text"]

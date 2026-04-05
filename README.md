@@ -59,7 +59,8 @@ Tessera's contribution is the **proposal-acknowledgment workflow**: a self-hoste
 ```bash
 # Docker (recommended)
 docker compose up -d
-open http://localhost:8000
+open http://localhost:8000          # Web UI (React SPA)
+open http://localhost:8000/docs     # Interactive API docs (Swagger)
 
 # Or from source
 uv sync --all-extras
@@ -84,7 +85,7 @@ Force-publish is available for emergencies (admin-only, audit-logged).
 - **Proposal workflow** — Breaking changes create proposals; all registered consumers must acknowledge before publication
 - **Schema diffing** — Detects property changes, type narrowing/widening, constraint tightening, enum changes, required field changes, nullable changes, and more
 - **Compatibility modes** — Backward, forward, full, or none (matching Kafka Schema Registry semantics)
-- **Service dependency graph** — `GET /api/v1/graph/services` returns a service-to-service dependency graph aggregated from asset-level edges, with team filtering, neighborhood subgraphs (`/services/{id}/neighborhood`), and downstream impact traversal (`/graph/impact/{asset_id}`)
+- **Service dependency graph** — `GET /api/v1/graph/services` returns a service-to-service dependency graph aggregated from asset-level edges, with team filtering, neighborhood subgraphs (`/api/v1/graph/services/{id}/neighborhood`), and downstream impact traversal (`/api/v1/graph/impact/{asset_id}`)
 - **Impact analysis** — Recursive lineage traversal shows all downstream assets and teams affected by a change
 - **Semantic versioning** — Auto, suggest, or enforce modes with pre-release support
 - **Data quality guarantees** — Not-null, unique, accepted_values, freshness, volume checks tracked alongside schemas

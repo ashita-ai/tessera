@@ -127,7 +127,6 @@ async def test_create_service(test_session: AsyncSession) -> None:
         repo_id=repo.id,
         root_path="services/orders/",
         otel_service_name="order-service",
-        owner_team_id=team.id,
     )
     test_session.add(service)
     await test_session.flush()
@@ -161,7 +160,6 @@ async def test_service_default_root_path(test_session: AsyncSession) -> None:
     service = ServiceDB(
         name="single-service",
         repo_id=repo.id,
-        owner_team_id=team.id,
     )
     test_session.add(service)
     await test_session.flush()
@@ -205,8 +203,8 @@ async def test_repo_services_relationship(test_session: AsyncSession) -> None:
     test_session.add(repo)
     await test_session.flush()
 
-    svc1 = ServiceDB(name="svc-a", repo_id=repo.id, root_path="a/", owner_team_id=team.id)
-    svc2 = ServiceDB(name="svc-b", repo_id=repo.id, root_path="b/", owner_team_id=team.id)
+    svc1 = ServiceDB(name="svc-a", repo_id=repo.id, root_path="a/")
+    svc2 = ServiceDB(name="svc-b", repo_id=repo.id, root_path="b/")
     test_session.add_all([svc1, svc2])
     await test_session.flush()
 
@@ -232,7 +230,7 @@ async def test_service_repo_relationship(test_session: AsyncSession) -> None:
     test_session.add(repo)
     await test_session.flush()
 
-    service = ServiceDB(name="svc-x", repo_id=repo.id, owner_team_id=team.id)
+    service = ServiceDB(name="svc-x", repo_id=repo.id)
     test_session.add(service)
     await test_session.flush()
 
@@ -256,7 +254,7 @@ async def test_asset_service_relationship(test_session: AsyncSession) -> None:
     test_session.add(repo)
     await test_session.flush()
 
-    service = ServiceDB(name="order-svc", repo_id=repo.id, owner_team_id=team.id)
+    service = ServiceDB(name="order-svc", repo_id=repo.id)
     test_session.add(service)
     await test_session.flush()
 
@@ -305,7 +303,7 @@ async def test_service_assets_relationship(test_session: AsyncSession) -> None:
     test_session.add(repo)
     await test_session.flush()
 
-    service = ServiceDB(name="payments", repo_id=repo.id, owner_team_id=team.id)
+    service = ServiceDB(name="payments", repo_id=repo.id)
     test_session.add(service)
     await test_session.flush()
 
@@ -390,11 +388,11 @@ async def test_service_unique_name_repo_among_active(test_session: AsyncSession)
     test_session.add(repo)
     await test_session.flush()
 
-    svc1 = ServiceDB(name="orders", repo_id=repo.id, root_path="a/", owner_team_id=team.id)
+    svc1 = ServiceDB(name="orders", repo_id=repo.id, root_path="a/")
     test_session.add(svc1)
     await test_session.flush()
 
-    svc2 = ServiceDB(name="orders", repo_id=repo.id, root_path="b/", owner_team_id=team.id)
+    svc2 = ServiceDB(name="orders", repo_id=repo.id, root_path="b/")
     test_session.add(svc2)
 
     with pytest.raises(IntegrityError):
@@ -421,8 +419,8 @@ async def test_service_same_name_different_repos(test_session: AsyncSession) -> 
     test_session.add_all([repo1, repo2])
     await test_session.flush()
 
-    svc1 = ServiceDB(name="orders", repo_id=repo1.id, owner_team_id=team.id)
-    svc2 = ServiceDB(name="orders", repo_id=repo2.id, owner_team_id=team.id)
+    svc1 = ServiceDB(name="orders", repo_id=repo1.id)
+    svc2 = ServiceDB(name="orders", repo_id=repo2.id)
     test_session.add_all([svc1, svc2])
     await test_session.flush()
 
@@ -508,14 +506,14 @@ async def test_service_soft_delete_allows_name_reuse(test_session: AsyncSession)
     test_session.add(repo)
     await test_session.flush()
 
-    svc1 = ServiceDB(name="recyclable-svc", repo_id=repo.id, owner_team_id=team.id)
+    svc1 = ServiceDB(name="recyclable-svc", repo_id=repo.id)
     test_session.add(svc1)
     await test_session.flush()
 
     svc1.deleted_at = datetime.now(UTC)
     await test_session.flush()
 
-    svc2 = ServiceDB(name="recyclable-svc", repo_id=repo.id, owner_team_id=team.id)
+    svc2 = ServiceDB(name="recyclable-svc", repo_id=repo.id)
     test_session.add(svc2)
     await test_session.flush()
 
@@ -549,33 +547,6 @@ async def test_service_requires_valid_repo(fk_session: AsyncSession) -> None:
     service = ServiceDB(
         name="orphan-svc",
         repo_id=uuid4(),  # Non-existent repo
-        owner_team_id=team.id,
-    )
-    fk_session.add(service)
-
-    with pytest.raises(IntegrityError):
-        await fk_session.flush()
-
-
-@pytest.mark.asyncio
-async def test_service_requires_valid_team(fk_session: AsyncSession) -> None:
-    """ServiceDB.owner_team_id must reference an existing team."""
-    team = TeamDB(name="valid-team-for-repo")
-    fk_session.add(team)
-    await fk_session.flush()
-
-    repo = RepoDB(
-        name="has-repo",
-        git_url="https://github.com/acme/has-repo.git",
-        owner_team_id=team.id,
-    )
-    fk_session.add(repo)
-    await fk_session.flush()
-
-    service = ServiceDB(
-        name="bad-team-svc",
-        repo_id=repo.id,
-        owner_team_id=uuid4(),  # Non-existent team
     )
     fk_session.add(service)
 
@@ -647,12 +618,11 @@ async def test_query_active_services(test_session: AsyncSession) -> None:
     test_session.add(repo)
     await test_session.flush()
 
-    active = ServiceDB(name="active-svc", repo_id=repo.id, owner_team_id=team.id)
+    active = ServiceDB(name="active-svc", repo_id=repo.id)
     deleted = ServiceDB(
         name="deleted-svc",
         repo_id=repo.id,
         root_path="old/",
-        owner_team_id=team.id,
         deleted_at=datetime.now(UTC),
     )
     test_session.add_all([active, deleted])

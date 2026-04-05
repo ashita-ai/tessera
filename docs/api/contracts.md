@@ -14,8 +14,9 @@ GET /api/v1/contracts
 |-----------|------|-------------|
 | `asset_id` | uuid | Filter by asset |
 | `status` | string | Filter by status (active, deprecated, archived) |
-| `page` | int | Page number |
-| `page_size` | int | Results per page |
+| `version` | string | Filter by version pattern (substring match) |
+| `limit` | int | Results per page (default: 50, max: 100) |
+| `offset` | int | Pagination offset (default: 0) |
 
 ### Response
 
@@ -31,10 +32,12 @@ GET /api/v1/contracts
       "compatibility_mode": "backward",
       "published_at": "2025-01-15T10:00:00Z",
       "published_by": "team-uuid",
-      "published_by_team_name": "Data Platform"
+      "publisher_name": "Data Platform"
     }
   ],
-  "total": 25
+  "total": 25,
+  "limit": 50,
+  "offset": 0
 }
 ```
 
@@ -43,6 +46,8 @@ GET /api/v1/contracts
 ```http
 GET /api/v1/contracts/{contract_id}
 ```
+
+Returns a contract with asset FQN and publisher team name. Requires read scope.
 
 ### Response
 
@@ -63,6 +68,8 @@ GET /api/v1/contracts/{contract_id}
     "required": ["id"]
   },
   "schema_format": "json_schema",
+  "field_descriptions": {},
+  "field_tags": {},
   "guarantees": {
     "freshness": {
       "max_staleness_minutes": 60
@@ -72,7 +79,9 @@ GET /api/v1/contracts/{contract_id}
     }
   },
   "published_at": "2025-01-15T10:00:00Z",
-  "published_by": "team-uuid"
+  "published_by": "team-uuid",
+  "published_by_user_id": null,
+  "publisher_name": "Data Platform"
 }
 ```
 
@@ -93,7 +102,14 @@ Note: OpenAPI and GraphQL imports are converted to JSON Schema internally.
 GET /api/v1/contracts/{contract_id}/registrations
 ```
 
-List all consumer registrations for a contract.
+List all consumer registrations for a contract. Requires read scope.
+
+### Query Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `limit` | int | Results per page (default: 50, max: 100) |
+| `offset` | int | Pagination offset (default: 0) |
 
 ### Response
 
@@ -104,10 +120,12 @@ List all consumer registrations for a contract.
       "id": "registration-uuid",
       "consumer_team_id": "team-uuid",
       "consumer_team_name": "Analytics",
-      "registered_at": "2025-01-10T10:00:00Z",
-      "status": "active"
+      "registered_at": "2025-01-10T10:00:00Z"
     }
-  ]
+  ],
+  "total": 3,
+  "limit": 50,
+  "offset": 0
 }
 ```
 
@@ -117,7 +135,7 @@ List all consumer registrations for a contract.
 PATCH /api/v1/contracts/{contract_id}/guarantees
 ```
 
-Update the guarantees on an existing contract without changing the schema.
+Update the guarantees on an existing contract without changing the schema. Requires write scope. Only active contracts can be updated. Resource-level auth: must own the asset's team or use an admin key.
 
 ### Request Body
 
@@ -144,7 +162,7 @@ Returns the updated contract.
 POST /api/v1/contracts/compare
 ```
 
-Compare two existing contracts by ID and return the schema differences.
+Compare two existing contracts by ID and return the schema differences. Requires read scope.
 
 ### Request Body
 
@@ -194,104 +212,20 @@ Compare two existing contracts by ID and return the schema differences.
 }
 ```
 
-## Contract History
-
-```http
-GET /api/v1/assets/{asset_id}/contracts/history
-```
-
-Get the complete contract version history for an asset with change type annotations.
-
-### Response
-
-```json
-{
-  "asset_id": "uuid",
-  "asset_fqn": "warehouse.schema.table",
-  "contracts": [
-    {
-      "id": "uuid",
-      "version": "2.0.0",
-      "status": "active",
-      "published_at": "2024-02-01T00:00:00Z",
-      "published_by": "uuid",
-      "compatibility_mode": "backward",
-      "change_type": "major",
-      "breaking_changes_count": 1
-    }
-  ]
-}
-```
-
-## Contract Diff
-
-```http
-GET /api/v1/assets/{asset_id}/contracts/diff?from_version=1.0.0&to_version=2.0.0
-```
-
-Compare two contract versions for the same asset. Returns the schema diff between `from_version` and `to_version`.
-
-### Query Parameters
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `from_version` | string | Yes | Base version (e.g., `1.0.0`) |
-| `to_version` | string | Yes | Target version (e.g., `2.0.0`) |
-
-### Response
-
-```json
-{
-  "asset_id": "uuid",
-  "asset_fqn": "warehouse.schema.table",
-  "from_version": "1.0.0",
-  "to_version": "2.0.0",
-  "change_type": "major",
-  "is_compatible": false,
-  "breaking_changes": [...],
-  "all_changes": [...],
-  "compatibility_mode": "backward"
-}
-```
-
-## Version Suggestion
-
-```http
-POST /api/v1/assets/{asset_id}/version-suggestion
-```
-
-Preview what version would be suggested for a new schema without actually publishing. Useful for CI dry-run checks.
-
-### Request Body
-
-```json
-{
-  "schema": {
-    "type": "object",
-    "properties": {...}
-  }
-}
-```
-
-### Response
-
-```json
-{
-  "suggested_version": "2.0.0",
-  "current_version": "1.5.0",
-  "change_type": "major",
-  "reason": "Breaking changes detected: 1 incompatible modification(s)",
-  "is_first_contract": false
-}
-```
-
 ## Bulk Publish Contracts
 
 ```http
 POST /api/v1/contracts/bulk
 ```
 
-Publish multiple contracts in a single request. Useful for CI/CD pipelines.
+Publish multiple contracts in a single request. Supports a two-phase workflow. Requires write scope.
+
+### Query Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `dry_run` | bool | Preview mode -- no changes made (default: true) |
+| `create_proposals_for_breaking` | bool | Auto-create proposals for breaking changes when `dry_run=false` (default: false) |
 
 ### Request Body
 
@@ -299,42 +233,72 @@ Publish multiple contracts in a single request. Useful for CI/CD pipelines.
 {
   "contracts": [
     {
-      "asset_fqn": "warehouse.analytics.users",
-      "schema": {...},
-      "version": "1.0.0"
-    },
-    {
-      "asset_fqn": "warehouse.analytics.orders",
-      "schema": {...},
-      "version": "2.1.0"
+      "asset_id": "asset-uuid-1",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "integer"}
+        }
+      },
+      "compatibility_mode": "backward",
+      "guarantees": null,
+      "field_descriptions": {},
+      "field_tags": {}
     }
   ],
-  "published_by": "team-uuid"
+  "published_by": "team-uuid",
+  "published_by_user_id": null
 }
 ```
 
-### Response
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `contracts` | array | Yes | List of contracts to publish (max 100) |
+| `contracts[].asset_id` | uuid | Yes | Target asset ID |
+| `contracts[].schema` | object | Yes | JSON Schema definition |
+| `contracts[].compatibility_mode` | string | No | Override compatibility mode |
+| `contracts[].guarantees` | object | No | Contract guarantees |
+| `contracts[].field_descriptions` | object | No | Map of JSON path to description |
+| `contracts[].field_tags` | object | No | Map of JSON path to tag list |
+| `published_by` | uuid | Yes | Publisher team ID |
+| `published_by_user_id` | uuid | No | Publisher user ID |
 
-Returns **200** when all items succeed, or **207 Multi-Status** when any items fail.
+### Response
 
 ```json
 {
+  "preview": true,
+  "total": 2,
+  "published": 1,
+  "skipped": 0,
+  "proposals_created": 1,
+  "failed": 0,
   "results": [
     {
+      "asset_id": "asset-uuid-1",
       "asset_fqn": "warehouse.analytics.users",
       "status": "published",
-      "contract_id": "uuid"
+      "contract_id": "contract-uuid",
+      "suggested_version": "1.1.0",
+      "current_version": "1.0.0",
+      "reason": "Compatible change",
+      "breaking_changes": []
     },
     {
+      "asset_id": "asset-uuid-2",
       "asset_fqn": "warehouse.analytics.orders",
-      "status": "proposal_created",
-      "proposal_id": "uuid"
+      "status": "proposal.created",
+      "proposal_id": "proposal-uuid",
+      "suggested_version": "2.0.0",
+      "current_version": "1.5.0",
+      "reason": "Breaking changes detected",
+      "breaking_changes": [
+        {
+          "type": "property_removed",
+          "path": "properties.email"
+        }
+      ]
     }
-  ],
-  "summary": {
-    "published": 1,
-    "proposals_created": 1,
-    "failed": 0
-  }
+  ]
 }
 ```

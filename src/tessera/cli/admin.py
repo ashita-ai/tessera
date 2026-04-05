@@ -25,7 +25,7 @@ async def _run_backfill(*, dry_run: bool = False) -> dict[str, int]:
 
     from tessera.db import AssetDB, AssetDependencyDB
     from tessera.db.database import get_async_session_maker, init_db
-    from tessera.models.enums import DependencyType
+    from tessera.models.enums import DependencySource, DependencyType
 
     await init_db()
 
@@ -60,7 +60,6 @@ async def _run_backfill(*, dry_run: bool = False) -> dict[str, int]:
 
         for asset in assets_with_deps:
             depends_on_fqns: list[str] = asset.metadata_.get("depends_on", [])
-            resource_type = (asset.metadata_ or {}).get("resource_type", "model")
 
             for dep_fqn in depends_on_fqns:
                 dep_asset = fqn_to_asset.get(dep_fqn)
@@ -68,15 +67,7 @@ async def _run_backfill(*, dry_run: bool = False) -> dict[str, int]:
                     counts["skipped_unresolved"] += 1
                     continue
 
-                # Determine dependency type: if this asset is a model and the
-                # dep is also a model, it's TRANSFORMS. Otherwise CONSUMES.
-                dep_resource_type = (dep_asset.metadata_ or {}).get("resource_type", "")
-                if resource_type == "model" and dep_resource_type == "model":
-                    dep_type = DependencyType.TRANSFORMS
-                else:
-                    dep_type = DependencyType.CONSUMES
-
-                edge_key = (str(asset.id), str(dep_asset.id), dep_type)
+                edge_key = (str(asset.id), str(dep_asset.id), DependencyType.CONSUMES)
                 if edge_key in existing_edges:
                     counts["skipped_exists"] += 1
                     continue
@@ -85,7 +76,8 @@ async def _run_backfill(*, dry_run: bool = False) -> dict[str, int]:
                     AssetDependencyDB(
                         dependent_asset_id=asset.id,
                         dependency_asset_id=dep_asset.id,
-                        dependency_type=dep_type,
+                        dependency_type=DependencyType.CONSUMES,
+                        source=DependencySource.MANUAL,
                     )
                 )
                 existing_edges.add(edge_key)

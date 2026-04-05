@@ -190,7 +190,7 @@ def example_2_http(asset: dict, client):
     if impact["affected_consumers"]:
         print("\nAffected consumers:")
         for c in impact["affected_consumers"]:
-            print(f"  - {c['team_name']} (status: {c['status']})")
+            print(f"  - {c['consumer_team_name']} (status: {c['status']})")
 
     return impact
 
@@ -401,7 +401,7 @@ def example_2_sdk(asset, client):
     if impact.affected_consumers:
         print("\nAffected consumers:")
         for c in impact.affected_consumers:
-            print(f"  - {c['team_name']} (status: {c['status']})")
+            print(f"  - {c['consumer_team_name']} (status: {c['status']})")
 
     return impact
 

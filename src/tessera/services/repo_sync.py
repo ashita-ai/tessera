@@ -501,7 +501,6 @@ async def _ensure_service(
         name=service_name,
         repo_id=repo.id,
         root_path=root_path,
-        owner_team_id=repo.owner_team_id,
     )
     session.add(new_service)
     await session.flush()
@@ -1024,7 +1023,14 @@ async def _poll_once(session_maker: Any) -> None:
                     )
                     await session.commit()
                 except Exception:
-                    logger.exception("Failed to save sync event for repo %s", target.name)
+                    logger.critical(
+                        "AUDIT GAP: failed to persist sync event for repo %s "
+                        "(repo_id=%s). The timeout occurred but no audit record "
+                        "was saved. Manual investigation required.",
+                        target.name,
+                        target.repo_id,
+                        exc_info=True,
+                    )
             except Exception:
                 await session.rollback()
                 duration = time.monotonic() - t0
@@ -1051,7 +1057,14 @@ async def _poll_once(session_maker: Any) -> None:
                     )
                     await session.commit()
                 except Exception:
-                    logger.exception("Failed to save sync event for repo %s", target.name)
+                    logger.critical(
+                        "AUDIT GAP: failed to persist sync event for repo %s "
+                        "(repo_id=%s). The sync error occurred but no audit "
+                        "record was saved. Manual investigation required.",
+                        target.name,
+                        target.repo_id,
+                        exc_info=True,
+                    )
 
     await asyncio.gather(
         *[_sync_one(t) for t in targets],
@@ -1133,7 +1146,11 @@ async def start_background_worker() -> asyncio.Task[None]:
             try:
                 await _poll_once(session_maker)
             except Exception:
-                logger.exception("Error in repo sync polling loop")
+                logger.critical(
+                    "Error in repo sync polling loop — "
+                    "some repos may not have been synced this cycle",
+                    exc_info=True,
+                )
             await asyncio.sleep(settings.sync_interval)
 
     task = asyncio.create_task(_loop(), name="repo-sync-worker")

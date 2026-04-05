@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,7 +24,7 @@ from tessera.api.pagination import PaginationParams, pagination_params
 from tessera.api.rate_limit import limit_read, limit_write
 from tessera.api.types import PaginatedResponse
 from tessera.config import settings
-from tessera.db import AssetDependencyDB, OtelSyncConfigDB, get_session
+from tessera.db import AssetDB, AssetDependencyDB, OtelSyncConfigDB, ServiceDB, get_session
 from tessera.models.enums import DependencySource
 from tessera.models.otel import (
     OtelDependency,
@@ -45,6 +45,10 @@ from tessera.services.otel import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Separate router for reconciliation — mounted at /api/v1/dependencies
+# per spec 007 which places it at GET /api/v1/dependencies/reconciliation.
+reconciliation_router = APIRouter()
 
 _E: dict[int, dict[str, str]] = {
     400: {"description": "Bad request — invalid input or parameters"},
@@ -130,7 +134,7 @@ async def list_otel_configs(
 
     Requires READ scope.
     """
-    base_query = select(OtelSyncConfigDB)
+    base_query = select(OtelSyncConfigDB).where(OtelSyncConfigDB.deleted_at.is_(None))
     if enabled is not None:
         base_query = base_query.where(OtelSyncConfigDB.enabled == enabled)
 
@@ -170,7 +174,11 @@ async def get_otel_config(
 
     Requires READ scope.
     """
-    result = await session.execute(select(OtelSyncConfigDB).where(OtelSyncConfigDB.id == config_id))
+    result = await session.execute(
+        select(OtelSyncConfigDB)
+        .where(OtelSyncConfigDB.id == config_id)
+        .where(OtelSyncConfigDB.deleted_at.is_(None))
+    )
     config = result.scalar_one_or_none()
     if not config:
         raise NotFoundError(ErrorCode.OTEL_CONFIG_NOT_FOUND, "OTEL config not found")
@@ -192,7 +200,11 @@ async def update_otel_config(
     session: AsyncSession = Depends(get_session),
 ) -> OtelSyncConfigDB:
     """Update an OTEL config. Requires WRITE scope."""
-    result = await session.execute(select(OtelSyncConfigDB).where(OtelSyncConfigDB.id == config_id))
+    result = await session.execute(
+        select(OtelSyncConfigDB)
+        .where(OtelSyncConfigDB.id == config_id)
+        .where(OtelSyncConfigDB.deleted_at.is_(None))
+    )
     config = result.scalar_one_or_none()
     if not config:
         raise NotFoundError(ErrorCode.OTEL_CONFIG_NOT_FOUND, "OTEL config not found")
@@ -259,18 +271,22 @@ async def delete_otel_config(
     _: None = RequireAdmin,
     session: AsyncSession = Depends(get_session),
 ) -> None:
-    """Delete an OTEL config. Requires ADMIN scope.
+    """Soft-delete an OTEL config. Requires ADMIN scope.
 
-    This is a hard delete since OTEL configs are infrastructure configuration,
-    not user data with audit trail requirements.
+    Sets deleted_at rather than removing the row so the record remains
+    available for audit purposes (ADR-002).
     """
-    result = await session.execute(select(OtelSyncConfigDB).where(OtelSyncConfigDB.id == config_id))
+    result = await session.execute(
+        select(OtelSyncConfigDB)
+        .where(OtelSyncConfigDB.id == config_id)
+        .where(OtelSyncConfigDB.deleted_at.is_(None))
+    )
     config = result.scalar_one_or_none()
     if not config:
         raise NotFoundError(ErrorCode.OTEL_CONFIG_NOT_FOUND, "OTEL config not found")
 
     config_name = config.name
-    await session.delete(config)
+    config.deleted_at = datetime.now(UTC)
     await session.flush()
 
     await audit.log_event(
@@ -310,7 +326,11 @@ async def trigger_sync(
             code=ErrorCode.OTEL_DISABLED,
         )
 
-    result = await session.execute(select(OtelSyncConfigDB).where(OtelSyncConfigDB.id == config_id))
+    result = await session.execute(
+        select(OtelSyncConfigDB)
+        .where(OtelSyncConfigDB.id == config_id)
+        .where(OtelSyncConfigDB.deleted_at.is_(None))
+    )
     config = result.scalar_one_or_none()
     if not config:
         raise NotFoundError(ErrorCode.OTEL_CONFIG_NOT_FOUND, "OTEL config not found")
@@ -364,6 +384,9 @@ async def trigger_sync(
 async def list_otel_dependencies(
     request: Request,
     auth: Auth,
+    service_name: str | None = Query(
+        None, description="Filter by source or target service (otel_service_name)"
+    ),
     min_confidence: float | None = Query(None, ge=0.0, le=1.0),
     stale: bool | None = Query(None, description="Show only stale dependencies"),
     params: PaginationParams = Depends(pagination_params),
@@ -385,6 +408,26 @@ async def list_otel_dependencies(
         AssetDependencyDB.source == DependencySource.OTEL,
         AssetDependencyDB.deleted_at.is_(None),
     )
+
+    if service_name is not None:
+        # Find asset IDs belonging to services with the given otel_service_name.
+        # Then filter dependencies where either side matches.
+        svc_asset_ids = (
+            select(AssetDB.id)
+            .join(ServiceDB, AssetDB.service_id == ServiceDB.id)
+            .where(
+                ServiceDB.otel_service_name == service_name,
+                ServiceDB.deleted_at.is_(None),
+                AssetDB.deleted_at.is_(None),
+            )
+            .scalar_subquery()
+        )
+        base_query = base_query.where(
+            or_(
+                AssetDependencyDB.dependent_asset_id.in_(svc_asset_ids),
+                AssetDependencyDB.dependency_asset_id.in_(svc_asset_ids),
+            )
+        )
 
     if min_confidence is not None:
         base_query = base_query.where(AssetDependencyDB.confidence >= min_confidence)
@@ -417,10 +460,11 @@ async def list_otel_dependencies(
 # ── Reconciliation ────────────────────────────────────────────
 
 
-@router.get(
+@reconciliation_router.get(
     "/reconciliation",
     response_model=ReconciliationReport,
     responses={k: _E[k] for k in (401, 403)},
+    tags=["dependencies"],
 )
 @limit_read
 async def get_reconciliation(

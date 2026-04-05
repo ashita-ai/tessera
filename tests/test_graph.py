@@ -23,9 +23,6 @@ from tessera.db.models import (
 from tessera.models.enums import DependencySource, DependencyType, ProposalStatus
 from tessera.services.graph import _ensure_utc, _sync_status
 
-pytestmark = pytest.mark.asyncio
-
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -72,17 +69,14 @@ async def _seed_graph(test_engine) -> dict[str, str]:
         order_svc = ServiceDB(
             name="order-service",
             repo_id=order_repo.id,
-            owner_team_id=commerce.id,
         )
         payment_svc = ServiceDB(
             name="payment-service",
             repo_id=payment_repo.id,
-            owner_team_id=commerce.id,
         )
         inventory_svc = ServiceDB(
             name="inventory-service",
             repo_id=inventory_repo.id,
-            owner_team_id=logistics.id,
         )
         session.add_all([order_svc, payment_svc, inventory_svc])
         await session.flush()
@@ -157,6 +151,7 @@ async def _seed_graph(test_engine) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 class TestFullGraph:
     """Tests for GET /api/v1/graph/services."""
 
@@ -241,6 +236,7 @@ class TestFullGraph:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 class TestTeamFilter:
     """Tests for team_id query parameter."""
 
@@ -278,6 +274,7 @@ class TestTeamFilter:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 class TestBreakingProposalFlag:
     """Tests for has_breaking_proposal node field."""
 
@@ -319,6 +316,7 @@ class TestBreakingProposalFlag:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 class TestNeighborhood:
     """Tests for GET /api/v1/graph/services/{id}/neighborhood."""
 
@@ -365,7 +363,7 @@ class TestNeighborhood:
             )
             session.add(repo)
             await session.flush()
-            svc = ServiceDB(name="lonely-svc", repo_id=repo.id, owner_team_id=team.id)
+            svc = ServiceDB(name="lonely-svc", repo_id=repo.id)
             session.add(svc)
             await session.flush()
             await session.commit()
@@ -383,6 +381,7 @@ class TestNeighborhood:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 class TestImpactGraph:
     """Tests for GET /api/v1/graph/impact/{asset_id}."""
 
@@ -439,9 +438,9 @@ class TestImpactGraph:
             session.add(repo)
             await session.flush()
 
-            svc_a = ServiceDB(name="svc-a", repo_id=repo.id, owner_team_id=team.id)
-            svc_b = ServiceDB(name="svc-b", repo_id=repo.id, owner_team_id=team.id)
-            svc_c = ServiceDB(name="svc-c", repo_id=repo.id, owner_team_id=team.id)
+            svc_a = ServiceDB(name="svc-a", repo_id=repo.id)
+            svc_b = ServiceDB(name="svc-b", repo_id=repo.id)
+            svc_c = ServiceDB(name="svc-c", repo_id=repo.id)
             session.add_all([svc_a, svc_b, svc_c])
             await session.flush()
 
@@ -490,6 +489,7 @@ class TestImpactGraph:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 class TestConfidenceFilter:
     """Tests for min_confidence query parameter on GET /graph/services."""
 
@@ -514,9 +514,9 @@ class TestConfidenceFilter:
             session.add(repo)
             await session.flush()
 
-            svc_api = ServiceDB(name="svc-api", repo_id=repo.id, owner_team_id=team.id)
-            svc_db = ServiceDB(name="svc-db", repo_id=repo.id, owner_team_id=team.id)
-            svc_cache = ServiceDB(name="svc-cache", repo_id=repo.id, owner_team_id=team.id)
+            svc_api = ServiceDB(name="svc-api", repo_id=repo.id)
+            svc_db = ServiceDB(name="svc-db", repo_id=repo.id)
+            svc_cache = ServiceDB(name="svc-cache", repo_id=repo.id)
             session.add_all([svc_api, svc_db, svc_cache])
             await session.flush()
 

@@ -15,11 +15,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.api.auth import Auth, RequireRead
-from tessera.api.errors import BadRequestError, ErrorCode, ForbiddenError, NotFoundError
+from tessera.api.errors import BadRequestError, ErrorCode, NotFoundError
 from tessera.api.rate_limit import limit_expensive, limit_read
 from tessera.db.database import get_session
 from tessera.db.models import AssetDB, ContractDB
-from tessera.models.enums import APIKeyScope, CompatibilityMode, ContractStatus
+from tessera.models.enums import CompatibilityMode, ContractStatus
 from tessera.services.impact_preview import compute_impact_preview
 from tessera.services.schema_validator import validate_json_schema
 
@@ -43,6 +43,7 @@ class ImpactPreviewResponse(BaseModel):
     """Response from the impact preview endpoint."""
 
     is_breaking: bool
+    change_type: str
     breaking_changes: list[dict[str, Any]]
     non_breaking_changes: list[dict[str, Any]]
     guarantee_changes: list[dict[str, Any]]
@@ -52,6 +53,7 @@ class ImpactPreviewResponse(BaseModel):
     suggested_version: str
     version_reason: str
     would_create_proposal: bool
+    proposal_would_notify: list[str]
     migration_suggestions: list[dict[str, Any]]
     current_version: str | None
     compatibility_mode: str
@@ -93,13 +95,6 @@ async def impact_preview(
     asset = asset_result.scalar_one_or_none()
     if not asset:
         raise NotFoundError(ErrorCode.ASSET_NOT_FOUND, "Asset not found")
-
-    # Authorization: must own the asset or be admin
-    if asset.owner_team_id != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):
-        raise ForbiddenError(
-            "Cannot preview impact for assets owned by other teams",
-            code=ErrorCode.UNAUTHORIZED_TEAM,
-        )
 
     # Load current active contract
     contract_result = await session.execute(

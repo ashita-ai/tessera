@@ -68,6 +68,7 @@ from tessera.models.slack_config import (
 )
 from tessera.models.team import Team, TeamCreate, TeamUpdate
 from tessera.models.user import User, UserCreate, UserUpdate, UserWithTeam
+from tessera.models.webhook import WebhookDelivery
 
 __all__ = [
     # Enums
@@ -149,4 +150,6 @@ __all__ = [
     "SlackConfigResponse",
     "SlackConfigUpdate",
     "TestMessageResult",
+    # Webhook Delivery
+    "WebhookDelivery",
 ]

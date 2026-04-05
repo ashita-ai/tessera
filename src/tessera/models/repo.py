@@ -22,6 +22,7 @@ class RepoCreate(BaseModel):
     spec_paths: list[str] = Field(default_factory=list)
     codeowners_path: str | None = Field(None, max_length=200)
     sync_enabled: bool = True
+    poll_interval_seconds: int = Field(default=300, ge=60, le=86400)
     git_token: str | None = Field(None, max_length=500)
     ssh_key: str | None = None
 
@@ -79,6 +80,7 @@ class RepoUpdate(BaseModel):
     spec_paths: list[str] | None = None
     codeowners_path: str | None = Field(None, max_length=200)
     sync_enabled: bool | None = None
+    poll_interval_seconds: int | None = Field(default=None, ge=60, le=86400)
     git_token: str | None = Field(None, max_length=500)
     ssh_key: str | None = None
 
@@ -128,6 +130,8 @@ class Repo(BaseModel):
     codeowners_path: str | None = None
     last_synced_at: datetime | None = None
     last_synced_commit: str | None = None
+    poll_interval_seconds: int = 300
+    last_sync_error: str | None = None
     created_at: datetime
     updated_at: datetime | None = None
     # Never expose plaintext credentials — only report whether they are set.

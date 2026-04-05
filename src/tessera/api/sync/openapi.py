@@ -3,6 +3,7 @@
 Endpoints for synchronizing schemas from OpenAPI specifications.
 """
 
+import logging
 from typing import Any
 from uuid import UUID
 
@@ -27,6 +28,8 @@ from tessera.services.openapi import (
 )
 from tessera.services.schema_diff import check_compatibility, diff_schemas
 from tessera.services.versioning import INITIAL_VERSION
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -271,14 +274,15 @@ async def import_openapi(
                 )
                 assets_created += 1
 
-        except Exception as e:
+        except Exception:
+            logger.exception("Error syncing OpenAPI endpoint %s %s", endpoint.method, endpoint.path)
             endpoints_results.append(
                 OpenAPIEndpointResult(
                     fqn=asset_def.fqn,
                     path=endpoint.path,
                     method=endpoint.method,
                     action="error",
-                    error=str(e),
+                    error="Internal error processing this endpoint",
                 )
             )
             assets_skipped += 1

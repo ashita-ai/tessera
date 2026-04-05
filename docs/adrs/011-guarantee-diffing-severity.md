@@ -14,14 +14,15 @@ Tightening a guarantee (fewer accepted values, stricter freshness SLA) is a safe
 
 ### Severity Classification
 
-Guarantee changes are classified into two severity levels:
+Guarantee changes are classified into three severity levels:
 
 | Change Direction | Severity | Rationale |
 |-----------------|----------|-----------|
 | **Contracted** (stricter) | `INFO` | Producer is raising the bar. Consumers see better data. Safe. |
-| **Expanded** (relaxed) | `WARNING` | Producer is lowering the bar. Consumers may see data they don't expect. Risky. |
 | **Added** | `INFO` | New guarantee where none existed. Improvement. |
+| **Expanded** (relaxed) | `WARNING` | Producer is lowering the bar. Consumers may see data they don't expect. Risky. |
 | **Removed** | `WARNING` | Guarantee withdrawn. Consumers lose a promise. |
+| **Expanded/Removed in STRICT mode** | `BREAKING` | In STRICT mode, WARNING-level changes are elevated to BREAKING. This triggers the proposal workflow, requiring consumer acknowledgment before publication — the same gate as schema breaking changes. |
 
 ### Guarantee Modes
 
@@ -30,7 +31,7 @@ Three modes control how guarantee changes interact with the publishing workflow:
 | Mode | Behavior |
 |------|----------|
 | `NOTIFY` (default) | Guarantee changes are reported but don't block publishing. |
-| `STRICT` | WARNING-level guarantee changes are treated as breaking. They trigger proposals and require acknowledgment. |
+| `STRICT` | WARNING-level guarantee changes are elevated to `BREAKING` severity. They trigger proposals and require consumer acknowledgment before publication, just like schema breaking changes. |
 | `IGNORE` | Guarantee changes are not diffed at all. |
 
 ### Integration with Impact Preview
@@ -42,7 +43,7 @@ The `/assets/{id}/impact-preview` endpoint includes guarantee diffs alongside sc
 **Benefits:**
 - Consumers are informed about guarantee changes without being blocked by improvements.
 - Teams that depend on specific guarantees can opt into `STRICT` mode for protection.
-- The INFO/WARNING distinction maps to intuition: stricter is good, laxer is concerning.
+- The INFO/WARNING/BREAKING distinction maps to intuition: stricter is good, laxer is concerning, and STRICT mode makes concerning changes blocking.
 
 **Costs:**
 - `NOTIFY` is the default, meaning guarantee relaxation doesn't block by default. A consumer relying on a not-null guarantee won't be protected unless they've opted into `STRICT` mode.
@@ -53,4 +54,4 @@ The `/assets/{id}/impact-preview` endpoint includes guarantee diffs alongside sc
 
 **All guarantee changes are breaking:** Simpler but too conservative. Adding a new not-null guarantee would require proposals from all consumers, discouraging quality improvements.
 
-**Per-guarantee severity overrides:** Let teams configure which guarantee types are breaking. Deferred as premature — the current two-level system covers the common cases.
+**Per-guarantee severity overrides:** Let teams configure which guarantee types are breaking. Deferred as premature — the current three-level system covers the common cases.

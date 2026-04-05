@@ -13,7 +13,6 @@ class ServiceCreate(BaseModel):
     repo_id: UUID
     root_path: str = Field(default="/", min_length=1, max_length=500)
     otel_service_name: str | None = Field(default=None, max_length=200)
-    owner_team_id: UUID
 
 
 class ServiceUpdate(BaseModel):

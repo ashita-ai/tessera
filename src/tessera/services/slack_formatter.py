@@ -386,6 +386,80 @@ def format_repo_sync_failed(
     }
 
 
+def format_proposal_acknowledged(
+    asset_fqn: str,
+    consumer_team: str,
+    response: str,
+    notes: str | None = None,
+    proposal_id: str | None = None,
+) -> dict[str, Any]:
+    """Format a proposal.acknowledged event as a Slack Block Kit message.
+
+    Args:
+        asset_fqn: Fully qualified asset name.
+        consumer_team: Name of the consumer team acknowledging.
+        response: One of 'approved', 'blocked', 'migrating'.
+        notes: Optional notes from the consumer.
+        proposal_id: UUID of the proposal for deep linking.
+
+    Returns:
+        Dict with 'text' and 'blocks'.
+    """
+    base = _base_url()
+
+    if response == "approved":
+        emoji = ":white_check_mark:"
+        status_text = "approved"
+    elif response == "blocked":
+        emoji = ":no_entry:"
+        status_text = "blocked"
+    else:
+        emoji = ":hourglass_flowing_sand:"
+        status_text = "acknowledged (migrating)"
+
+    escaped_fqn = _escape(asset_fqn)
+    escaped_team = _escape(consumer_team)
+
+    blocks: list[dict[str, Any]] = [
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": (
+                    f"{emoji} *{escaped_team}* {status_text} "
+                    f"the breaking change for `{escaped_fqn}`"
+                ),
+            },
+        },
+    ]
+
+    if notes:
+        blocks.append(
+            {
+                "type": "context",
+                "elements": [{"type": "mrkdwn", "text": f"_{_escape(notes)}_"}],
+            }
+        )
+
+    if base and proposal_id:
+        blocks.append(
+            {
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "mrkdwn",
+                        "text": f"<{base}/proposals/{proposal_id}|View proposal>",
+                    }
+                ],
+            }
+        )
+
+    return {
+        "text": f"{consumer_team} {status_text} breaking change for {asset_fqn}",
+        "blocks": blocks,
+    }
+
+
 def format_test_message() -> dict[str, Any]:
     """Format a test message to verify Slack config works.
 

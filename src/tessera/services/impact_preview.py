@@ -41,10 +41,10 @@ from tessera.services.versioning import compute_version_suggestion
 class AffectedConsumer:
     """A consumer team affected by the proposed change."""
 
-    team_id: str
-    team_name: str
+    consumer_team_id: str
+    consumer_team_name: str
     registration_id: str
-    contract_version: str
+    contract_id: str
     pinned_version: str | None
     status: str
 
@@ -55,8 +55,8 @@ class AffectedDownstream:
 
     asset_id: str
     asset_fqn: str
-    owner_team_id: str
     owner_team_name: str
+    dependency_type: str
     depth: int = 1
 
 
@@ -65,6 +65,7 @@ class ImpactPreviewResult:
     """Complete result of an impact preview analysis."""
 
     is_breaking: bool
+    change_type: str
     breaking_changes: list[dict[str, Any]]
     non_breaking_changes: list[dict[str, Any]]
     guarantee_changes: list[dict[str, Any]]
@@ -74,6 +75,7 @@ class ImpactPreviewResult:
     suggested_version: str
     version_reason: str
     would_create_proposal: bool
+    proposal_would_notify: list[str]
     migration_suggestions: list[dict[str, Any]]
     current_version: str | None
     compatibility_mode: str
@@ -82,6 +84,7 @@ class ImpactPreviewResult:
         """Serialize to JSON-compatible dict."""
         return {
             "is_breaking": self.is_breaking,
+            "change_type": self.change_type,
             "breaking_changes": self.breaking_changes,
             "non_breaking_changes": self.non_breaking_changes,
             "guarantee_changes": self.guarantee_changes,
@@ -91,6 +94,7 @@ class ImpactPreviewResult:
             "suggested_version": self.suggested_version,
             "version_reason": self.version_reason,
             "would_create_proposal": self.would_create_proposal,
+            "proposal_would_notify": self.proposal_would_notify,
             "migration_suggestions": self.migration_suggestions,
             "current_version": self.current_version,
             "compatibility_mode": self.compatibility_mode,
@@ -185,10 +189,10 @@ async def compute_impact_preview(
     # Build affected consumers list
     affected_consumers = [
         {
-            "team_id": str(reg.consumer_team_id),
-            "team_name": team.name,
             "registration_id": str(reg.id),
-            "contract_version": contract.version,
+            "consumer_team_id": str(reg.consumer_team_id),
+            "consumer_team_name": team.name,
+            "contract_id": str(contract.id),
             "pinned_version": reg.pinned_version,
             "status": str(reg.status),
         }
@@ -200,8 +204,8 @@ async def compute_impact_preview(
         {
             "asset_id": a["asset_id"],
             "asset_fqn": a["asset_fqn"],
-            "owner_team_id": a["owner_team_id"],
             "owner_team_name": a["owner_team_name"],
+            "dependency_type": a.get("dependency_type", "CONSUMES"),
             "depth": 1,  # flat depth since get_affected_parties doesn't track depth
         }
         for a in affected_assets
@@ -234,8 +238,18 @@ async def compute_impact_preview(
     has_consumers = len(registrations) > 0
     would_create_proposal = is_breaking and has_consumers
 
+    # Step 9: Compute the list of team names that would be notified
+    # Includes both consumer teams and downstream asset owner teams
+    notify_team_names: set[str] = set()
+    for _reg, team in registrations:
+        notify_team_names.add(team.name)
+    for a in affected_assets:
+        notify_team_names.add(a["owner_team_name"])
+    proposal_would_notify = sorted(notify_team_names)
+
     return ImpactPreviewResult(
         is_breaking=is_breaking,
+        change_type=str(diff_result.change_type).upper(),
         breaking_changes=[c.to_dict() for c in breaking],
         non_breaking_changes=[c.to_dict() for c in non_breaking],
         guarantee_changes=guarantee_changes_list,
@@ -245,6 +259,7 @@ async def compute_impact_preview(
         suggested_version=version_suggestion.suggested_version,
         version_reason=version_suggestion.reason,
         would_create_proposal=would_create_proposal,
+        proposal_would_notify=proposal_would_notify,
         migration_suggestions=migration_suggestions,
         current_version=contract.version,
         compatibility_mode=str(compat_mode),

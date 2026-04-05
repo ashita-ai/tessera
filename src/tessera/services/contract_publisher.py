@@ -12,7 +12,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.db import AssetDB, AuditRunDB, ContractDB, ProposalDB, RegistrationDB, TeamDB
@@ -38,7 +38,6 @@ from tessera.services.avro import AvroConversionError, avro_to_json_schema, vali
 from tessera.services.cache import cache_contract, invalidate_asset
 from tessera.services.schema_diff import check_compatibility, diff_schemas
 from tessera.services.schema_validator import validate_json_schema
-from tessera.services.slack import notify_proposal_created
 from tessera.services.slack_dispatcher import dispatch_slack_notifications
 from tessera.services.versioning import (
     INITIAL_VERSION,
@@ -267,7 +266,6 @@ async def bulk_publish_contracts(
                         )
                         session.add(new_contract)
                         await session.flush()
-                        await session.refresh(new_contract)
 
                         await log_contract_published(
                             session=session,
@@ -358,7 +356,6 @@ async def bulk_publish_contracts(
                         )
                         session.add(new_contract)
                         await session.flush()
-                        await session.refresh(new_contract)
 
                         await log_contract_deprecated(
                             session=session,
@@ -447,7 +444,6 @@ async def bulk_publish_contracts(
                     )
                     session.add(proposal)
                     await session.flush()
-                    await session.refresh(proposal)
 
                     await log_proposal_created(
                         session=session,
@@ -492,19 +488,36 @@ async def bulk_publish_contracts(
                     )
                     failed_count += 1
         except Exception as exc:
-            logger.exception("Failed to publish contract for asset %s: %s", item.asset_id, exc)
+            logger.exception("Failed to publish contract for asset %s", item.asset_id)
             results.append(
                 PublishResult(
                     asset_id=item.asset_id,
                     asset_fqn=asset.fqn if asset else None,
                     status="failed",
-                    error=(
-                        f"Internal error publishing contract for asset {item.asset_id}"
-                        f": {type(exc).__name__}: {exc}"
-                    ),
+                    error=f"Internal error publishing contract for asset {item.asset_id}",
                 )
             )
             failed_count += 1
+            # If this is a session-level error (connection lost, etc.), stop
+            # processing. Subsequent items will fail the same way.
+            if isinstance(exc, DBAPIError):
+                remaining = len(contracts) - len(results)
+                logger.error(
+                    "Database-level error detected; aborting remaining %d items",
+                    remaining,
+                )
+                # Account for remaining unprocessed items
+                for skip_item in contracts[len(results) :]:
+                    results.append(
+                        PublishResult(
+                            asset_id=skip_item.asset_id,
+                            asset_fqn=None,
+                            status="failed",
+                            error="Skipped — database connection lost",
+                        )
+                    )
+                    failed_count += 1
+                break
 
     return BulkPublishResult(
         preview=dry_run,
@@ -742,7 +755,6 @@ class ContractPublishingWorkflow:
                 self.current_contract.status = ContractStatus.DEPRECATED
 
             await self.session.flush()
-            await self.session.refresh(db_contract)
 
             # Audit: log deprecation of the old contract
             if self.current_contract:
@@ -1066,8 +1078,6 @@ class ContractPublishingWorkflow:
                 proposal=existing,
                 message=f"Asset already has pending proposal: {existing_id}",
             )
-        await self.session.refresh(proposal)
-
         await log_proposal_created(
             session=self.session,
             proposal_id=proposal.id,
@@ -1097,14 +1107,6 @@ class ContractPublishingWorkflow:
                 }
                 for c in impacted_consumers
             ],
-        )
-
-        await notify_proposal_created(
-            asset_fqn=self.asset.fqn,
-            version=self.version,
-            producer_team=self.publisher_team.name,
-            affected_consumers=[c.team_name for c in impacted_consumers],
-            breaking_changes=breaking_changes_list,
         )
 
         # Dispatch per-team Slack notifications for proposal_created

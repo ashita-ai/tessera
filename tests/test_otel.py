@@ -8,6 +8,7 @@ from uuid import uuid4
 import httpx
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
 
 from tessera.db.models import (
     AssetDB,
@@ -211,7 +212,6 @@ async def test_resolve_service_name_found(test_session) -> None:
     svc = ServiceDB(
         name="order-service",
         repo_id=repo.id,
-        owner_team_id=team.id,
         otel_service_name="order-svc",
     )
     test_session.add(svc)
@@ -243,7 +243,6 @@ async def test_resolve_service_name_ignores_deleted(test_session) -> None:
     svc = ServiceDB(
         name="deleted-svc",
         repo_id=repo.id,
-        owner_team_id=team.id,
         otel_service_name="deleted-otel",
         deleted_at=datetime.now(UTC),
     )
@@ -296,6 +295,7 @@ async def test_upsert_creates_new_dependency(test_session) -> None:
     assert dep.source == DependencySource.OTEL
     assert dep.confidence == 0.8
     assert dep.call_count == 500
+    assert dep.syncs_seen == 1
     assert dep.otel_config_id == config.id
 
 
@@ -352,6 +352,7 @@ async def test_upsert_updates_existing_otel_dependency(test_session) -> None:
     assert dep2.call_count == 500
     assert dep2.confidence == 0.9
     assert dep2.last_observed_at == later
+    assert dep2.syncs_seen == 2  # Incremented from 1 to 2
 
 
 @pytest.mark.asyncio
@@ -518,12 +519,8 @@ async def test_run_sync_creates_dependencies(test_session) -> None:
     test_session.add(repo)
     await test_session.flush()
 
-    svc_a = ServiceDB(
-        name="svc-a", repo_id=repo.id, owner_team_id=team.id, otel_service_name="order-svc"
-    )
-    svc_b = ServiceDB(
-        name="svc-b", repo_id=repo.id, owner_team_id=team.id, otel_service_name="payment-svc"
-    )
+    svc_a = ServiceDB(name="svc-a", repo_id=repo.id, otel_service_name="order-svc")
+    svc_b = ServiceDB(name="svc-b", repo_id=repo.id, otel_service_name="payment-svc")
     test_session.add_all([svc_a, svc_b])
     await test_session.flush()
 
@@ -573,12 +570,8 @@ async def test_run_sync_skips_below_min_call_count(test_session) -> None:
     test_session.add(repo)
     await test_session.flush()
 
-    svc_a = ServiceDB(
-        name="svc-skip-a", repo_id=repo.id, owner_team_id=team.id, otel_service_name="low-a"
-    )
-    svc_b = ServiceDB(
-        name="svc-skip-b", repo_id=repo.id, owner_team_id=team.id, otel_service_name="low-b"
-    )
+    svc_a = ServiceDB(name="svc-skip-a", repo_id=repo.id, otel_service_name="low-a")
+    svc_b = ServiceDB(name="svc-skip-b", repo_id=repo.id, otel_service_name="low-b")
     test_session.add_all([svc_a, svc_b])
     await test_session.flush()
 
@@ -954,8 +947,8 @@ async def test_list_otel_dependencies_empty(client: AsyncClient) -> None:
 
 @pytest.mark.asyncio
 async def test_reconciliation_endpoint(client: AsyncClient) -> None:
-    """GET /api/v1/otel/reconciliation should return a reconciliation report."""
-    response = await client.get("/api/v1/otel/reconciliation")
+    """GET /api/v1/dependencies/reconciliation should return a reconciliation report."""
+    response = await client.get("/api/v1/dependencies/reconciliation")
     assert response.status_code == 200
     data = response.json()
     assert "declared_only" in data
@@ -1117,3 +1110,224 @@ async def test_delete_otel_config_with_dependencies(test_session) -> None:
     await test_session.refresh(dep)
     assert dep.otel_config_id is None
     assert dep.dependent_asset_id == asset_a.id
+
+
+# ── Multi-sync confidence tracking ───────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_run_sync_increments_syncs_seen_on_repeat(test_session) -> None:
+    """Running sync twice should increment syncs_seen and use it in confidence."""
+    team = TeamDB(name="team-multi-sync")
+    test_session.add(team)
+    await test_session.flush()
+
+    repo = RepoDB(name="repo-multi", git_url="https://git.example.com/multi", owner_team_id=team.id)
+    test_session.add(repo)
+    await test_session.flush()
+
+    svc_a = ServiceDB(
+        name="svc-multi-a",
+        repo_id=repo.id,
+        otel_service_name="multi-parent",
+    )
+    svc_b = ServiceDB(
+        name="svc-multi-b",
+        repo_id=repo.id,
+        otel_service_name="multi-child",
+    )
+    test_session.add_all([svc_a, svc_b])
+    await test_session.flush()
+
+    asset_a = AssetDB(fqn="multi-parent.api", owner_team_id=team.id, service_id=svc_a.id)
+    asset_b = AssetDB(fqn="multi-child.api", owner_team_id=team.id, service_id=svc_b.id)
+    test_session.add_all([asset_a, asset_b])
+    await test_session.flush()
+
+    config = OtelSyncConfigDB(
+        name="multi-sync-config",
+        backend_type=OtelBackendType.JAEGER,
+        endpoint_url="http://jaeger:16686",
+        lookback_seconds=86400,
+        poll_interval_seconds=3600,
+        min_call_count=10,
+        enabled=True,
+    )
+    test_session.add(config)
+    await test_session.flush()
+
+    mock_response = httpx.Response(
+        200,
+        json=[{"parent": "multi-parent", "child": "multi-child", "callCount": 5000}],
+        request=httpx.Request("GET", "http://jaeger:16686/api/dependencies"),
+    )
+    mock_client = AsyncMock(spec=httpx.AsyncClient)
+    mock_client.get = AsyncMock(return_value=mock_response)
+
+    # First sync
+    result1 = await run_sync(test_session, config, http_client=mock_client)
+    assert result1.edges_created == 1
+    assert config.sync_count == 1
+
+    # Verify syncs_seen = 1 on the created dependency
+    dep_result = await test_session.execute(
+        select(AssetDependencyDB).where(
+            AssetDependencyDB.dependent_asset_id == asset_b.id,
+            AssetDependencyDB.dependency_asset_id == asset_a.id,
+            AssetDependencyDB.source == DependencySource.OTEL,
+        )
+    )
+    dep = dep_result.scalar_one()
+    assert dep.syncs_seen == 1
+
+    # Second sync
+    result2 = await run_sync(test_session, config, http_client=mock_client)
+    assert result2.edges_updated == 1
+    assert config.sync_count == 2
+
+    await test_session.refresh(dep)
+    assert dep.syncs_seen == 2
+
+    # Confidence should use real syncs_seen/total_syncs (2/2 = 1.0 consistency)
+    expected = compute_confidence(5000, syncs_seen=2, total_syncs=2)
+    assert dep.confidence == expected
+
+
+@pytest.mark.asyncio
+async def test_sync_count_increments_on_config(test_session) -> None:
+    """Config sync_count should increment after each successful sync."""
+    config = OtelSyncConfigDB(
+        name="count-config",
+        backend_type=OtelBackendType.JAEGER,
+        endpoint_url="http://jaeger:16686",
+        lookback_seconds=86400,
+        poll_interval_seconds=3600,
+        min_call_count=10,
+        enabled=True,
+    )
+    test_session.add(config)
+    await test_session.flush()
+    assert config.sync_count == 0
+
+    # Sync with empty response (no edges)
+    mock_response = httpx.Response(
+        200,
+        json=[],
+        request=httpx.Request("GET", "http://jaeger:16686/api/dependencies"),
+    )
+    mock_client = AsyncMock(spec=httpx.AsyncClient)
+    mock_client.get = AsyncMock(return_value=mock_response)
+
+    await run_sync(test_session, config, http_client=mock_client)
+    assert config.sync_count == 1
+
+    await run_sync(test_session, config, http_client=mock_client)
+    assert config.sync_count == 2
+
+
+# ── service_name filter ──────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_list_otel_dependencies_service_name_filter(
+    client: AsyncClient, test_session
+) -> None:
+    """GET /api/v1/otel/dependencies?service_name=X should filter by service."""
+    team = TeamDB(name="team-svc-filter")
+    test_session.add(team)
+    await test_session.flush()
+
+    repo = RepoDB(
+        name="repo-svc-filter",
+        git_url="https://git.example.com/svc-filter",
+        owner_team_id=team.id,
+    )
+    test_session.add(repo)
+    await test_session.flush()
+
+    svc_a = ServiceDB(
+        name="filter-svc-a",
+        repo_id=repo.id,
+        otel_service_name="filter-alpha",
+    )
+    svc_b = ServiceDB(
+        name="filter-svc-b",
+        repo_id=repo.id,
+        otel_service_name="filter-beta",
+    )
+    svc_c = ServiceDB(
+        name="filter-svc-c",
+        repo_id=repo.id,
+        otel_service_name="filter-gamma",
+    )
+    test_session.add_all([svc_a, svc_b, svc_c])
+    await test_session.flush()
+
+    asset_a = AssetDB(fqn="filter-alpha.api", owner_team_id=team.id, service_id=svc_a.id)
+    asset_b = AssetDB(fqn="filter-beta.api", owner_team_id=team.id, service_id=svc_b.id)
+    asset_c = AssetDB(fqn="filter-gamma.api", owner_team_id=team.id, service_id=svc_c.id)
+    test_session.add_all([asset_a, asset_b, asset_c])
+    await test_session.flush()
+
+    # Create OTEL deps: a→b and c→b (beta is involved in both)
+    dep_ab = AssetDependencyDB(
+        dependent_asset_id=asset_a.id,
+        dependency_asset_id=asset_b.id,
+        dependency_type=DependencyType.CONSUMES,
+        source=DependencySource.OTEL,
+        confidence=0.8,
+        call_count=1000,
+        last_observed_at=datetime.now(UTC),
+    )
+    dep_cb = AssetDependencyDB(
+        dependent_asset_id=asset_c.id,
+        dependency_asset_id=asset_b.id,
+        dependency_type=DependencyType.CONSUMES,
+        source=DependencySource.OTEL,
+        confidence=0.7,
+        call_count=500,
+        last_observed_at=datetime.now(UTC),
+    )
+    # Unrelated: a→c (should not appear when filtering by beta)
+    dep_ac = AssetDependencyDB(
+        dependent_asset_id=asset_a.id,
+        dependency_asset_id=asset_c.id,
+        dependency_type=DependencyType.CONSUMES,
+        source=DependencySource.OTEL,
+        confidence=0.6,
+        call_count=200,
+        last_observed_at=datetime.now(UTC),
+    )
+    test_session.add_all([dep_ab, dep_cb, dep_ac])
+    await test_session.flush()
+
+    # Filter by filter-beta — should return dep_ab and dep_cb (both involve beta)
+    response = await client.get("/api/v1/otel/dependencies", params={"service_name": "filter-beta"})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 2
+
+    # Filter by filter-gamma — should return dep_cb and dep_ac
+    response2 = await client.get(
+        "/api/v1/otel/dependencies", params={"service_name": "filter-gamma"}
+    )
+    assert response2.status_code == 200
+    data2 = response2.json()
+    assert data2["total"] == 2
+
+    # Filter by nonexistent service — should return 0
+    response3 = await client.get(
+        "/api/v1/otel/dependencies", params={"service_name": "nonexistent-svc"}
+    )
+    assert response3.status_code == 200
+    assert response3.json()["total"] == 0
+
+
+# ── Reconciliation at new path ───────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_old_path_returns_404(client: AsyncClient) -> None:
+    """The old /api/v1/otel/reconciliation path should now return 404."""
+    response = await client.get("/api/v1/otel/reconciliation")
+    assert response.status_code == 404

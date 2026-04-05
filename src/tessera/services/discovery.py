@@ -14,7 +14,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, func, select, update
+from sqlalchemy import ColumnElement, and_, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.db.models import (
@@ -523,6 +523,8 @@ class CoverageReport:
 
 async def compute_coverage_report(
     session: AsyncSession,
+    *,
+    team_id: UUID | None = None,
 ) -> CoverageReport:
     """Compute a gap analysis report for dependency coverage.
 
@@ -532,27 +534,32 @@ async def compute_coverage_report(
     """
     report = CoverageReport()
 
-    # Total non-deleted assets
-    total_result = await session.execute(
-        select(func.count(AssetDB.id)).where(AssetDB.deleted_at.is_(None))
-    )
+    # Base filter: non-deleted assets, optionally scoped to a single team
+    asset_filters: list[ColumnElement[bool]] = [AssetDB.deleted_at.is_(None)]
+    if team_id is not None:
+        asset_filters.append(AssetDB.owner_team_id == team_id)
+
+    # Total non-deleted assets (within team scope when filtered)
+    total_result = await session.execute(select(func.count(AssetDB.id)).where(and_(*asset_filters)))
     report.total_assets = total_result.scalar() or 0
 
     if report.total_assets == 0:
         return report
 
-    # Assets with at least one active registration (scoped to non-deleted assets)
+    # Assets with at least one active registration (within team scope)
+    reg_filters: list[ColumnElement[bool]] = [
+        AssetDB.deleted_at.is_(None),
+        RegistrationDB.deleted_at.is_(None),
+        RegistrationDB.status == RegistrationStatus.ACTIVE,
+    ]
+    if team_id is not None:
+        reg_filters.append(AssetDB.owner_team_id == team_id)
+
     registered_result = await session.execute(
         select(func.count(func.distinct(ContractDB.asset_id)))
         .join(RegistrationDB, RegistrationDB.contract_id == ContractDB.id)
         .join(AssetDB, ContractDB.asset_id == AssetDB.id)
-        .where(
-            and_(
-                AssetDB.deleted_at.is_(None),
-                RegistrationDB.deleted_at.is_(None),
-                RegistrationDB.status == RegistrationStatus.ACTIVE,
-            )
-        )
+        .where(and_(*reg_filters))
     )
     report.assets_with_registrations = registered_result.scalar() or 0
 
@@ -561,24 +568,20 @@ async def compute_coverage_report(
         select(func.distinct(ContractDB.asset_id))
         .join(RegistrationDB, RegistrationDB.contract_id == ContractDB.id)
         .join(AssetDB, ContractDB.asset_id == AssetDB.id)
-        .where(
-            and_(
-                AssetDB.deleted_at.is_(None),
-                RegistrationDB.deleted_at.is_(None),
-                RegistrationDB.status == RegistrationStatus.ACTIVE,
-            )
-        )
+        .where(and_(*reg_filters))
     )
+    inferred_filters: list[ColumnElement[bool]] = [
+        AssetDB.deleted_at.is_(None),
+        InferredDependencyDB.status == InferredDependencyStatus.PENDING,
+        InferredDependencyDB.asset_id.not_in(registered_asset_ids),
+    ]
+    if team_id is not None:
+        inferred_filters.append(AssetDB.owner_team_id == team_id)
+
     inferred_only_result = await session.execute(
         select(func.count(func.distinct(InferredDependencyDB.asset_id)))
         .join(AssetDB, InferredDependencyDB.asset_id == AssetDB.id)
-        .where(
-            and_(
-                AssetDB.deleted_at.is_(None),
-                InferredDependencyDB.status == InferredDependencyStatus.PENDING,
-                InferredDependencyDB.asset_id.not_in(registered_asset_ids),
-            )
-        )
+        .where(and_(*inferred_filters))
     )
     report.assets_with_inferred_only = inferred_only_result.scalar() or 0
 
@@ -596,20 +599,27 @@ async def compute_coverage_report(
     # Use a 30-day lookback for activity counting
     thirty_days_ago = datetime.now(UTC) - timedelta(days=30)
 
+    gap_filters: list[ColumnElement[bool]] = [
+        AuditEventDB.action == str(AuditAction.PREFLIGHT_CHECKED),
+        AuditEventDB.occurred_at >= thirty_days_ago,
+        AuditEventDB.actor_id.is_not(None),
+    ]
+
+    gap_query = select(
+        AuditEventDB.entity_id.label("asset_id"),
+        func.count(AuditEventDB.id).label("preflight_calls_30d"),
+        func.count(func.distinct(AuditEventDB.actor_id)).label("distinct_consumer_teams"),
+    ).where(and_(*gap_filters))
+
+    # When team-scoped, restrict to assets owned by this team
+    if team_id is not None:
+        team_asset_ids = select(AssetDB.id).where(
+            and_(AssetDB.deleted_at.is_(None), AssetDB.owner_team_id == team_id)
+        )
+        gap_query = gap_query.where(AuditEventDB.entity_id.in_(team_asset_ids))
+
     gap_query = (
-        select(
-            AuditEventDB.entity_id.label("asset_id"),
-            func.count(AuditEventDB.id).label("preflight_calls_30d"),
-            func.count(func.distinct(AuditEventDB.actor_id)).label("distinct_consumer_teams"),
-        )
-        .where(
-            and_(
-                AuditEventDB.action == str(AuditAction.PREFLIGHT_CHECKED),
-                AuditEventDB.occurred_at >= thirty_days_ago,
-                AuditEventDB.actor_id.is_not(None),
-            )
-        )
-        .group_by(AuditEventDB.entity_id)
+        gap_query.group_by(AuditEventDB.entity_id)
         .order_by(func.count(AuditEventDB.id).desc())
         .limit(20)
     )
