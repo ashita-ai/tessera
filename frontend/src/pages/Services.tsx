@@ -141,7 +141,8 @@ function RegisterModal({ onClose }: { onClose: () => void }) {
   return (
     <>
       <div className="fixed inset-0 z-40 bg-bg/70 backdrop-blur-sm" onClick={onClose} />
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="fixed inset-0 z-50 overflow-y-auto p-4">
+        <div className="flex min-h-full items-center justify-center">
         <div className="w-full max-w-md rounded-lg border border-line bg-bg-raised p-5 shadow-2xl">
           <p className="text-[13px] font-medium text-t1">Register service</p>
           <p className="mt-1 text-[11px] text-t3">Register a deployable unit within a repository.</p>
@@ -186,6 +187,7 @@ function RegisterModal({ onClose }: { onClose: () => void }) {
               </button>
             </div>
           </form>
+        </div>
         </div>
       </div>
     </>
