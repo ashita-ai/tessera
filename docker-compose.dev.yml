@@ -42,6 +42,7 @@ services:
 
   api:
     build: .
+    pull_policy: build
     ports:
       - "8001:8000"
     env_file:
@@ -52,8 +53,6 @@ services:
       DEMO_MODE: "true"
       WEBHOOK_URL: http://webhook-receiver:5555/webhooks
       WEBHOOK_SECRET: dev-webhook-secret
-    volumes:
-      - ./src/tessera/static:/app/src/tessera/static:ro
     depends_on:
       db:
         condition: service_healthy
