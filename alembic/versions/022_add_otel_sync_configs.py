@@ -1,7 +1,7 @@
 """Add otel_sync_configs table and extend dependencies with OTEL fields.
 
-Revision ID: 021
-Revises: 020
+Revision ID: 022
+Revises: 021
 Create Date: 2026-04-04
 
 Adds OTEL-based dependency discovery support (Spec-007, ADR-014 Phase 2):
@@ -20,8 +20,8 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "021"
-down_revision: str = "020"
+revision: str = "022"
+down_revision: str = "021"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

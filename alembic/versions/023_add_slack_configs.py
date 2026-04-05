@@ -1,7 +1,7 @@
 """Add slack_configs table for per-team Slack notification configuration.
 
-Revision ID: 021
-Revises: 020
+Revision ID: 023
+Revises: 022
 Create Date: 2026-04-04
 
 Part of ADR-014 Phase 3 (Slack integration). Creates the ``slack_configs``
@@ -16,8 +16,8 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "021"
-down_revision: str = "020"
+revision: str = "023"
+down_revision: str = "022"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

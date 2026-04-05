@@ -1,7 +1,7 @@
 """Fix otel_config_id FK to SET NULL on delete.
 
-Revision ID: 023
-Revises: 022
+Revision ID: 025
+Revises: 024
 Create Date: 2026-04-04
 
 Without ON DELETE SET NULL, deleting an otel_sync_configs row while
@@ -15,8 +15,8 @@ from collections.abc import Sequence
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "023"
-down_revision: str = "022"
+revision: str = "025"
+down_revision: str = "024"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

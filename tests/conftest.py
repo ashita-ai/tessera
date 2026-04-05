@@ -142,40 +142,22 @@ async def test_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
 
 
 @pytest.fixture
-async def client(test_engine) -> AsyncGenerator[AsyncClient, None]:
-    """Create a test client with isolated database and auth disabled."""
+async def session(test_session: AsyncSession) -> AsyncGenerator[AsyncSession, None]:
+    """Alias for test_session — many test files inject 'session' directly."""
+    yield test_session
+
+
+@pytest.fixture
+async def client(session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
+    """Create a test client that shares the test session with the app."""
     from tessera.config import settings
     from tessera.db import database
 
-    # Disable auth for general tests
     original_auth_disabled = settings.auth_disabled
     settings.auth_disabled = True
 
-    # Create schemas and tables
-    async with test_engine.begin() as conn:
-        if not _USE_SQLITE:
-            # PostgreSQL: Create schemas
-            await conn.execute(text("CREATE SCHEMA IF NOT EXISTS core"))
-            await conn.execute(text("CREATE SCHEMA IF NOT EXISTS workflow"))
-            await conn.execute(text("CREATE SCHEMA IF NOT EXISTS audit"))
-        await conn.run_sync(create_tables)
-
-    # Create session maker for this engine
-    async_session = async_sessionmaker(
-        test_engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-    )
-
-    # Override the get_session dependency
     async def get_test_session() -> AsyncGenerator[AsyncSession, None]:
-        async with async_session() as session:
-            try:
-                yield session
-                await session.commit()
-            except Exception:
-                await session.rollback()
-                raise
+        yield session
 
     app.dependency_overrides[database.get_session] = get_test_session
 
@@ -186,13 +168,7 @@ async def client(test_engine) -> AsyncGenerator[AsyncClient, None]:
         yield client
 
     app.dependency_overrides.clear()
-
-    # Restore original auth setting
     settings.auth_disabled = original_auth_disabled
-
-    # Clean up tables after test
-    async with test_engine.begin() as conn:
-        await conn.run_sync(drop_tables)
 
 
 # Sample data factories

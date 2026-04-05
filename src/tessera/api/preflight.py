@@ -95,6 +95,9 @@ def _evaluate_freshness(
         return None, sla
 
     threshold = datetime.now(UTC) - timedelta(minutes=max_staleness)
+    # Normalize timezone: SQLite returns naive datetimes, PostgreSQL returns aware.
+    if last_audit_at.tzinfo is None:
+        last_audit_at = last_audit_at.replace(tzinfo=UTC)
     return last_audit_at >= threshold, sla
 
 
