@@ -35,9 +35,9 @@ async def resolve_team_by_name(
     session: AsyncSession,
     team_name: str,
 ) -> TeamDB | None:
-    """Look up a team by name (case-insensitive)."""
+    """Look up a team by exact name match."""
     result = await session.execute(
-        select(TeamDB).where(TeamDB.name.ilike(team_name)).where(TeamDB.deleted_at.is_(None))
+        select(TeamDB).where(TeamDB.name == team_name).where(TeamDB.deleted_at.is_(None))
     )
     return result.scalar_one_or_none()
 
@@ -46,8 +46,8 @@ async def resolve_user_by_email(
     session: AsyncSession,
     email: str,
 ) -> UserDB | None:
-    """Look up a user by email (case-insensitive)."""
+    """Look up a user by exact email match."""
     result = await session.execute(
-        select(UserDB).where(UserDB.email.ilike(email)).where(UserDB.deactivated_at.is_(None))
+        select(UserDB).where(UserDB.email == email).where(UserDB.deactivated_at.is_(None))
     )
     return result.scalar_one_or_none()
