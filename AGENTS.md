@@ -105,10 +105,10 @@ Core logic in `services/schema_diff.py`. Detects property additions/removals, re
 
 | Mode | Breaking if... |
 |------|----------------|
-| backward | Remove field, add required, narrow type, remove enum |
-| forward | Add field, remove required, widen type, add enum |
-| full | Any change to schema |
-| none | Nothing (just notify) |
+| backward | Remove/rename field, add required, narrow type, incompatible type change, remove enum values, tighten constraints, remove default, remove nullable |
+| forward | Add/rename field, remove required, widen type, incompatible type change, add enum values, relax constraints, add default, add nullable |
+| full | Union of backward + forward breaking sets (non-breaking changes still pass) |
+| none | Nothing is breaking (changes are recorded but never block publishing) |
 
 ### Contract Publishing Flow
 

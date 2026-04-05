@@ -1,5 +1,6 @@
 """Slack configuration CRUD API endpoints."""
 
+from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -132,7 +133,7 @@ async def list_slack_configs(
 
     Requires READ scope.
     """
-    base_query = select(SlackConfigDB)
+    base_query = select(SlackConfigDB).where(SlackConfigDB.deleted_at.is_(None))
 
     if team_id is not None:
         base_query = base_query.where(SlackConfigDB.team_id == team_id)
@@ -179,7 +180,11 @@ async def get_slack_config(
 
     Requires READ scope.
     """
-    result = await session.execute(select(SlackConfigDB).where(SlackConfigDB.id == config_id))
+    result = await session.execute(
+        select(SlackConfigDB)
+        .where(SlackConfigDB.id == config_id)
+        .where(SlackConfigDB.deleted_at.is_(None))
+    )
     config = result.scalar_one_or_none()
     if not config:
         raise NotFoundError(ErrorCode.SLACK_CONFIG_NOT_FOUND, "Slack config not found")
@@ -205,7 +210,11 @@ async def update_slack_config(
 
     Requires WRITE scope.
     """
-    result = await session.execute(select(SlackConfigDB).where(SlackConfigDB.id == config_id))
+    result = await session.execute(
+        select(SlackConfigDB)
+        .where(SlackConfigDB.id == config_id)
+        .where(SlackConfigDB.deleted_at.is_(None))
+    )
     config = result.scalar_one_or_none()
     if not config:
         raise NotFoundError(ErrorCode.SLACK_CONFIG_NOT_FOUND, "Slack config not found")
@@ -267,15 +276,22 @@ async def delete_slack_config(
     _: None = RequireWrite,
     session: AsyncSession = Depends(get_session),
 ) -> None:
-    """Remove a Slack config.
+    """Soft-delete a Slack config.
 
-    Requires WRITE scope. This is a hard delete since configs have no
-    audit trail requirements and can be recreated easily.
+    Requires WRITE scope. Sets deleted_at rather than removing the row
+    so the record remains available for audit purposes.
     """
-    result = await session.execute(select(SlackConfigDB).where(SlackConfigDB.id == config_id))
+    result = await session.execute(
+        select(SlackConfigDB)
+        .where(SlackConfigDB.id == config_id)
+        .where(SlackConfigDB.deleted_at.is_(None))
+    )
     config = result.scalar_one_or_none()
     if not config:
         raise NotFoundError(ErrorCode.SLACK_CONFIG_NOT_FOUND, "Slack config not found")
+
+    config.deleted_at = datetime.now(UTC)
+    await session.flush()
 
     await audit.log_event(
         session=session,
@@ -287,9 +303,6 @@ async def delete_slack_config(
             "channel_id": config.channel_id,
         },
     )
-
-    await session.delete(config)
-    await session.flush()
 
 
 @router.post(
@@ -309,7 +322,11 @@ async def test_slack_config(
 
     Requires WRITE scope.
     """
-    result = await session.execute(select(SlackConfigDB).where(SlackConfigDB.id == config_id))
+    result = await session.execute(
+        select(SlackConfigDB)
+        .where(SlackConfigDB.id == config_id)
+        .where(SlackConfigDB.deleted_at.is_(None))
+    )
     config = result.scalar_one_or_none()
     if not config:
         raise NotFoundError(ErrorCode.SLACK_CONFIG_NOT_FOUND, "Slack config not found")

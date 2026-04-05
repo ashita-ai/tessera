@@ -78,6 +78,7 @@ async def create_repo(
         spec_paths=repo.spec_paths,
         owner_team_id=repo.owner_team_id,
         sync_enabled=repo.sync_enabled,
+        poll_interval_seconds=repo.poll_interval_seconds,
         codeowners_path=repo.codeowners_path,
         git_token=repo.git_token,
         ssh_key=repo.ssh_key,
@@ -212,6 +213,9 @@ async def update_repo(
     if update.sync_enabled is not None:
         repo.sync_enabled = update.sync_enabled
         changed["sync_enabled"] = update.sync_enabled
+    if update.poll_interval_seconds is not None:
+        repo.poll_interval_seconds = update.poll_interval_seconds
+        changed["poll_interval_seconds"] = update.poll_interval_seconds
     if update.git_token is not None:
         repo.git_token = update.git_token
         changed["git_token"] = "***"  # Never log plaintext

@@ -46,6 +46,7 @@ async def _get_configs_for_teams(
         select(SlackConfigDB).where(
             SlackConfigDB.team_id.in_(team_ids),
             SlackConfigDB.enabled.is_(True),
+            SlackConfigDB.deleted_at.is_(None),
         )
     )
     configs = list(result.scalars().all())

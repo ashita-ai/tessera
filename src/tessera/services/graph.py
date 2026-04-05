@@ -74,13 +74,13 @@ async def _load_service_nodes(
             ServiceDB.name,
             ServiceDB.repo_id,
             RepoDB.name.label("repo_name"),
-            ServiceDB.owner_team_id,
+            RepoDB.owner_team_id,
             TeamDB.name.label("team_name"),
             RepoDB.last_synced_at,
             func.count(AssetDB.id).label("asset_count"),
         )
         .join(RepoDB, ServiceDB.repo_id == RepoDB.id)
-        .join(TeamDB, ServiceDB.owner_team_id == TeamDB.id)
+        .join(TeamDB, RepoDB.owner_team_id == TeamDB.id)
         .outerjoin(
             AssetDB,
             (AssetDB.service_id == ServiceDB.id) & (AssetDB.deleted_at.is_(None)),
@@ -91,14 +91,14 @@ async def _load_service_nodes(
             ServiceDB.name,
             ServiceDB.repo_id,
             RepoDB.name,
-            ServiceDB.owner_team_id,
+            RepoDB.owner_team_id,
             TeamDB.name,
             RepoDB.last_synced_at,
         )
     )
 
     if team_id is not None:
-        svc_query = svc_query.where(ServiceDB.owner_team_id == team_id)
+        svc_query = svc_query.where(RepoDB.owner_team_id == team_id)
 
     result = await session.execute(svc_query)
     rows = result.all()
@@ -411,7 +411,8 @@ async def build_impact_graph(
     downstream_query = (
         select(AssetDB.id, AssetDB.service_id, ServiceDB.name, TeamDB.name.label("team_name"))
         .outerjoin(ServiceDB, AssetDB.service_id == ServiceDB.id)
-        .outerjoin(TeamDB, ServiceDB.owner_team_id == TeamDB.id)
+        .outerjoin(RepoDB, ServiceDB.repo_id == RepoDB.id)
+        .outerjoin(TeamDB, RepoDB.owner_team_id == TeamDB.id)
         .where(AssetDB.id.in_(downstream_asset_ids))
         .where(AssetDB.deleted_at.is_(None))
     )

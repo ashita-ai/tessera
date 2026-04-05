@@ -153,7 +153,6 @@ class TeamDB(Base):
     members: Mapped[list["UserDB"]] = relationship(back_populates="team")
     assets: Mapped[list["AssetDB"]] = relationship(back_populates="owner_team")
     repos: Mapped[list["RepoDB"]] = relationship(back_populates="owner_team")
-    services: Mapped[list["ServiceDB"]] = relationship(back_populates="owner_team")
 
 
 class RepoDB(Base):
@@ -179,6 +178,8 @@ class RepoDB(Base):
     ssh_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_synced_commit: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    poll_interval_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=300)
+    last_sync_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, onupdate=_utcnow
@@ -224,9 +225,6 @@ class ServiceDB(Base):
     repo_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("repos.id"), nullable=False, index=True)
     root_path: Mapped[str] = mapped_column(String(500), nullable=False, default="/")
     otel_service_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
-    owner_team_id: Mapped[UUID] = mapped_column(
-        Uuid, ForeignKey("teams.id"), nullable=False, index=True
-    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, onupdate=_utcnow
@@ -248,8 +246,12 @@ class ServiceDB(Base):
 
     # Relationships
     repo: Mapped["RepoDB"] = relationship(back_populates="services", lazy="selectin")
-    owner_team: Mapped["TeamDB"] = relationship(back_populates="services", lazy="selectin")
     assets: Mapped[list["AssetDB"]] = relationship(back_populates="service")
+
+    @property
+    def owner_team_id(self) -> UUID:
+        """Derive team ownership from the parent repo (ADR-014)."""
+        return self.repo.owner_team_id
 
 
 class AssetDB(Base):
@@ -521,6 +523,7 @@ class AssetDependencyDB(Base):
         DateTime(timezone=True), nullable=True
     )
     call_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    syncs_seen: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True
@@ -710,6 +713,9 @@ class SlackConfigDB(Base):
     updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, onupdate=_utcnow
     )
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
 
     __table_args__ = (
         UniqueConstraint("team_id", "channel_id", name="uq_slack_configs_team_channel"),
@@ -783,8 +789,15 @@ class OtelSyncConfigDB(Base):
     poll_interval_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=3600)
     min_call_count: Mapped[int] = mapped_column(Integer, nullable=False, default=10)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    sync_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_sync_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, onupdate=_utcnow
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     # Relationships

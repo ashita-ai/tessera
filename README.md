@@ -59,7 +59,8 @@ Tessera's contribution is the **proposal-acknowledgment workflow**: a self-hoste
 ```bash
 # Docker (recommended)
 docker compose up -d
-open http://localhost:8000
+open http://localhost:8000          # Web UI (React SPA)
+open http://localhost:8000/docs     # Interactive API docs (Swagger)
 
 # Or from source
 uv sync --all-extras

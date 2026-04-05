@@ -281,6 +281,7 @@ async def upsert_otel_dependency(
         existing.last_observed_at = now
         existing.call_count = call_count
         existing.confidence = confidence
+        existing.syncs_seen = existing.syncs_seen + 1
         existing.otel_config_id = config_id
         await session.flush()
         return existing, False
@@ -293,6 +294,7 @@ async def upsert_otel_dependency(
         confidence=confidence,
         last_observed_at=now,
         call_count=call_count,
+        syncs_seen=1,
         otel_config_id=config_id,
     )
     session.add(dep)
@@ -404,13 +406,29 @@ async def run_sync(
         if parent_asset is None or child_asset is None:
             continue
 
-        confidence = compute_confidence(edge.call_count, syncs_seen=1, total_syncs=1)
+        # child depends on parent (child calls parent)
+        # Look up existing edge to get current syncs_seen for confidence calc
+        existing_result = await session.execute(
+            select(AssetDependencyDB).where(
+                and_(
+                    AssetDependencyDB.dependent_asset_id == child_asset.id,
+                    AssetDependencyDB.dependency_asset_id == parent_asset.id,
+                    AssetDependencyDB.dependency_type == DependencyType.CONSUMES,
+                    AssetDependencyDB.source == DependencySource.OTEL,
+                    AssetDependencyDB.deleted_at.is_(None),
+                )
+            )
+        )
+        existing_dep = existing_result.scalar_one_or_none()
+        edge_syncs_seen = (existing_dep.syncs_seen + 1) if existing_dep else 1
+        total_syncs = config.sync_count + 1  # +1 for the current sync
+
+        confidence = compute_confidence(edge.call_count, edge_syncs_seen, total_syncs)
         if confidence < settings.otel_min_confidence:
             continue
 
         resolved_count += 1
 
-        # child depends on parent (child calls parent)
         _, was_created = await upsert_otel_dependency(
             session=session,
             dependent_asset_id=child_asset.id,
@@ -428,6 +446,7 @@ async def run_sync(
     stale_count = await mark_stale_dependencies(session, config, now)
 
     # Update config sync state
+    config.sync_count = config.sync_count + 1
     config.last_synced_at = now
     config.last_sync_error = None
     await session.flush()
@@ -558,6 +577,7 @@ async def get_due_configs(session: AsyncSession) -> list[OtelSyncConfigDB]:
     result = await session.execute(
         select(OtelSyncConfigDB).where(
             and_(
+                OtelSyncConfigDB.deleted_at.is_(None),
                 OtelSyncConfigDB.enabled.is_(True),
                 (
                     OtelSyncConfigDB.last_synced_at.is_(None)
