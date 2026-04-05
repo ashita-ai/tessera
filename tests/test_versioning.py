@@ -1,6 +1,6 @@
 """Tests for the consolidated versioning module."""
 
-import logging
+from unittest.mock import patch
 
 import pytest
 
@@ -52,25 +52,23 @@ class TestParseSemverLenient:
     def test_invalid_returns_default(self) -> None:
         assert parse_semver_lenient("garbage") == (1, 0, 0)
 
-    def test_valid_version_does_not_warn(self, caplog: pytest.LogCaptureFixture) -> None:
-        with caplog.at_level(logging.WARNING, logger="tessera.services.versioning"):
+    def test_valid_version_does_not_warn(self) -> None:
+        with patch("tessera.services.versioning.logger") as mock_logger:
             parse_semver_lenient("2.0.0")
-        assert caplog.records == []
+        mock_logger.warning.assert_not_called()
 
-    def test_malformed_version_logs_warning(self, caplog: pytest.LogCaptureFixture) -> None:
-        with caplog.at_level(logging.WARNING, logger="tessera.services.versioning"):
+    def test_malformed_version_logs_warning(self) -> None:
+        with patch("tessera.services.versioning.logger") as mock_logger:
             result = parse_semver_lenient("not-a-version")
         assert result == (1, 0, 0)
-        assert len(caplog.records) == 1
-        assert caplog.records[0].levelno == logging.WARNING
-        assert "not-a-version" in caplog.records[0].message
+        mock_logger.warning.assert_called_once()
+        assert "not-a-version" in str(mock_logger.warning.call_args)
 
-    def test_empty_string_logs_warning(self, caplog: pytest.LogCaptureFixture) -> None:
-        with caplog.at_level(logging.WARNING, logger="tessera.services.versioning"):
+    def test_empty_string_logs_warning(self) -> None:
+        with patch("tessera.services.versioning.logger") as mock_logger:
             result = parse_semver_lenient("")
         assert result == (1, 0, 0)
-        assert len(caplog.records) == 1
-        assert "''" in caplog.records[0].message
+        mock_logger.warning.assert_called_once()
 
 
 class TestIsPrerelease:

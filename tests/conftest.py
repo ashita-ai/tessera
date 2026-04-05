@@ -21,7 +21,7 @@ if "REDIS_URL" not in os.environ:
 
 import pytest  # noqa: E402
 from httpx import ASGITransport, AsyncClient  # noqa: E402
-from sqlalchemy import event, text  # noqa: E402
+from sqlalchemy import event  # noqa: E402
 from sqlalchemy.ext.asyncio import (  # noqa: E402
     AsyncSession,
     async_sessionmaker,
@@ -75,55 +75,15 @@ async def test_engine():
 
 def create_tables(connection):
     """Create all tables, dropping existing ones first to ensure fresh schema."""
-    # Drop all tables first to ensure we have a clean schema
-    # This is important for PostgreSQL where schema might be stale
     if not _USE_SQLITE:
-        # Drop all tables with CASCADE first
         Base.metadata.drop_all(connection)
     Base.metadata.create_all(connection, checkfirst=True)
-
-
-def drop_tables(connection):
-    """Drop all tables."""
-    # For PostgreSQL, drop with CASCADE to handle type dependencies
-    if not _USE_SQLITE:
-        # Drop all tables with CASCADE to handle dependencies
-        from sqlalchemy import inspect
-
-        inspector = inspect(connection)
-        tables = inspector.get_table_names(schema="core")
-        tables.extend(inspector.get_table_names(schema="workflow"))
-        tables.extend(inspector.get_table_names(schema="audit"))
-        for table in tables:
-            try:
-                connection.execute(text(f'DROP TABLE IF EXISTS core."{table}" CASCADE'))
-            except Exception:
-                pass
-            try:
-                connection.execute(text(f'DROP TABLE IF EXISTS workflow."{table}" CASCADE'))
-            except Exception:
-                pass
-            try:
-                connection.execute(text(f'DROP TABLE IF EXISTS audit."{table}" CASCADE'))
-            except Exception:
-                pass
-        # Also drop types that might have dependencies
-        try:
-            connection.execute(text("DROP TYPE IF EXISTS dependencytype CASCADE"))
-        except Exception:
-            pass
-    Base.metadata.drop_all(connection)
 
 
 @pytest.fixture
 async def test_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
     """Create tables and provide a test session."""
     async with test_engine.begin() as conn:
-        if not _USE_SQLITE:
-            # PostgreSQL: Create schemas
-            await conn.execute(text("CREATE SCHEMA IF NOT EXISTS core"))
-            await conn.execute(text("CREATE SCHEMA IF NOT EXISTS workflow"))
-            await conn.execute(text("CREATE SCHEMA IF NOT EXISTS audit"))
         await conn.run_sync(create_tables)
 
     async_session = async_sessionmaker(
@@ -138,7 +98,7 @@ async def test_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
 
     # Clean up tables after test
     async with test_engine.begin() as conn:
-        await conn.run_sync(drop_tables)
+        await conn.run_sync(Base.metadata.drop_all)
 
 
 @pytest.fixture

@@ -7,7 +7,8 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from tests.conftest import _USE_SQLITE, create_tables, drop_tables
+from tessera.db.models import Base
+from tests.conftest import _USE_SQLITE, create_tables
 
 pytestmark = pytest.mark.asyncio
 
@@ -478,7 +479,7 @@ class TestAuthScopes:
         settings.auth_disabled = original_auth_disabled
 
         async with test_engine.begin() as conn:
-            await conn.run_sync(drop_tables)
+            await conn.run_sync(Base.metadata.drop_all)
 
     async def test_list_repos_requires_auth(self, auth_client: AsyncClient):
         """GET /repos without auth should 401."""
