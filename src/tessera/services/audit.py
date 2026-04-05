@@ -3,7 +3,6 @@
 Provides append-only audit trail for all significant events.
 """
 
-from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 from uuid import UUID
@@ -142,7 +141,6 @@ async def log_event(
         actor_id=actor_id,
         actor_type=actor_type,
         payload=payload or {},
-        occurred_at=datetime.now(UTC),
     )
     session.add(event)
     await session.flush()

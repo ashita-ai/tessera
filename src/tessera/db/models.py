@@ -44,6 +44,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Uuid,
+    func,
     text,
 )
 from sqlalchemy.orm import (
@@ -578,7 +579,7 @@ class AuditEventDB(Base):
     )  # "human" or "agent"
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     occurred_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=_utcnow, index=True
+        DateTime(timezone=True), default=_utcnow, server_default=func.now(), index=True
     )
 
     __table_args__ = (

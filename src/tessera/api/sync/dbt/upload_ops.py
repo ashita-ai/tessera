@@ -5,6 +5,7 @@ and auto-delete stale assets — extracted from the upload endpoint to
 keep individual modules under 500 lines.
 """
 
+import logging
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -24,6 +25,8 @@ from tessera.services import audit, get_affected_parties
 from tessera.services.audit import AuditAction, log_proposal_created
 from tessera.services.contract_publisher import ContractToPublish, bulk_publish_contracts
 from tessera.services.schema_diff import check_compatibility, diff_schemas
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_compat_mode(
@@ -95,8 +98,9 @@ async def auto_publish_contracts(
                 )
             )
             asset_publishers[asset.id] = (asset.owner_team_id, asset.owner_user_id)
-        except Exception as e:
-            warnings.append(f"{asset.fqn}: Failed to prepare contract ({type(e).__name__}): {e}")
+        except Exception:
+            logger.exception("Failed to prepare contract for new asset %s", asset.fqn)
+            warnings.append(f"{asset.fqn}: Failed to prepare contract — see server logs")
 
     for asset, columns, asset_guarantees, compat_mode_str, _existing in existing_assets:
         try:
@@ -115,8 +119,9 @@ async def auto_publish_contracts(
                 )
             )
             asset_publishers[asset.id] = (asset.owner_team_id, asset.owner_user_id)
-        except Exception as e:
-            warnings.append(f"{asset.fqn}: Failed to prepare contract ({type(e).__name__}): {e}")
+        except Exception:
+            logger.exception("Failed to prepare contract for existing asset %s", asset.fqn)
+            warnings.append(f"{asset.fqn}: Failed to prepare contract — see server logs")
 
     if not contracts_to_publish:
         return 0

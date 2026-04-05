@@ -312,19 +312,21 @@ async def update_guarantees(
     # Store old guarantees for audit log
     old_guarantees = contract.guarantees
 
-    # Update guarantees
-    contract.guarantees = update.guarantees.model_dump()
-    await session.flush()
-    await session.refresh(contract)
+    # Update guarantees and log atomically within a savepoint so the
+    # data change and its audit record succeed or fail together.
+    async with session.begin_nested():
+        contract.guarantees = update.guarantees.model_dump()
+        await session.flush()
 
-    # Log the update
-    await log_guarantees_updated(
-        session=session,
-        contract_id=contract_id,
-        actor_id=auth.team_id,
-        old_guarantees=old_guarantees,
-        new_guarantees=contract.guarantees,
-    )
+        await log_guarantees_updated(
+            session=session,
+            contract_id=contract_id,
+            actor_id=auth.team_id,
+            old_guarantees=old_guarantees,
+            new_guarantees=contract.guarantees,
+        )
+
+    await session.refresh(contract)
 
     # Invalidate cache
     from tessera.services.cache import contract_cache

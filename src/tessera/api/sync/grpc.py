@@ -3,6 +3,7 @@
 Endpoints for synchronizing schemas from .proto file definitions.
 """
 
+import logging
 from typing import Any
 from uuid import UUID
 
@@ -26,6 +27,8 @@ from tessera.services.grpc import (
 )
 from tessera.services.schema_diff import check_compatibility, diff_schemas
 from tessera.services.versioning import INITIAL_VERSION
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -271,14 +274,15 @@ async def import_grpc(
                 )
                 assets_created += 1
 
-        except Exception as e:
+        except Exception:
+            logger.exception("Error syncing gRPC method %s.%s", rpc.service_name, rpc.method_name)
             method_results.append(
                 GRPCMethodResult(
                     fqn=asset_def.fqn,
                     service=rpc.service_name,
                     method=rpc.method_name,
                     action="error",
-                    error=str(e),
+                    error="Internal error processing this method",
                 )
             )
             assets_skipped += 1
