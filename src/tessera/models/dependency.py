@@ -11,7 +11,7 @@ from tessera.models.enums import DependencySource, DependencyType
 class DependencyCreate(BaseModel):
     """Request body for creating an asset dependency."""
 
-    dependency_asset_id: UUID
+    depends_on_asset_id: UUID
     dependency_type: DependencyType = DependencyType.CONSUMES
 
 

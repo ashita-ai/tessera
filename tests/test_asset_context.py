@@ -61,7 +61,7 @@ async def test_asset_context_full_data(client: AsyncClient) -> None:
     dep_resp = await client.post(
         f"/api/v1/assets/{asset_id}/dependencies",
         json={
-            "dependency_asset_id": upstream_id,
+            "depends_on_asset_id": upstream_id,
             "dependency_type": "consumes",
         },
     )
@@ -78,7 +78,7 @@ async def test_asset_context_full_data(client: AsyncClient) -> None:
     dep_resp2 = await client.post(
         f"/api/v1/assets/{downstream_id}/dependencies",
         json={
-            "dependency_asset_id": asset_id,
+            "depends_on_asset_id": asset_id,
             "dependency_type": "consumes",
         },
     )

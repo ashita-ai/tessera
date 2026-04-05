@@ -909,7 +909,7 @@ class TestObjectionConcurrency:
             dep_resp = await client.post(
                 f"/api/v1/assets/{downstream_id}/dependencies",
                 json={
-                    "dependency_asset_id": asset_id,
+                    "depends_on_asset_id": asset_id,
                     "dependency_type": "consumes",
                 },
             )

@@ -221,7 +221,7 @@ class TestDependencyEdgeCases:
 
         resp = await client.post(
             f"/api/v1/assets/{asset_id}/dependencies",
-            json={"dependency_asset_id": asset_id, "dependency_type": "consumes"},
+            json={"depends_on_asset_id": asset_id, "dependency_type": "consumes"},
         )
         assert resp.status_code == 400
 

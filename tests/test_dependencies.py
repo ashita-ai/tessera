@@ -53,7 +53,7 @@ class TestCreateDependency:
         resp = await client.post(
             f"/api/v1/assets/{downstream.json()['id']}/dependencies",
             json={
-                "dependency_asset_id": upstream.json()["id"],
+                "depends_on_asset_id": upstream.json()["id"],
                 "dependency_type": dep_type,
             },
         )
@@ -70,7 +70,7 @@ class TestCreateDependency:
 
         resp = await client.post(
             f"/api/v1/assets/{asset_id}/dependencies",
-            json={"dependency_asset_id": asset_id, "dependency_type": "consumes"},
+            json={"depends_on_asset_id": asset_id, "dependency_type": "consumes"},
         )
         assert resp.status_code == 400
         assert "SELF_DEPENDENCY" in resp.text
@@ -80,7 +80,7 @@ class TestCreateDependency:
         ctx = await _setup_teams_and_assets(client)
 
         body = {
-            "dependency_asset_id": ctx["upstream_id"],
+            "depends_on_asset_id": ctx["upstream_id"],
             "dependency_type": "consumes",
         }
         resp1 = await client.post(f"/api/v1/assets/{ctx['downstream_id']}/dependencies", json=body)
@@ -102,7 +102,7 @@ class TestCreateDependency:
         resp = await client.post(
             f"/api/v1/assets/{asset_resp.json()['id']}/dependencies",
             json={
-                "dependency_asset_id": "00000000-0000-0000-0000-000000000000",
+                "depends_on_asset_id": "00000000-0000-0000-0000-000000000000",
                 "dependency_type": "consumes",
             },
         )
@@ -113,7 +113,7 @@ class TestCreateDependency:
         resp = await client.post(
             "/api/v1/assets/00000000-0000-0000-0000-000000000000/dependencies",
             json={
-                "dependency_asset_id": "00000000-0000-0000-0000-000000000001",
+                "depends_on_asset_id": "00000000-0000-0000-0000-000000000001",
                 "dependency_type": "consumes",
             },
         )
@@ -144,7 +144,7 @@ class TestListDependencies:
         await client.post(
             f"/api/v1/assets/{ctx['downstream_id']}/dependencies",
             json={
-                "dependency_asset_id": ctx["upstream_id"],
+                "depends_on_asset_id": ctx["upstream_id"],
                 "dependency_type": "consumes",
             },
         )
@@ -171,7 +171,7 @@ class TestDeleteDependency:
         create_resp = await client.post(
             f"/api/v1/assets/{ctx['downstream_id']}/dependencies",
             json={
-                "dependency_asset_id": ctx["upstream_id"],
+                "depends_on_asset_id": ctx["upstream_id"],
                 "dependency_type": "consumes",
             },
         )
@@ -230,7 +230,7 @@ class TestGetLineage:
         await client.post(
             f"/api/v1/assets/{ctx['downstream_id']}/dependencies",
             json={
-                "dependency_asset_id": ctx["upstream_id"],
+                "depends_on_asset_id": ctx["upstream_id"],
                 "dependency_type": "consumes",
             },
         )
@@ -248,7 +248,7 @@ class TestGetLineage:
         await client.post(
             f"/api/v1/assets/{ctx['downstream_id']}/dependencies",
             json={
-                "dependency_asset_id": ctx["upstream_id"],
+                "depends_on_asset_id": ctx["upstream_id"],
                 "dependency_type": "transforms",
             },
         )

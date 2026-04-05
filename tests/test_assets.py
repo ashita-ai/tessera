@@ -329,7 +329,7 @@ class TestAssetDependencies:
 
         resp = await client.post(
             f"/api/v1/assets/{downstream_id}/dependencies",
-            json={"dependency_asset_id": upstream_id, "dependency_type": "transforms"},
+            json={"depends_on_asset_id": upstream_id, "dependency_type": "transforms"},
         )
         assert resp.status_code == 201
         data = resp.json()
@@ -353,7 +353,7 @@ class TestAssetDependencies:
 
         await client.post(
             f"/api/v1/assets/{downstream_id}/dependencies",
-            json={"dependency_asset_id": upstream_id, "dependency_type": "transforms"},
+            json={"depends_on_asset_id": upstream_id, "dependency_type": "transforms"},
         )
 
         resp = await client.get(f"/api/v1/assets/{downstream_id}/dependencies")
@@ -380,7 +380,7 @@ class TestAssetDependencies:
 
         dep_resp = await client.post(
             f"/api/v1/assets/{downstream_id}/dependencies",
-            json={"dependency_asset_id": upstream_id, "dependency_type": "transforms"},
+            json={"depends_on_asset_id": upstream_id, "dependency_type": "transforms"},
         )
         dep_id = dep_resp.json()["id"]
 
@@ -404,7 +404,7 @@ class TestAssetDependencies:
 
         resp = await client.post(
             f"/api/v1/assets/{asset_id}/dependencies",
-            json={"dependency_asset_id": asset_id, "dependency_type": "transforms"},
+            json={"depends_on_asset_id": asset_id, "dependency_type": "transforms"},
         )
         assert resp.status_code == 400
         data = resp.json()
@@ -428,12 +428,12 @@ class TestAssetDependencies:
 
         await client.post(
             f"/api/v1/assets/{downstream_id}/dependencies",
-            json={"dependency_asset_id": upstream_id, "dependency_type": "transforms"},
+            json={"depends_on_asset_id": upstream_id, "dependency_type": "transforms"},
         )
 
         resp = await client.post(
             f"/api/v1/assets/{downstream_id}/dependencies",
-            json={"dependency_asset_id": upstream_id, "dependency_type": "transforms"},
+            json={"depends_on_asset_id": upstream_id, "dependency_type": "transforms"},
         )
         assert resp.status_code == 409  # DuplicateError for conflicts
         data = resp.json()
@@ -453,7 +453,7 @@ class TestAssetDependencies:
         resp = await client.post(
             f"/api/v1/assets/{asset_id}/dependencies",
             json={
-                "dependency_asset_id": "00000000-0000-0000-0000-000000000000",
+                "depends_on_asset_id": "00000000-0000-0000-0000-000000000000",
                 "dependency_type": "transforms",
             },
         )
@@ -495,7 +495,7 @@ class TestAssetLineage:
 
         await client.post(
             f"/api/v1/assets/{downstream_id}/dependencies",
-            json={"dependency_asset_id": upstream_id, "dependency_type": "transforms"},
+            json={"depends_on_asset_id": upstream_id, "dependency_type": "transforms"},
         )
 
         resp = await client.get(f"/api/v1/assets/{downstream_id}/lineage")
@@ -521,7 +521,7 @@ class TestAssetLineage:
 
         await client.post(
             f"/api/v1/assets/{downstream_id}/dependencies",
-            json={"dependency_asset_id": upstream_id, "dependency_type": "transforms"},
+            json={"depends_on_asset_id": upstream_id, "dependency_type": "transforms"},
         )
 
         resp = await client.get(f"/api/v1/assets/{upstream_id}/lineage")

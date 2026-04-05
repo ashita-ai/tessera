@@ -61,19 +61,19 @@ async def create_dependency(
 
     result = await session.execute(
         select(AssetDB)
-        .where(AssetDB.id == dependency.dependency_asset_id)
+        .where(AssetDB.id == dependency.depends_on_asset_id)
         .where(AssetDB.deleted_at.is_(None))
     )
     if not result.scalar_one_or_none():
         raise NotFoundError(ErrorCode.ASSET_NOT_FOUND, "Dependency asset not found")
 
-    if asset_id == dependency.dependency_asset_id:
+    if asset_id == dependency.depends_on_asset_id:
         raise BadRequestError("Asset cannot depend on itself", code=ErrorCode.SELF_DEPENDENCY)
 
     result = await session.execute(
         select(AssetDependencyDB)
         .where(AssetDependencyDB.dependent_asset_id == asset_id)
-        .where(AssetDependencyDB.dependency_asset_id == dependency.dependency_asset_id)
+        .where(AssetDependencyDB.dependency_asset_id == dependency.depends_on_asset_id)
         .where(AssetDependencyDB.deleted_at.is_(None))
     )
     if result.scalar_one_or_none():
@@ -81,7 +81,7 @@ async def create_dependency(
 
     db_dependency = AssetDependencyDB(
         dependent_asset_id=asset_id,
-        dependency_asset_id=dependency.dependency_asset_id,
+        dependency_asset_id=dependency.depends_on_asset_id,
         dependency_type=dependency.dependency_type,
     )
     session.add(db_dependency)
@@ -91,7 +91,7 @@ async def create_dependency(
         session=session,
         dependency_id=db_dependency.id,
         source_asset_id=asset_id,
-        target_asset_id=dependency.dependency_asset_id,
+        target_asset_id=dependency.depends_on_asset_id,
         actor_id=auth.team_id,
         dependency_type=str(db_dependency.dependency_type),
     )

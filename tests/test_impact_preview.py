@@ -304,7 +304,7 @@ async def test_impact_preview_lineage(client: AsyncClient) -> None:
     dep_resp = await client.post(
         f"/api/v1/assets/{downstream_id}/dependencies",
         json={
-            "dependency_asset_id": upstream_id,
+            "depends_on_asset_id": upstream_id,
             "dependency_type": "consumes",
         },
     )
