@@ -63,8 +63,10 @@ async def test_impact_preview_non_breaking_change(client: AsyncClient) -> None:
     assert resp.status_code == 200, f"Impact preview failed: {resp.json()}"
     data = resp.json()
     assert data["is_breaking"] is False
+    assert "change_type" in data
     assert data["breaking_changes"] == []
     assert data["would_create_proposal"] is False
+    assert data["proposal_would_notify"] == []
     assert data["migration_suggestions"] == []
     assert data["current_version"] == "1.0.0"
 
@@ -115,7 +117,11 @@ async def test_impact_preview_breaking_with_consumers(client: AsyncClient) -> No
         len(data["affected_consumers"]) > 0
     ), f"Expected consumers but got: {data['affected_consumers']}"
     assert data["would_create_proposal"] is True
-    assert data["affected_consumers"][0]["team_name"] == "consumer-team"
+    assert data["change_type"] == "MAJOR"
+    assert "consumer-team" in data["proposal_would_notify"]
+    assert data["affected_consumers"][0]["consumer_team_name"] == "consumer-team"
+    assert "consumer_team_id" in data["affected_consumers"][0]
+    assert "contract_id" in data["affected_consumers"][0]
     assert len(data["migration_suggestions"]) > 0
     assert data["suggested_version"] == "2.0.0"
 
@@ -325,3 +331,9 @@ async def test_impact_preview_lineage(client: AsyncClient) -> None:
     # Downstream asset should be in affected_downstream
     fqns = [a["asset_fqn"] for a in data["affected_downstream"]]
     assert "prod.lineage.downstream" in fqns
+    downstream_entry = next(
+        a for a in data["affected_downstream"] if a["asset_fqn"] == "prod.lineage.downstream"
+    )
+    assert "dependency_type" in downstream_entry
+    assert "depth" in downstream_entry
+    assert downstream_entry["owner_team_name"] == "downstream-team"
