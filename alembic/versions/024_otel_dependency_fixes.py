@@ -1,7 +1,7 @@
 """Fix OTEL dependency unique constraint and add config scoping.
 
-Revision ID: 022
-Revises: 021
+Revision ID: 024
+Revises: 023
 Create Date: 2026-04-04
 
 Fixes two issues in the OTEL dependency discovery schema:

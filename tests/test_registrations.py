@@ -363,7 +363,11 @@ class TestRegistrationsEndpoint:
         )
         audit_event = audit_result.scalar_one()
 
-        assert audit_event.occurred_at >= registration.deleted_at, (
+        # Normalize both to naive UTC — SQLite strips tzinfo on round-trip,
+        # so one may be aware (identity-map hit) while the other is naive.
+        occurred = audit_event.occurred_at.replace(tzinfo=None)
+        deleted = registration.deleted_at.replace(tzinfo=None)
+        assert occurred >= deleted, (
             f"audit occurred_at ({audit_event.occurred_at}) must be >= "
             f"deleted_at ({registration.deleted_at})"
         )

@@ -147,9 +147,6 @@ __all__ = [
     # Impact preview
     "ImpactPreviewResult",
     "compute_impact_preview",
-    # Migration suggester
-    "MigrationSuggestion",
-    "suggest_migrations",
     # CODEOWNERS parser
     "CodeownersParseResult",
     "CodeownersRule",

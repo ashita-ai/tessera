@@ -370,7 +370,7 @@ message Resp {
         assert "command" in props
         assert "query" in props
 
-    def test_deeply_nested_messages(self) -> None:
+    async def test_deeply_nested_messages(self) -> None:
         """Messages nested 3+ levels deep are parsed without field leakage."""
         proto = """\
 syntax = "proto3";
@@ -403,7 +403,7 @@ message Resp {
         # Outer should only have its own fields, not Middle's or Inner's
         assert outer_props == {"outer_field", "mid"}
 
-    def test_bytes_field_type(self) -> None:
+    async def test_bytes_field_type(self) -> None:
         proto = """\
 syntax = "proto3";
 package blob;
@@ -433,38 +433,38 @@ message BlobResp {
 
 
 class TestGenerateFQN:
-    def test_basic(self) -> None:
+    async def test_basic(self) -> None:
         assert generate_fqn("users", "UserService", "GetUser") == "grpc.users.UserService.GetUser"
 
-    def test_no_package(self) -> None:
+    async def test_no_package(self) -> None:
         assert generate_fqn("", "Svc", "Do") == "grpc.Svc.Do"
 
-    def test_dotted_package_sanitized(self) -> None:
+    async def test_dotted_package_sanitized(self) -> None:
         """Dots in proto package are replaced with underscores to prevent FQN injection."""
         assert generate_fqn("com.example.api", "Svc", "Call") == "grpc.com_example_api.Svc.Call"
 
-    def test_dots_in_service_name_rejected(self) -> None:
+    async def test_dots_in_service_name_rejected(self) -> None:
         """Service names with dots are rejected (FQN injection vector)."""
         from tessera.services.fqn import FQNComponentError
 
         with pytest.raises(FQNComponentError, match="unsafe characters"):
             generate_fqn("users", "User.Service", "GetUser")
 
-    def test_dots_in_method_name_rejected(self) -> None:
+    async def test_dots_in_method_name_rejected(self) -> None:
         """Method names with dots are rejected."""
         from tessera.services.fqn import FQNComponentError
 
         with pytest.raises(FQNComponentError, match="unsafe characters"):
             generate_fqn("users", "UserService", "Get.User")
 
-    def test_slashes_in_service_name_rejected(self) -> None:
+    async def test_slashes_in_service_name_rejected(self) -> None:
         """Slashes in service names are rejected."""
         from tessera.services.fqn import FQNComponentError
 
         with pytest.raises(FQNComponentError, match="unsafe characters"):
             generate_fqn("users", "User/Service", "GetUser")
 
-    def test_impersonation_via_dotted_package(self) -> None:
+    async def test_impersonation_via_dotted_package(self) -> None:
         """A crafted package cannot produce an FQN that collides with another team's assets.
 
         Without sanitization, package="evil.real_team" would produce
@@ -480,7 +480,7 @@ class TestGenerateFQN:
         assert legitimate == "grpc.real_team.Svc.Call"
         assert crafted == "grpc.evil_real_team.Svc.Call"
 
-    def test_unsafe_chars_in_package_segment_rejected(self) -> None:
+    async def test_unsafe_chars_in_package_segment_rejected(self) -> None:
         """Package segments with slashes or other unsafe chars are rejected."""
         from tessera.services.fqn import FQNComponentError
 
@@ -494,7 +494,7 @@ class TestGenerateFQN:
 
 
 class TestRpcMethodsToAssets:
-    def test_basic_conversion(self) -> None:
+    async def test_basic_conversion(self) -> None:
         from uuid import uuid4
 
         result = parse_proto(SIMPLE_PROTO)

@@ -1,7 +1,7 @@
 """Add inferred_dependencies table for passive dependency discovery.
 
-Revision ID: 020
-Revises: 019
+Revision ID: 021
+Revises: 020
 Create Date: 2026-04-03
 
 Stores dependencies inferred from audit signals (preflight.checked events).

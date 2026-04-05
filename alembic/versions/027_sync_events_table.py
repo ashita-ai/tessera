@@ -1,7 +1,7 @@
 """Add sync_events table for tracking repo sync history.
 
-Revision ID: 024
-Revises: 023
+Revision ID: 027
+Revises: 026
 Create Date: 2026-04-04
 
 Records the outcome of each repo sync (manual or worker-triggered) so

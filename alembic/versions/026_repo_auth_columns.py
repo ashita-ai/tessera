@@ -1,7 +1,7 @@
 """Add per-repo git_token and ssh_key columns.
 
-Revision ID: 023
-Revises: 022
+Revision ID: 026
+Revises: 025
 Create Date: 2026-04-04
 
 Adds optional authentication columns to repos so each repository can

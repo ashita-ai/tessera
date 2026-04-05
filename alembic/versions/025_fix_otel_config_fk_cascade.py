@@ -1,7 +1,7 @@
 """Fix otel_config_id FK to SET NULL on delete.
 
-Revision ID: 023
-Revises: 022
+Revision ID: 025
+Revises: 024
 Create Date: 2026-04-04
 
 Without ON DELETE SET NULL, deleting an otel_sync_configs row while
