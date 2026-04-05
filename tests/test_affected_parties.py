@@ -47,7 +47,7 @@ class TestAffectedParties:
         # Create dependency: downstream depends on upstream
         await client.post(
             f"/api/v1/assets/{downstream['id']}/dependencies",
-            json={"depends_on_asset_id": upstream["id"]},
+            json={"dependency_asset_id": upstream["id"]},
         )
 
         # Now publish a breaking change to upstream
@@ -111,7 +111,7 @@ class TestAffectedParties:
         # Create dependency
         await client.post(
             f"/api/v1/assets/{downstream['id']}/dependencies",
-            json={"depends_on_asset_id": upstream["id"]},
+            json={"dependency_asset_id": upstream["id"]},
         )
 
         # Publish breaking change
@@ -165,7 +165,7 @@ class TestObjections:
 
         await client.post(
             f"/api/v1/assets/{downstream['id']}/dependencies",
-            json={"depends_on_asset_id": upstream["id"]},
+            json={"dependency_asset_id": upstream["id"]},
         )
 
         # Create proposal via breaking change
@@ -268,7 +268,7 @@ class TestObjections:
 
         await client.post(
             f"/api/v1/assets/{downstream['id']}/dependencies",
-            json={"depends_on_asset_id": upstream["id"]},
+            json={"dependency_asset_id": upstream["id"]},
         )
 
         schema_v2 = {"type": "object", "properties": {"x": {"type": "string"}}}
@@ -327,7 +327,7 @@ class TestObjections:
 
         await client.post(
             f"/api/v1/assets/{downstream['id']}/dependencies",
-            json={"depends_on_asset_id": upstream["id"]},
+            json={"dependency_asset_id": upstream["id"]},
         )
 
         schema_v2 = {"type": "object", "properties": {"y": {"type": "string"}}}
@@ -394,7 +394,7 @@ class TestGetAffectedPartiesService:
 
         await client.post(
             f"/api/v1/assets/{downstream['id']}/dependencies",
-            json={"depends_on_asset_id": upstream["id"]},
+            json={"dependency_asset_id": upstream["id"]},
         )
 
         # Publish breaking change
@@ -459,7 +459,7 @@ class TestDuplicateProposalPrevention:
 
         await client.post(
             f"/api/v1/assets/{downstream['id']}/dependencies",
-            json={"depends_on_asset_id": upstream["id"]},
+            json={"dependency_asset_id": upstream["id"]},
         )
 
         # First breaking change should create a proposal
@@ -530,7 +530,7 @@ class TestDuplicateProposalPrevention:
 
         await client.post(
             f"/api/v1/assets/{downstream['id']}/dependencies",
-            json={"depends_on_asset_id": upstream["id"]},
+            json={"dependency_asset_id": upstream["id"]},
         )
 
         # First breaking change creates proposal

@@ -3,7 +3,6 @@
 from tessera.models.acknowledgment import (
     Acknowledgment,
     AcknowledgmentCreate,
-    AcknowledgmentResponse,
 )
 from tessera.models.asset import (
     Asset,
@@ -128,7 +127,6 @@ __all__ = [
     # Acknowledgment
     "Acknowledgment",
     "AcknowledgmentCreate",
-    "AcknowledgmentResponse",
     # Bulk Operations
     "BulkItemResult",
     "BulkOperationResponse",

@@ -142,6 +142,12 @@ async def test_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
 
 
 @pytest.fixture
+async def session(test_session: AsyncSession) -> AsyncGenerator[AsyncSession, None]:
+    """Alias for test_session — many test files inject 'session' directly."""
+    yield test_session
+
+
+@pytest.fixture
 async def client(test_engine) -> AsyncGenerator[AsyncClient, None]:
     """Create a test client with isolated database and auth disabled."""
     from tessera.config import settings

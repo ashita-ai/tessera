@@ -1,7 +1,7 @@
 """Add sync_events table for tracking repo sync history.
 
-Revision ID: 024
-Revises: 023
+Revision ID: 027
+Revises: 026
 Create Date: 2026-04-04
 
 Records the outcome of each repo sync (manual or worker-triggered) so
@@ -16,8 +16,8 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "024"
-down_revision: str = "023"
+revision: str = "027"
+down_revision: str = "026"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

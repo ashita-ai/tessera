@@ -204,7 +204,7 @@ class TestProposalAuditEvents:
         # Create dependency: downstream depends on upstream
         await client.post(
             f"/api/v1/assets/{downstream_id}/dependencies",
-            json={"depends_on_asset_id": upstream_id},
+            json={"dependency_asset_id": upstream_id},
         )
 
         # Publish initial contract on upstream

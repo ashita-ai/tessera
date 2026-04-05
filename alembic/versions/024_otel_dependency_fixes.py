@@ -1,7 +1,7 @@
 """Fix OTEL dependency unique constraint and add config scoping.
 
-Revision ID: 022
-Revises: 021
+Revision ID: 024
+Revises: 023
 Create Date: 2026-04-04
 
 Fixes two issues in the OTEL dependency discovery schema:
@@ -22,8 +22,8 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "022"
-down_revision: str = "021"
+revision: str = "024"
+down_revision: str = "023"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

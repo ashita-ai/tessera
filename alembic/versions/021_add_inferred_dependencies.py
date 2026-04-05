@@ -1,7 +1,7 @@
 """Add inferred_dependencies table for passive dependency discovery.
 
-Revision ID: 020
-Revises: 019
+Revision ID: 021
+Revises: 020
 Create Date: 2026-04-03
 
 Stores dependencies inferred from audit signals (preflight.checked events).
@@ -15,8 +15,8 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "020"
-down_revision: str = "019"
+revision: str = "021"
+down_revision: str = "020"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
