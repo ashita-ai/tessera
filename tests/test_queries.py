@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from tessera.db.models import (
     AssetDB,
     AssetDependencyDB,
+    AuditEventDB,
     RepoDB,
     ServiceDB,
     TeamDB,
@@ -90,11 +91,9 @@ class TestActiveOnly:
         self, test_session: AsyncSession
     ) -> None:
         """Returns query unchanged for models with no soft-delete column."""
-        base_query = select(TeamDB)
-        filtered = active_only(base_query, TeamDB)
-        # TeamDB has deleted_at, so this should actually filter.
-        # Use AssetDB's contract-related model or just verify it compiles.
-        assert filtered is not base_query  # Should have appended a WHERE clause
+        base_query = select(AuditEventDB)
+        filtered = active_only(base_query, AuditEventDB)
+        assert filtered is base_query
 
 
 class TestActiveDependencies:
