@@ -261,18 +261,20 @@ api_v1.include_router(bulk.router, prefix="/bulk", tags=["bulk"])
 
 app.include_router(api_v1)
 
-# Static files and Web UI
+# Static files — React SPA only, no legacy fallback.
 static_dir = Path(__file__).parent / "static"
 spa_dist_dir = static_dir / "dist"
-if static_dir.exists():
-    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+images_dir = static_dir / "images"
 
-# Mount Vite build assets at /assets so the React SPA's JS/CSS loads correctly.
-# Vite outputs to static/dist/assets/ with paths like /assets/index-*.js.
+# Favicons and logo referenced by the SPA via /static/images/.
+if images_dir.exists():
+    app.mount("/static/images", StaticFiles(directory=str(images_dir)), name="static-images")
+
+# Vite build assets: JS/CSS bundles at /assets/index-*.{js,css}.
 if spa_dist_dir.exists() and (spa_dist_dir / "assets").exists():
     app.mount("/assets", StaticFiles(directory=str(spa_dist_dir / "assets")), name="spa-assets")
 
-# SPA + auth routes
+# SPA catch-all entry point.
 _spa_index = spa_dist_dir / "index.html" if spa_dist_dir.exists() else None
 
 
