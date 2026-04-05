@@ -13,9 +13,13 @@ GET /api/v1/proposals
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `asset_id` | uuid | Filter by asset |
-| `status` | string | Filter by status (pending, approved, published, rejected) |
-| `page` | int | Page number |
-| `page_size` | int | Results per page |
+| `status` | string | Filter by status (pending, approved, published, rejected, withdrawn, expired) |
+| `change_type` | string | Filter by change type |
+| `proposed_by` | uuid | Filter by proposer team ID |
+| `consumer_team_id` | uuid | Filter by consumer team (returns proposals affecting contracts where this team is registered) |
+| `pending_ack_for` | uuid | Filter to pending proposals needing acknowledgment from this team |
+| `limit` | int | Results per page (default: 50) |
+| `offset` | int | Pagination offset (default: 0) |
 
 ### Response
 
@@ -29,12 +33,55 @@ GET /api/v1/proposals
       "status": "pending",
       "change_type": "major",
       "breaking_changes_count": 2,
-      "total_consumers": 3,
-      "acknowledgment_count": 1,
+      "proposed_by": "team-uuid",
       "proposed_at": "2025-01-15T10:00:00Z",
-      "proposed_by": "team-uuid"
+      "acknowledgment_count": 1,
+      "total_consumers": 3
     }
-  ]
+  ],
+  "total": 1,
+  "limit": 50,
+  "offset": 0
+}
+```
+
+## Get Pending Proposals for Team
+
+```http
+GET /api/v1/proposals/pending/{team_id}
+```
+
+Returns proposals awaiting acknowledgment from a specific team. Excludes expired proposals and proposals already acknowledged by the team. Team-scoped: the API key's team must match `team_id`, or the key must have admin scope.
+
+### Query Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `status` | string | Proposal status to filter by (default: pending) |
+| `limit` | int | Results per page (default: 50) |
+| `offset` | int | Pagination offset (default: 0) |
+
+### Response
+
+```json
+{
+  "pending_proposals": [
+    {
+      "proposal_id": "proposal-uuid",
+      "asset_id": "asset-uuid",
+      "asset_fqn": "warehouse.analytics.users",
+      "proposed_by_team": "data-platform",
+      "proposed_at": "2025-01-15T10:00:00Z",
+      "expires_at": "2025-02-15T10:00:00Z",
+      "breaking_changes_summary": ["property_removed: email"],
+      "total_consumers": 3,
+      "acknowledged_count": 1,
+      "your_team_status": "AWAITING_RESPONSE"
+    }
+  ],
+  "total": 1,
+  "limit": 50,
+  "offset": 0
 }
 ```
 
@@ -44,65 +91,30 @@ GET /api/v1/proposals
 GET /api/v1/proposals/{proposal_id}
 ```
 
+Returns the full Proposal object.
+
 ### Response
 
 ```json
 {
   "id": "proposal-uuid",
   "asset_id": "asset-uuid",
-  "asset_fqn": "warehouse.analytics.users",
-  "status": "pending",
+  "proposed_schema": {},
   "change_type": "major",
-  "proposed_schema": {...},
   "breaking_changes": [
     {
       "type": "property_removed",
       "path": "$.properties.email",
-      "description": "Property 'email' was removed"
+      "message": "Property 'email' was removed"
     }
   ],
-  "consumers": [
-    {
-      "team_id": "team-uuid",
-      "team_name": "Analytics",
-      "acknowledged": true,
-      "acknowledged_at": "2025-01-16T10:00:00Z",
-      "notes": "Updated our dashboards"
-    },
-    {
-      "team_id": "team-uuid-2",
-      "team_name": "Finance",
-      "acknowledged": false
-    }
-  ],
+  "status": "pending",
+  "proposed_by": "team-uuid",
+  "proposed_by_user_id": null,
   "proposed_at": "2025-01-15T10:00:00Z",
-  "proposed_by": "team-uuid"
-}
-```
-
-## Acknowledge Proposal
-
-```http
-POST /api/v1/proposals/{proposal_id}/acknowledge
-```
-
-Acknowledge that your team is ready for the breaking change.
-
-### Request Body
-
-```json
-{
-  "notes": "We've updated our dashboards to handle this change"
-}
-```
-
-### Response
-
-```json
-{
-  "acknowledged": true,
-  "acknowledged_at": "2025-01-16T10:00:00Z",
-  "remaining_consumers": 1
+  "resolved_at": null,
+  "expires_at": "2025-02-15T10:00:00Z",
+  "auto_expire": false
 }
 ```
 
@@ -112,54 +124,209 @@ Acknowledge that your team is ready for the breaking change.
 GET /api/v1/proposals/{proposal_id}/status
 ```
 
-Quick check of acknowledgment progress.
+Detailed status of a proposal including acknowledgment progress.
 
 ### Response
 
 ```json
 {
+  "proposal_id": "proposal-uuid",
   "status": "pending",
-  "total_consumers": 3,
-  "acknowledged": 2,
-  "remaining": 1,
-  "can_publish": false
+  "asset_fqn": "warehouse.analytics.users",
+  "change_type": "major",
+  "breaking_changes": [],
+  "proposed_by": {
+    "team_id": "team-uuid",
+    "team_name": "data-platform",
+    "user_id": null,
+    "user_name": null
+  },
+  "proposed_at": "2025-01-15T10:00:00Z",
+  "resolved_at": null,
+  "consumers": {
+    "total": 3,
+    "acknowledged": 2,
+    "pending": 1,
+    "blocked": 0
+  },
+  "acknowledgments": [
+    {
+      "consumer_team_id": "team-uuid",
+      "consumer_team_name": "Analytics",
+      "acknowledged_by_user_id": "user-uuid",
+      "acknowledged_by_user_name": "Jane Doe",
+      "response": "approved",
+      "responded_at": "2025-01-16T10:00:00Z",
+      "notes": "Updated our dashboards"
+    }
+  ],
+  "pending_consumers": [
+    {
+      "team_id": "team-uuid-2",
+      "team_name": "Finance",
+      "registered_at": "2025-01-10T10:00:00Z"
+    }
+  ],
+  "audit_status": null,
+  "warnings": []
 }
 ```
 
-## Force Publish
+## Acknowledge Proposal
 
 ```http
-POST /api/v1/proposals/{proposal_id}/force
+POST /api/v1/proposals/{proposal_id}/acknowledge
 ```
 
-Publish without waiting for all acknowledgments (admin only).
+Acknowledge a proposal as a consumer team. The API key's team must match `consumer_team_id`, or the key must have admin scope.
+
+If the response is `blocked`, the proposal is rejected. If all registered consumers acknowledge (none blocked), the proposal is auto-approved.
 
 ### Request Body
 
 ```json
 {
-  "reason": "Critical security fix, cannot wait for all acknowledgments"
+  "consumer_team_id": "team-uuid",
+  "acknowledged_by_user_id": "user-uuid",
+  "response": "approved",
+  "migration_deadline": "2025-03-01T00:00:00Z",
+  "notes": "We've updated our dashboards to handle this change"
 }
 ```
 
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `consumer_team_id` | uuid | yes | Team acknowledging the proposal |
+| `acknowledged_by_user_id` | uuid | no | User performing the acknowledgment |
+| `response` | string | yes | One of: `approved`, `blocked`, `migrating` |
+| `migration_deadline` | datetime | no | Deadline for completing migration |
+| `notes` | string | no | Free-text notes (max 2000 chars) |
+
+### Response (201)
+
+Returns the created Acknowledgment object.
+
+```json
+{
+  "id": "ack-uuid",
+  "proposal_id": "proposal-uuid",
+  "consumer_team_id": "team-uuid",
+  "acknowledged_by_user_id": "user-uuid",
+  "response": "approved",
+  "migration_deadline": "2025-03-01T00:00:00Z",
+  "notes": "We've updated our dashboards to handle this change",
+  "responded_at": "2025-01-16T10:00:00Z"
+}
+```
+
+## File Objection
+
+```http
+POST /api/v1/proposals/{proposal_id}/object
+```
+
+File a non-blocking objection to a proposal. Objections don't prevent approval but are visible to all parties. Only teams listed in the proposal's `affected_teams` can file objections.
+
+### Query Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `objector_team_id` | uuid | yes | Team ID filing the objection |
+| `objector_user_id` | uuid | no | User ID filing the objection |
+
+### Request Body
+
+```json
+{
+  "reason": "This change will break our nightly ETL pipeline"
+}
+```
+
+### Response (201)
+
+```json
+{
+  "action": "objection_filed",
+  "proposal_id": "proposal-uuid",
+  "asset_fqn": "warehouse.analytics.users",
+  "objection": {
+    "team_id": "team-uuid",
+    "team_name": "Analytics",
+    "reason": "This change will break our nightly ETL pipeline",
+    "objected_at": "2025-01-16T10:00:00Z",
+    "objected_by_user_id": "user-uuid",
+    "objected_by_user_name": "Jane Doe"
+  },
+  "total_objections": 1,
+  "note": "Objections are non-blocking. The proposal can still be approved, but objections are visible to all parties to facilitate coordination."
+}
+```
+
+## Force Approve
+
+```http
+POST /api/v1/proposals/{proposal_id}/force
+```
+
+Force-approve a proposal, bypassing consumer acknowledgments. Requires admin scope.
+
+### Query Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `actor_id` | uuid | yes | Team ID of the actor forcing approval |
+
 ### Response
 
-Returns the updated proposal with status `force_published`.
+Returns the updated Proposal object with status `approved`.
 
 !!! warning "Audit Trail"
-    Force publishing is logged with the reason. Use sparingly.
+    Force approval is logged in the audit trail. Use sparingly.
 
-## Publish Proposal
+## Publish from Proposal
 
 ```http
 POST /api/v1/proposals/{proposal_id}/publish
 ```
 
-Publish a proposal after all consumers have acknowledged.
+Publish a contract from an approved proposal. Only works on proposals with status `approved`. Creates a new contract with the proposed schema and deprecates the previous active contract.
+
+### Request Body
+
+```json
+{
+  "version": "2.0.0",
+  "published_by": "team-uuid",
+  "published_by_user_id": "user-uuid"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `version` | string | yes | Semantic version for the new contract |
+| `published_by` | uuid | yes | Team ID publishing the contract |
+| `published_by_user_id` | uuid | no | User ID publishing the contract |
 
 ### Response
 
-Returns the published contract details.
+```json
+{
+  "action": "published",
+  "proposal_id": "proposal-uuid",
+  "contract": {
+    "id": "contract-uuid",
+    "asset_id": "asset-uuid",
+    "version": "2.0.0",
+    "status": "active",
+    "schema_def": {},
+    "published_by": "team-uuid",
+    "published_at": "2025-01-17T10:00:00Z"
+  },
+  "deprecated_contract_id": "old-contract-uuid"
+}
+```
+
+An `audit_warning` field is included if the asset's most recent audit run is not passing.
 
 ## Withdraw Proposal
 
@@ -167,34 +334,37 @@ Returns the published contract details.
 POST /api/v1/proposals/{proposal_id}/withdraw
 ```
 
-Withdraw a pending proposal (producer only).
-
-### Request Body
-
-```json
-{
-  "reason": "Decided to take a different approach"
-}
-```
+Withdraw a pending proposal. The API key's team must match the proposer team, or the key must have admin scope.
 
 ### Response
 
-Returns the updated proposal with status `withdrawn`.
+Returns the updated Proposal object with status `withdrawn`.
 
-## Expire Pending Proposals
+## Expire Proposal
+
+```http
+POST /api/v1/proposals/{proposal_id}/expire
+```
+
+Manually expire a single pending proposal. The API key's team must be the proposer team, the asset owner team, or have admin scope.
+
+### Response
+
+Returns the updated Proposal object with status `expired`.
+
+## Expire Pending Proposals (Bulk)
 
 ```http
 POST /api/v1/proposals/expire-pending
 ```
 
-Expire all pending proposals that have passed their `expires_at` deadline. Requires admin scope.
-
-This is a bulk administrative action — it finds all proposals with status `PENDING` and an `expires_at` timestamp in the past, and transitions them to `EXPIRED`.
+Expire all pending proposals that have passed their `expires_at` deadline. Requires admin scope. Designed to be called periodically via cron.
 
 ### Response
 
 ```json
 {
-  "expired_count": 3
+  "expired_count": 3,
+  "expired_proposal_ids": ["proposal-uuid-1", "proposal-uuid-2", "proposal-uuid-3"]
 }
 ```

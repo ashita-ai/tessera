@@ -23,9 +23,6 @@ from tessera.db.models import (
 from tessera.models.enums import DependencySource, DependencyType, ProposalStatus
 from tessera.services.graph import _ensure_utc, _sync_status
 
-pytestmark = pytest.mark.asyncio
-
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -154,6 +151,7 @@ async def _seed_graph(test_engine) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 class TestFullGraph:
     """Tests for GET /api/v1/graph/services."""
 
@@ -238,6 +236,7 @@ class TestFullGraph:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 class TestTeamFilter:
     """Tests for team_id query parameter."""
 
@@ -275,6 +274,7 @@ class TestTeamFilter:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 class TestBreakingProposalFlag:
     """Tests for has_breaking_proposal node field."""
 
@@ -316,6 +316,7 @@ class TestBreakingProposalFlag:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 class TestNeighborhood:
     """Tests for GET /api/v1/graph/services/{id}/neighborhood."""
 
@@ -380,6 +381,7 @@ class TestNeighborhood:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 class TestImpactGraph:
     """Tests for GET /api/v1/graph/impact/{asset_id}."""
 
@@ -487,6 +489,7 @@ class TestImpactGraph:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 class TestConfidenceFilter:
     """Tests for min_confidence query parameter on GET /graph/services."""
 

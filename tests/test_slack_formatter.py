@@ -7,6 +7,7 @@ import pytest
 from tessera.services.slack_formatter import (
     format_contract_published,
     format_force_publish,
+    format_proposal_acknowledged,
     format_proposal_created,
     format_proposal_resolved,
     format_repo_sync_failed,
@@ -209,6 +210,96 @@ class TestFormatRepoSyncFailed:
         )
         detail = result["blocks"][1]["text"]["text"]
         assert "2h ago" in detail
+
+
+class TestFormatProposalAcknowledged:
+    """Tests for proposal_acknowledged message formatting."""
+
+    def test_approved(self):
+        """Formats an approved acknowledgment."""
+        result = format_proposal_acknowledged(
+            asset_fqn="analytics.users",
+            consumer_team="marketing",
+            response="approved",
+            proposal_id="abc-123",
+        )
+        assert "text" in result
+        assert "blocks" in result
+        assert ":white_check_mark:" in str(result["blocks"])
+        assert "marketing" in result["text"]
+        assert "approved" in result["text"]
+        assert "analytics.users" in result["text"]
+
+    def test_blocked(self):
+        """Formats a blocked acknowledgment."""
+        result = format_proposal_acknowledged(
+            asset_fqn="analytics.orders",
+            consumer_team="finance",
+            response="blocked",
+            proposal_id="xyz-456",
+        )
+        assert ":no_entry:" in str(result["blocks"])
+        assert "blocked" in result["text"]
+
+    def test_migrating(self):
+        """Formats a migrating acknowledgment."""
+        result = format_proposal_acknowledged(
+            asset_fqn="analytics.orders",
+            consumer_team="finance",
+            response="migrating",
+        )
+        assert ":hourglass_flowing_sand:" in str(result["blocks"])
+        assert "migrating" in result["text"]
+
+    def test_includes_notes(self):
+        """Appends a context block when notes are provided."""
+        result = format_proposal_acknowledged(
+            asset_fqn="analytics.users",
+            consumer_team="marketing",
+            response="approved",
+            notes="Will migrate by Friday",
+        )
+        context_blocks = [b for b in result["blocks"] if b["type"] == "context"]
+        notes_text = str(context_blocks)
+        assert "Will migrate by Friday" in notes_text
+
+    def test_includes_deep_link(self):
+        """Includes deep link when proposal_id is provided."""
+        result = format_proposal_acknowledged(
+            asset_fqn="analytics.users",
+            consumer_team="marketing",
+            response="approved",
+            proposal_id="deep-link-id",
+        )
+        context_blocks = [b for b in result["blocks"] if b["type"] == "context"]
+        link_text = str(context_blocks)
+        assert "deep-link-id" in link_text
+        assert "View proposal" in link_text
+
+    def test_escapes_special_characters(self):
+        """Escapes mrkdwn special chars to prevent injection."""
+        result = format_proposal_acknowledged(
+            asset_fqn="test<script>",
+            consumer_team="team<b>",
+            response="approved",
+        )
+        blocks_str = str(result["blocks"])
+        assert "<script>" not in blocks_str
+        assert "&lt;script&gt;" in blocks_str
+        assert "&lt;b&gt;" in blocks_str
+
+    def test_without_optional_fields(self):
+        """Formats with only required fields."""
+        result = format_proposal_acknowledged(
+            asset_fqn="test.asset",
+            consumer_team="team",
+            response="approved",
+        )
+        assert "text" in result
+        assert "blocks" in result
+        # No notes context block, no deep link
+        context_blocks = [b for b in result["blocks"] if b["type"] == "context"]
+        assert len(context_blocks) == 0
 
 
 class TestFormatTestMessage:
