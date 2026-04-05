@@ -1,6 +1,7 @@
 """Proposal models."""
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -8,12 +9,17 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from tessera.models.enums import ChangeType, ProposalStatus
 
 
-class BreakingChange(BaseModel):
-    """A specific breaking change in a proposal."""
+class ProposalBreakingChangeDict(BaseModel):
+    """A breaking change as stored in the proposal JSON column.
 
-    type: str = Field(..., description="Type of change (e.g., 'dropped_column', 'type_change')")
-    column: str | None = None
-    details: dict[str, str | int | bool | None] = Field(default_factory=dict)
+    Matches the output of ``schema_diff.BreakingChange.to_dict()``.
+    """
+
+    type: str = Field(..., description="Change kind (e.g., 'property_removed', 'type_changed')")
+    path: str = Field(default="", description="JSON path to the affected element")
+    message: str = Field(default="", description="Human-readable description")
+    old_value: Any = None
+    new_value: Any = None
 
 
 class AffectedAsset(BaseModel):
@@ -119,7 +125,7 @@ class Proposal(ProposalBase):
     id: UUID
     asset_id: UUID
     change_type: ChangeType
-    breaking_changes: list[BreakingChange] = Field(default_factory=list)
+    breaking_changes: list[ProposalBreakingChangeDict] = Field(default_factory=list)
     status: ProposalStatus = ProposalStatus.PENDING
     proposed_by: UUID
     proposed_by_user_id: UUID | None = None

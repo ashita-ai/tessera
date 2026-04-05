@@ -348,7 +348,9 @@ async def upload_dbt_manifest(
 
     for entry_id, node, resource_type, is_source in entries:
         fqn = _build_fqn(node)
-        result = await session.execute(select(AssetDB).where(AssetDB.fqn == fqn))
+        result = await session.execute(
+            select(AssetDB).where(AssetDB.fqn == fqn).where(AssetDB.deleted_at.is_(None))
+        )
         existing = result.scalar_one_or_none()
 
         if existing:

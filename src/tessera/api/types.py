@@ -145,14 +145,6 @@ class ReassignAssetsResponse(TypedDict, total=False):
     asset_ids: list[str]
 
 
-class ImpactedConsumer(TypedDict):
-    """Consumer impacted by a breaking change."""
-
-    team_id: UUID
-    team_name: str
-    pinned_version: str | None
-
-
 class VersionSuggestionDict(TypedDict):
     """Version suggestion as returned by API."""
 
@@ -184,20 +176,3 @@ class ContractPublishResponse(TypedDict, total=False):
     schema_converted_from: str
     audit_warning: str
     version_suggestion: VersionSuggestionDict
-
-
-class GuaranteeFailureCount(TypedDict):
-    """Count of failures for a specific guarantee."""
-
-    guarantee_id: str
-    failure_count: int
-
-
-class LastRunSummary(TypedDict):
-    """Summary of the most recent audit run."""
-
-    id: str
-    status: str
-    run_at: str
-    triggered_by: str
-    guarantees_failed: int

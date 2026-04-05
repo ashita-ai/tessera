@@ -33,11 +33,11 @@ from tessera.db.models import WebhookDeliveryDB
 from tessera.models.enums import WebhookDeliveryStatus
 from tessera.models.webhook import (
     AcknowledgmentPayload,
-    BreakingChange,
     ContractPublishedPayload,
     ImpactedConsumer,
     ProposalCreatedPayload,
     ProposalStatusPayload,
+    WebhookBreakingChange,
     WebhookEvent,
     WebhookEventType,
 )
@@ -558,11 +558,16 @@ async def send_proposal_created(
             producer_team_name=producer_team_name,
             proposed_version=proposed_version,
             breaking_changes=[
-                BreakingChange(
-                    change_type=c.get("change_type", "unknown"),
+                WebhookBreakingChange(
+                    change_type=c.get("type", c.get("change_type", "unknown")),
                     path=c.get("path", ""),
                     message=c.get("message", ""),
-                    details=c.get("details"),
+                    details={
+                        k: v
+                        for k, v in c.items()
+                        if k not in ("type", "change_type", "path", "message")
+                    }
+                    or None,
                 )
                 for c in breaking_changes
             ],

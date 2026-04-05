@@ -9,11 +9,11 @@ import pytest
 
 from tessera.models.webhook import (
     AcknowledgmentPayload,
-    BreakingChange,
     ContractPublishedPayload,
     ImpactedConsumer,
     ProposalCreatedPayload,
     ProposalStatusPayload,
+    WebhookBreakingChange,
     WebhookEvent,
     WebhookEventType,
 )
@@ -42,7 +42,7 @@ class TestWebhookModels:
                 producer_team_name="analytics-team",
                 proposed_version="2.0.0",
                 breaking_changes=[
-                    BreakingChange(
+                    WebhookBreakingChange(
                         change_type="dropped_column",
                         path="$.properties.old_field",
                         message="Field 'old_field' was removed",
@@ -217,7 +217,7 @@ class TestAdditionalWebhookPayloads:
 
     async def test_breaking_change_with_details(self):
         """Test breaking change with extra details."""
-        change = BreakingChange(
+        change = WebhookBreakingChange(
             change_type="type_narrowed",
             path="$.properties.amount.type",
             message="Type changed from number to integer",
