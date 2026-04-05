@@ -6,7 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy import select
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.api.auth import Auth, RequireWrite
@@ -177,6 +177,16 @@ async def bulk_create_registrations(
                 )
             )
             failed += 1
+        except IntegrityError:
+            logger.exception("Integrity error in bulk registration at index %d", idx)
+            results.append(
+                BulkItemResult(
+                    success=False,
+                    index=idx,
+                    error="Constraint violation processing this item",
+                )
+            )
+            failed += 1
         except DBAPIError:
             logger.exception("Database error in bulk registration at index %d", idx)
             results.append(
@@ -333,6 +343,16 @@ async def bulk_create_assets(
                     success=False,
                     index=idx,
                     error=str(e.message if hasattr(e, "message") else str(e)),
+                )
+            )
+            failed += 1
+        except IntegrityError:
+            logger.exception("Integrity error in bulk asset create at index %d", idx)
+            results.append(
+                BulkItemResult(
+                    success=False,
+                    index=idx,
+                    error="Constraint violation processing this item",
                 )
             )
             failed += 1
@@ -564,6 +584,18 @@ async def bulk_acknowledge_proposals(
                     success=False,
                     index=idx,
                     error=str(e.message if hasattr(e, "message") else str(e)),
+                )
+            )
+            failed += 1
+            if not bulk_request.continue_on_error:
+                break
+        except IntegrityError:
+            logger.exception("Integrity error in bulk acknowledgment at index %d", idx)
+            results.append(
+                BulkItemResult(
+                    success=False,
+                    index=idx,
+                    error="Constraint violation processing this item",
                 )
             )
             failed += 1
