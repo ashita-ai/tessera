@@ -83,7 +83,6 @@ async def _create_service(
         name=name,
         repo_id=repo.id,
         root_path=root_path,
-        owner_team_id=repo.owner_team_id,
     )
     session.add(svc)
     await session.flush()
@@ -1025,6 +1024,8 @@ class TestPerRepoAuth:
         repo_db.codeowners_path = None
         repo_db.last_synced_at = None
         repo_db.last_synced_commit = None
+        repo_db.poll_interval_seconds = 300
+        repo_db.last_sync_error = None
         repo_db.created_at = "2026-01-01T00:00:00Z"
         repo_db.updated_at = None
         repo_db.git_token = "ghp_secret123"
@@ -1052,6 +1053,8 @@ class TestPerRepoAuth:
         repo_db.codeowners_path = None
         repo_db.last_synced_at = None
         repo_db.last_synced_commit = None
+        repo_db.poll_interval_seconds = 300
+        repo_db.last_sync_error = None
         repo_db.created_at = "2026-01-01T00:00:00Z"
         repo_db.updated_at = None
         repo_db.git_token = None

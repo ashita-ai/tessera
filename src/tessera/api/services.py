@@ -33,7 +33,7 @@ class ServiceWithAssetCount(TypedDict, total=False):
     repo_id: UUID
     root_path: str
     otel_service_name: str | None
-    owner_team_id: UUID
+    owner_team_id: UUID  # Computed from repo
     created_at: datetime
     updated_at: datetime | None
     asset_count: int
@@ -83,7 +83,6 @@ async def create_service(
         repo_id=body.repo_id,
         root_path=body.root_path,
         otel_service_name=body.otel_service_name,
-        owner_team_id=body.owner_team_id,
     )
     session.add(db_service)
     try:
@@ -128,7 +127,9 @@ async def list_services(
     if repo_id is not None:
         base_query = base_query.where(ServiceDB.repo_id == repo_id)
     if team_id is not None:
-        base_query = base_query.where(ServiceDB.owner_team_id == team_id)
+        base_query = base_query.join(RepoDB, ServiceDB.repo_id == RepoDB.id).where(
+            RepoDB.owner_team_id == team_id
+        )
     if otel_service_name is not None:
         base_query = base_query.where(ServiceDB.otel_service_name == otel_service_name)
 

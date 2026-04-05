@@ -66,6 +66,7 @@ class OtelSyncConfig(BaseModel):
     poll_interval_seconds: int
     min_call_count: int
     enabled: bool
+    sync_count: int = 0
     last_synced_at: datetime | None = None
     last_sync_error: str | None = None
     created_at: datetime
@@ -83,6 +84,7 @@ class OtelDependency(BaseModel):
     confidence: float | None = None
     last_observed_at: datetime | None = None
     call_count: int | None = None
+    syncs_seen: int = 0
     otel_config_id: UUID | None = None
     created_at: datetime
 

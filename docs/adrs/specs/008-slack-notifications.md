@@ -40,7 +40,7 @@ CREATE TABLE slack_configs (
     channel_name    VARCHAR(200),               -- display name, for UI only
     webhook_url     VARCHAR(500),               -- incoming webhook URL (option A)
     bot_token       VARCHAR(500),               -- bot token (option B, enables richer messages)
-    notify_on       JSONB NOT NULL DEFAULT '["proposal_created", "proposal_resolved", "force_publish"]',
+    notify_on       JSONB NOT NULL DEFAULT '["proposal.created", "proposal.resolved", "force.publish"]',
     enabled         BOOLEAN NOT NULL DEFAULT TRUE,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -51,11 +51,11 @@ CREATE UNIQUE INDEX uq_slack_configs_team_channel
 ```
 
 `notify_on` is an array of event types. Supported values:
-- `proposal_created` — a breaking change proposal was created that affects this team
-- `proposal_resolved` — a proposal this team was tracking was approved/rejected/expired
-- `force_publish` — someone force-published a breaking change affecting this team
-- `contract_published` — any contract was published for an asset this team consumes
-- `repo_sync_failed` — a repo owned by this team failed to sync
+- `proposal.created` — a breaking change proposal was created that affects this team
+- `proposal.resolved` — a proposal this team was tracking was approved/rejected/expired
+- `force.publish` — someone force-published a breaking change affecting this team
+- `contract.published` — any contract was published for an asset this team consumes
+- `repo.sync_failed` — a repo owned by this team failed to sync
 
 ### Auth approach
 
@@ -75,7 +75,7 @@ Configure Slack for a team.
     "channel_id": "C0123456789",
     "channel_name": "#platform-alerts",
     "webhook_url": "https://hooks.slack.com/services/T.../B.../xxx",
-    "notify_on": ["proposal_created", "force_publish"]
+    "notify_on": ["proposal.created", "force.publish"]
 }
 ```
 
@@ -234,7 +234,7 @@ In the existing event dispatch path (wherever webhooks are triggered today), add
 # In contract_publisher.py, after proposal creation:
 await dispatch_slack_notifications(
     session=session,
-    event_type="proposal_created",
+    event_type="proposal.created",
     affected_team_ids=affected_team_ids,
     context={"proposal": proposal, "asset": asset, "breaking_changes": changes},
 )
@@ -262,10 +262,10 @@ await dispatch_slack_notifications(
 - [ ] `SlackConfigDB` model and migration
 - [ ] CRUD endpoints for Slack configs
 - [ ] Test message endpoint
-- [ ] SlackFormatter: proposal_created message
-- [ ] SlackFormatter: proposal_resolved message
-- [ ] SlackFormatter: force_publish message
-- [ ] SlackFormatter: repo_sync_failed message
+- [ ] SlackFormatter: proposal.created message
+- [ ] SlackFormatter: proposal.resolved message
+- [ ] SlackFormatter: force.publish message
+- [ ] SlackFormatter: repo.sync_failed message
 - [ ] Delivery via incoming webhook URL
 - [ ] Delivery via bot token
 - [ ] Event hook integration: proposals trigger Slack

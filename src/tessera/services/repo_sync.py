@@ -501,7 +501,6 @@ async def _ensure_service(
         name=service_name,
         repo_id=repo.id,
         root_path=root_path,
-        owner_team_id=repo.owner_team_id,
     )
     session.add(new_service)
     await session.flush()

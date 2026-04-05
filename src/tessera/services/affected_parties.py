@@ -44,6 +44,7 @@ async def get_affected_parties(
             dep_asset.c.owner_team_id,
             dep_asset.c.owner_user_id,
             dep_team.c.name.label("team_name"),
+            AssetDependencyDB.dependency_type,
         )
         .distinct()
         .join(dep_asset, AssetDependencyDB.dependent_asset_id == dep_asset.c.id)
@@ -61,7 +62,7 @@ async def get_affected_parties(
     team_assets: dict[str, list[str]] = defaultdict(list)
 
     for row in downstream_result.all():
-        dep_asset_id, fqn, owner_team_id, owner_user_id, team_name = row
+        dep_asset_id, fqn, owner_team_id, owner_user_id, team_name, dep_type = row
         asset_id_str = str(dep_asset_id)
         team_id_str = str(owner_team_id)
 
@@ -72,6 +73,7 @@ async def get_affected_parties(
                 "owner_team_id": team_id_str,
                 "owner_team_name": team_name,
                 "owner_user_id": str(owner_user_id) if owner_user_id else None,
+                "dependency_type": str(dep_type) if dep_type else "CONSUMES",
             }
         )
         team_assets[team_id_str].append(asset_id_str)

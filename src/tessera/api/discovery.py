@@ -312,8 +312,16 @@ async def coverage_report(
 
     Shows how many assets have registrations, inferred-only consumers, or
     no known consumers at all. Includes the top 20 highest-risk gaps.
+
+    ADMIN scope sees the full report across all teams. Non-admin keys see
+    only coverage data for assets owned by their team.
     """
-    report = await compute_coverage_report(session)
+    # Non-admin callers are scoped to their own team's assets
+    team_filter: UUID | None = None
+    if not auth.has_scope(APIKeyScope.ADMIN):
+        team_filter = auth.team_id
+
+    report = await compute_coverage_report(session, team_id=team_filter)
 
     return {
         "total_assets": report.total_assets,
