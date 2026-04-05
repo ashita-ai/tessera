@@ -532,9 +532,20 @@ async def _update_delivery_status(
                     delivery.delivered_at = datetime.now(UTC)
                 await session.commit()
     except OSError:
-        logger.error("Network error updating webhook delivery %s status", delivery_id)
+        logger.critical(
+            "AUDIT GAP: network error updating webhook delivery %s status to %s. "
+            "The delivery record is stale.",
+            delivery_id,
+            status,
+        )
     except Exception:
-        logger.exception("Failed to update webhook delivery %s status", delivery_id)
+        logger.critical(
+            "AUDIT GAP: failed to update webhook delivery %s status to %s. "
+            "The delivery record is stale.",
+            delivery_id,
+            status,
+            exc_info=True,
+        )
 
 
 async def _create_delivery_record(event: WebhookEvent) -> UUID | None:
@@ -552,13 +563,21 @@ async def _create_delivery_record(event: WebhookEvent) -> UUID | None:
             )
             session.add(delivery)
             await session.commit()
-            await session.refresh(delivery)
             return delivery.id
     except OSError:
-        logger.error("Network error creating webhook delivery record")
+        logger.critical(
+            "AUDIT GAP: network error creating webhook delivery record for %s. "
+            "Webhook will be sent without tracking.",
+            event.event.value,
+        )
         return None
     except Exception:
-        logger.exception("Failed to create webhook delivery record")
+        logger.critical(
+            "AUDIT GAP: failed to create webhook delivery record for %s. "
+            "Webhook will be sent without tracking.",
+            event.event.value,
+            exc_info=True,
+        )
         return None
 
 

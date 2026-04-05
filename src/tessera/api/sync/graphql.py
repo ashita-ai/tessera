@@ -3,6 +3,7 @@
 Endpoints for synchronizing schemas from GraphQL introspection.
 """
 
+import logging
 from typing import Any
 from uuid import UUID
 
@@ -24,6 +25,8 @@ from tessera.services.graphql import operations_to_assets as graphql_operations_
 from tessera.services.openapi import _merge_guarantees
 from tessera.services.schema_diff import check_compatibility, diff_schemas
 from tessera.services.versioning import INITIAL_VERSION
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -291,14 +294,15 @@ async def import_graphql(
                 )
                 assets_created += 1
 
-        except Exception as e:
+        except Exception:
+            logger.exception("Error syncing GraphQL operation %s", operation.name)
             operations_results.append(
                 GraphQLOperationResult(
                     fqn=asset_def.fqn,
                     operation_name=operation.name,
                     operation_type=operation.operation_type,
                     action="error",
-                    error=str(e),
+                    error="Internal error processing this operation",
                 )
             )
             assets_skipped += 1

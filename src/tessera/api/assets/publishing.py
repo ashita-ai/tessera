@@ -202,36 +202,41 @@ async def create_contract(
             )
 
     # --- Pre-workflow validation (without FOR UPDATE lock) ---
-    # Compute version suggestion for SUGGEST/ENFORCE mode validation.
-    # The workflow will re-compute under lock for the actual publish decision.
-    pre_contract_result = await session.execute(
-        select(ContractDB)
-        .where(ContractDB.asset_id == asset_id)
-        .where(ContractDB.status == ContractStatus.ACTIVE)
-        .order_by(ContractDB.published_at.desc())
-        .limit(1)
-    )
-    pre_current_contract = pre_contract_result.scalar_one_or_none()
-
-    if pre_current_contract:
-        pre_diff = diff_schemas(pre_current_contract.schema_def, schema_to_store)
-        pre_is_compatible, pre_breaks = check_compatibility(
-            pre_current_contract.schema_def,
-            schema_to_store,
-            pre_current_contract.compatibility_mode,
-        )
-        version_suggestion = compute_version_suggestion(
-            pre_current_contract.version,
-            pre_diff.change_type,
-            pre_is_compatible,
-            breaking_changes=[bc.to_dict() for bc in pre_breaks],
-        )
-    else:
-        version_suggestion = compute_version_suggestion(None, ChangeType.PATCH, True)
-
-    # Handle version based on semver_mode
+    # The pre-lock diff is only needed for SUGGEST mode (read-only early return)
+    # and ENFORCE mode (version validation). In AUTO mode the workflow computes
+    # the diff under lock, so we skip the redundant work here.
     semver_mode = asset.semver_mode
     version_for_workflow: str | None = None
+    needs_pre_lock_diff = (semver_mode == SemverMode.SUGGEST and contract.version is None) or (
+        semver_mode == SemverMode.ENFORCE and contract.version is not None
+    )
+
+    pre_current_contract: ContractDB | None = None
+    version_suggestion = compute_version_suggestion(None, ChangeType.PATCH, True)
+
+    if needs_pre_lock_diff:
+        pre_contract_result = await session.execute(
+            select(ContractDB)
+            .where(ContractDB.asset_id == asset_id)
+            .where(ContractDB.status == ContractStatus.ACTIVE)
+            .order_by(ContractDB.published_at.desc())
+            .limit(1)
+        )
+        pre_current_contract = pre_contract_result.scalar_one_or_none()
+
+        if pre_current_contract:
+            pre_diff = diff_schemas(pre_current_contract.schema_def, schema_to_store)
+            pre_is_compatible, pre_breaks = check_compatibility(
+                pre_current_contract.schema_def,
+                schema_to_store,
+                pre_current_contract.compatibility_mode,
+            )
+            version_suggestion = compute_version_suggestion(
+                pre_current_contract.version,
+                pre_diff.change_type,
+                pre_is_compatible,
+                breaking_changes=[bc.to_dict() for bc in pre_breaks],
+            )
 
     if contract.version is None:
         # No version provided by user

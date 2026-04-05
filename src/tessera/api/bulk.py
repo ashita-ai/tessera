@@ -1,10 +1,12 @@
 """Bulk operations API endpoints."""
 
+import logging
 from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy import select
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.api.auth import Auth, RequireWrite
@@ -41,6 +43,8 @@ from tessera.services import (
     log_proposal_rejected,
 )
 from tessera.services.audit import AuditAction, log_event
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -173,12 +177,24 @@ async def bulk_create_registrations(
                 )
             )
             failed += 1
-        except Exception as e:
+        except DBAPIError:
+            logger.exception("Database error in bulk registration at index %d", idx)
             results.append(
                 BulkItemResult(
                     success=False,
                     index=idx,
-                    error=f"Unexpected error: {str(e)}",
+                    error="Database error — remaining items skipped",
+                )
+            )
+            failed += 1
+            break
+        except Exception:
+            logger.exception("Unexpected error in bulk registration at index %d", idx)
+            results.append(
+                BulkItemResult(
+                    success=False,
+                    index=idx,
+                    error="Internal error processing this item",
                 )
             )
             failed += 1
@@ -310,12 +326,24 @@ async def bulk_create_assets(
                 )
             )
             failed += 1
-        except Exception as e:
+        except DBAPIError:
+            logger.exception("Database error in bulk asset create at index %d", idx)
             results.append(
                 BulkItemResult(
                     success=False,
                     index=idx,
-                    error=f"Unexpected error: {str(e)}",
+                    error="Database error — remaining items skipped",
+                )
+            )
+            failed += 1
+            break
+        except Exception:
+            logger.exception("Unexpected error in bulk asset create at index %d", idx)
+            results.append(
+                BulkItemResult(
+                    success=False,
+                    index=idx,
+                    error="Internal error processing this item",
                 )
             )
             failed += 1
@@ -521,12 +549,24 @@ async def bulk_acknowledge_proposals(
             failed += 1
             if not bulk_request.continue_on_error:
                 break
-        except Exception as e:
+        except DBAPIError:
+            logger.exception("Database error in bulk acknowledgment at index %d", idx)
             results.append(
                 BulkItemResult(
                     success=False,
                     index=idx,
-                    error=f"Unexpected error: {str(e)}",
+                    error="Database error — remaining items skipped",
+                )
+            )
+            failed += 1
+            break
+        except Exception:
+            logger.exception("Unexpected error in bulk acknowledgment at index %d", idx)
+            results.append(
+                BulkItemResult(
+                    success=False,
+                    index=idx,
+                    error="Internal error processing this item",
                 )
             )
             failed += 1
