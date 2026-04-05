@@ -436,6 +436,7 @@ class TestFullCrudCycle:
         assert resp.status_code == 404
 
 
+@pytest.mark.postgres
 class TestAuthScopes:
     """Tests that auth scopes are enforced when auth is enabled."""
 

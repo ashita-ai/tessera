@@ -19,6 +19,8 @@ from tessera.db.models import AssetDB, Base, RepoDB, ServiceDB, TeamDB
 TEST_DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 _USE_SQLITE = TEST_DATABASE_URL.startswith("sqlite")
 
+pytestmark = pytest.mark.postgres
+
 
 @pytest.fixture
 async def fk_session() -> AsyncGenerator[AsyncSession, None]:

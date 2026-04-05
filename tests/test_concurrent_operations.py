@@ -446,6 +446,7 @@ class TestContractPublish:
         assert "1.0.0" in published_versions
         assert "2.0.0" in published_versions
 
+    @pytest.mark.postgres
     @pytest.mark.skipif(_USE_SQLITE, reason="SQLite does not support FOR UPDATE row locking")
     async def test_concurrent_auto_publish_no_duplicate_versions(self, client: AsyncClient):
         """Two concurrent publishes without explicit versions must not produce duplicate versions.
