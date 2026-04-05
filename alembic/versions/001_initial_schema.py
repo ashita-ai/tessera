@@ -55,6 +55,7 @@ _USER_ROLE = ("admin", "team_admin", "user")
 _USER_TYPE = ("human", "bot")
 _WEBHOOK_STATUS = ("pending", "delivered", "failed", "dead_lettered")
 _AUDIT_RUN_STATUS = ("passed", "failed", "partial")
+_DEPENDENCY_SOURCE = ("manual", "otel", "inferred")
 _INFERRED_DEP_STATUS = ("pending", "confirmed", "rejected", "expired")
 _OTEL_BACKEND = ("jaeger", "tempo", "datadog")
 
@@ -125,6 +126,8 @@ def upgrade() -> None:
         sa.Column("ssh_key", sa.Text(), nullable=True),
         sa.Column("last_synced_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("last_synced_commit", sa.String(40), nullable=True),
+        sa.Column("poll_interval_seconds", sa.Integer(), nullable=False),
+        sa.Column("last_sync_error", sa.Text(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
@@ -156,13 +159,11 @@ def upgrade() -> None:
         sa.Column("repo_id", sa.Uuid(), sa.ForeignKey("repos.id"), nullable=False),
         sa.Column("root_path", sa.String(500), nullable=False),
         sa.Column("otel_service_name", sa.String(200), nullable=True),
-        sa.Column("owner_team_id", sa.Uuid(), sa.ForeignKey("teams.id"), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
     )
     op.create_index("ix_services_repo_id", "services", ["repo_id"])
-    op.create_index("ix_services_owner_team_id", "services", ["owner_team_id"])
     op.create_index("ix_services_deleted_at", "services", ["deleted_at"])
     op.create_index(
         "uq_service_name_repo_active",
@@ -369,8 +370,11 @@ def upgrade() -> None:
         sa.Column("poll_interval_seconds", sa.Integer(), nullable=False),
         sa.Column("min_call_count", sa.Integer(), nullable=False),
         sa.Column("enabled", sa.Boolean(), nullable=False),
+        sa.Column("sync_count", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("last_synced_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("last_sync_error", sa.Text(), nullable=True),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
     )
     op.create_index(
@@ -379,6 +383,7 @@ def upgrade() -> None:
         ["name"],
         unique=True,
     )
+    op.create_index("ix_otel_sync_configs_deleted_at", "otel_sync_configs", ["deleted_at"])
 
     # ── 11. dependencies ──────────────────────────────────────────────────
     op.create_table(
@@ -391,10 +396,15 @@ def upgrade() -> None:
             sa.Enum(*_DEPENDENCY_TYPE, name="dependencytype"),
             nullable=False,
         ),
-        sa.Column("source", sa.String(50), nullable=False),
+        sa.Column(
+            "source",
+            sa.Enum(*_DEPENDENCY_SOURCE, name="dependencysource"),
+            nullable=False,
+        ),
         sa.Column("confidence", sa.Float(), nullable=True),
         sa.Column("last_observed_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("call_count", sa.Integer(), nullable=True),
+        sa.Column("syncs_seen", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column(
@@ -529,9 +539,11 @@ def upgrade() -> None:
         sa.Column("enabled", sa.Boolean(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
         sa.UniqueConstraint("team_id", "channel_id", name="uq_slack_configs_team_channel"),
     )
     op.create_index("ix_slack_configs_team_id", "slack_configs", ["team_id"])
+    op.create_index("ix_slack_configs_deleted_at", "slack_configs", ["deleted_at"])
 
     # ── 17. inferred_dependencies ─────────────────────────────────────────
     op.create_table(
@@ -642,6 +654,7 @@ def downgrade() -> None:
             "auditrunstatus",
             "inferreddependencystatus",
             "otelbackendtype",
+            "dependencysource",
         ]
         for enum_type in enum_types:
             op.execute(f"DROP TYPE IF EXISTS {enum_type}")
