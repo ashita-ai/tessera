@@ -421,7 +421,7 @@ class TestAffectedPartiesUsesTableOnly:
         # Create explicit dependency row
         await client.post(
             f"/api/v1/assets/{downstream['id']}/dependencies",
-            json={"depends_on_asset_id": upstream["id"]},
+            json={"dependency_asset_id": upstream["id"]},
         )
 
         # Publish breaking change

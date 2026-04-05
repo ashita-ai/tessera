@@ -395,6 +395,7 @@ class RegistrationDB(Base):
 
     # Relationships
     contract: Mapped["ContractDB"] = relationship(back_populates="registrations")
+    consumer_team: Mapped["TeamDB"] = relationship(lazy="raise", foreign_keys=[consumer_team_id])
 
 
 class ProposalDB(Base):
@@ -527,6 +528,14 @@ class AssetDependencyDB(Base):
 
     otel_config_id: Mapped[UUID | None] = mapped_column(
         Uuid, ForeignKey("otel_sync_configs.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
+    # Relationships
+    dependent_asset: Mapped["AssetDB"] = relationship(
+        lazy="raise", foreign_keys=[dependent_asset_id]
+    )
+    dependency_asset: Mapped["AssetDB"] = relationship(
+        lazy="raise", foreign_keys=[dependency_asset_id]
     )
 
     __table_args__ = (
@@ -777,6 +786,11 @@ class OtelSyncConfigDB(Base):
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_sync_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    # Relationships
+    dependencies: Mapped[list["AssetDependencyDB"]] = relationship(
+        lazy="raise", foreign_keys="AssetDependencyDB.otel_config_id"
+    )
 
     __table_args__ = (
         Index(

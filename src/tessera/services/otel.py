@@ -28,9 +28,9 @@ from tessera.db.models import (
 )
 from tessera.models.enums import DependencySource, DependencyType, OtelBackendType
 from tessera.models.otel import (
+    OtelServiceEdge,
     ReconciliationItem,
     ReconciliationReport,
-    ServiceEdge,
     SyncResult,
     UnresolvedService,
 )
@@ -112,7 +112,7 @@ def compute_confidence(call_count: int, syncs_seen: int, total_syncs: int) -> fl
 async def fetch_jaeger_dependencies(
     config: OtelSyncConfigDB,
     http_client: httpx.AsyncClient | None = None,
-) -> list[ServiceEdge]:
+) -> list[OtelServiceEdge]:
     """Fetch dependency edges from a Jaeger backend.
 
     Queries Jaeger's ``/api/dependencies`` endpoint which returns aggregated
@@ -158,12 +158,12 @@ async def fetch_jaeger_dependencies(
         logger.warning("Unexpected Jaeger response format: %s", type(data))
         return []
 
-    results: list[ServiceEdge] = []
+    results: list[OtelServiceEdge] = []
     for edge in edges_raw:
         call_count_val = edge.get("callCount", 0)
         cc = int(float(str(call_count_val))) if call_count_val is not None else 0
         results.append(
-            ServiceEdge(
+            OtelServiceEdge(
                 parent=str(edge["parent"]),
                 child=str(edge["child"]),
                 call_count=cc,
@@ -175,7 +175,7 @@ async def fetch_jaeger_dependencies(
 async def fetch_dependencies(
     config: OtelSyncConfigDB,
     http_client: httpx.AsyncClient | None = None,
-) -> list[ServiceEdge]:
+) -> list[OtelServiceEdge]:
     """Fetch dependency edges from the configured OTEL backend.
 
     Dispatches to the appropriate backend client based on ``config.backend_type``.

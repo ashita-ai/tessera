@@ -23,12 +23,6 @@ class AcknowledgmentCreate(AcknowledgmentBase):
     acknowledged_by_user_id: UUID | None = None
 
 
-class AcknowledgmentResponse(AcknowledgmentBase):
-    """Response model for acknowledgment (used in API responses)."""
-
-    pass
-
-
 class Acknowledgment(AcknowledgmentBase):
     """Acknowledgment entity."""
 

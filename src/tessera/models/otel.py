@@ -87,7 +87,7 @@ class OtelDependency(BaseModel):
     created_at: datetime
 
 
-class ServiceEdge(BaseModel):
+class OtelServiceEdge(BaseModel):
     """A raw dependency edge from an OTEL backend (pre-resolution)."""
 
     parent: str
