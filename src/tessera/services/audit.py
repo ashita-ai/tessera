@@ -3,6 +3,8 @@
 Provides append-only audit trail for all significant events.
 """
 
+import hashlib
+import json
 from enum import StrEnum
 from typing import Any
 from uuid import UUID
@@ -10,6 +12,16 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.db import AuditEventDB
+
+
+def compute_schema_hash(schema: dict[str, Any]) -> str:
+    """Return a short deterministic hash of a JSON schema.
+
+    Canonicalizes via sorted-key JSON serialization, then returns the
+    first 16 hex characters of the SHA-256 digest.
+    """
+    canonical = json.dumps(schema, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode()).hexdigest()[:16]
 
 
 class AuditAction(StrEnum):
@@ -222,19 +234,33 @@ async def log_proposal_created(
     proposer_id: UUID,
     change_type: str,
     breaking_changes: list[dict[str, Any]],
+    proposed_version: str | None = None,
+    proposed_schema_hash: str | None = None,
 ) -> AuditEventDB:
-    """Log a proposal creation event."""
+    """Log a proposal creation event.
+
+    Args:
+        proposed_version: The semantic version string proposed for this contract.
+        proposed_schema_hash: A SHA-256 hex digest (first 16 chars) of the
+            canonicalized proposed schema, for cross-referencing without
+            embedding the full schema in the audit trail.
+    """
+    payload: dict[str, Any] = {
+        "asset_id": str(asset_id),
+        "change_type": change_type,
+        "breaking_changes_count": len(breaking_changes),
+    }
+    if proposed_version is not None:
+        payload["proposed_version"] = proposed_version
+    if proposed_schema_hash is not None:
+        payload["proposed_schema_hash"] = proposed_schema_hash
     return await log_event(
         session=session,
         entity_type="proposal",
         entity_id=proposal_id,
         action=AuditAction.PROPOSAL_CREATED,
         actor_id=proposer_id,
-        payload={
-            "asset_id": str(asset_id),
-            "change_type": change_type,
-            "breaking_changes_count": len(breaking_changes),
-        },
+        payload=payload,
     )
 
 

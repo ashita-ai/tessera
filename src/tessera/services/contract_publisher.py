@@ -29,6 +29,7 @@ from tessera.models.enums import (
 )
 from tessera.services.affected_parties import get_affected_parties
 from tessera.services.audit import (
+    compute_schema_hash,
     log_contract_deprecated,
     log_contract_published,
     log_guarantees_updated,
@@ -452,6 +453,8 @@ async def bulk_publish_contracts(
                         proposer_id=published_by,
                         change_type=str(diff_result.change_type.value),
                         breaking_changes=breaking_changes_list,
+                        proposed_version=suggested_version,
+                        proposed_schema_hash=compute_schema_hash(item.schema_def),
                     )
 
                     results.append(
@@ -1085,6 +1088,8 @@ class ContractPublishingWorkflow:
             proposer_id=self.published_by,
             change_type=str(diff_result.change_type),
             breaking_changes=breaking_changes_list,
+            proposed_version=self.version,
+            proposed_schema_hash=compute_schema_hash(self.schema_to_store),
         )
 
         # Get impacted consumers

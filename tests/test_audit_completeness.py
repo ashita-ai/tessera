@@ -107,6 +107,75 @@ class TestRestoreAuditEvents:
         assert events[0].payload["name"] == "Audit Reactivate"
 
 
+class TestProposalCreatedAuditPayload:
+    """Verify proposal.created audit events contain version and schema hash."""
+
+    async def test_proposal_audit_includes_version_and_schema_hash(
+        self, client: AsyncClient, test_session: AsyncSession
+    ):
+        # Create team, asset, and initial contract
+        team_resp = await client.post("/api/v1/teams", json={"name": "audit-ver-team"})
+        team_id = team_resp.json()["id"]
+
+        asset_resp = await client.post(
+            "/api/v1/assets",
+            json={"fqn": "db.schema.audit_version_test", "owner_team_id": team_id},
+        )
+        asset_id = asset_resp.json()["id"]
+
+        # Publish initial contract
+        await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            json={
+                "version": "1.0.0",
+                "schema": {
+                    "type": "object",
+                    "properties": {"id": {"type": "integer"}, "name": {"type": "string"}},
+                    "required": ["id", "name"],
+                },
+            },
+        )
+
+        # Register a consumer so a breaking change creates a proposal
+        consumer_resp = await client.post("/api/v1/teams", json={"name": "audit-ver-consumer"})
+        consumer_id = consumer_resp.json()["id"]
+        contracts_resp = await client.get(f"/api/v1/assets/{asset_id}/contracts")
+        contract_id = contracts_resp.json()["results"][0]["id"]
+        await client.post(
+            f"/api/v1/contracts/{contract_id}/register",
+            json={"consumer_team_id": consumer_id},
+        )
+
+        # Publish breaking change → creates a proposal
+        breaking_schema = {
+            "type": "object",
+            "properties": {"id": {"type": "integer"}},
+            "required": ["id"],
+        }
+        resp = await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            json={"version": "2.0.0", "schema": breaking_schema},
+        )
+        assert resp.status_code == 201
+        assert resp.json()["action"] == "proposal.created"
+        proposal_id = UUID(resp.json()["proposal"]["id"])
+
+        # Verify the audit event payload
+        events = await _get_audit_events(test_session, "proposal.created", proposal_id)
+        assert len(events) == 1
+        payload = events[0].payload
+
+        assert payload["proposed_version"] == "2.0.0"
+        assert "proposed_schema_hash" in payload
+        # Hash should be a 16-char hex string
+        assert len(payload["proposed_schema_hash"]) == 16
+        assert all(c in "0123456789abcdef" for c in payload["proposed_schema_hash"])
+        # Standard fields still present
+        assert payload["asset_id"] == asset_id
+        assert payload["change_type"] == "major"
+        assert payload["breaking_changes_count"] > 0
+
+
 class TestProposalAuditEvents:
     """Verify proposal mutations create audit events."""
 
