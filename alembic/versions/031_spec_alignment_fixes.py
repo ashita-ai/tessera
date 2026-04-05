@@ -2,8 +2,8 @@
 add repos.poll_interval_seconds and repos.last_sync_error, add soft delete
 to slack_configs and otel_sync_configs.
 
-Revision ID: 028
-Revises: 027
+Revision ID: 031
+Revises: 030
 Create Date: 2026-04-05
 """
 
@@ -13,8 +13,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "028"
-down_revision: str | None = "027"
+revision: str = "031"
+down_revision: str | None = "030"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

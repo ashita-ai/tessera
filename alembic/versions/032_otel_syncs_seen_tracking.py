@@ -1,7 +1,7 @@
 """Add syncs_seen to dependencies and sync_count to otel_sync_configs.
 
-Revision ID: 029
-Revises: 028
+Revision ID: 032
+Revises: 031
 Create Date: 2026-04-05
 
 Enables proper confidence scoring per spec 007. The confidence formula's
@@ -17,8 +17,8 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "029"
-down_revision: str = "028"
+revision: str = "032"
+down_revision: str = "031"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

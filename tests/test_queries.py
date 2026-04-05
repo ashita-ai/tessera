@@ -173,11 +173,10 @@ class TestActiveServices:
         await test_session.flush()
         await test_session.refresh(repo)
 
-        alive = ServiceDB(name="alive-svc", repo_id=repo.id, owner_team_id=team.id)
+        alive = ServiceDB(name="alive-svc", repo_id=repo.id)
         gone = ServiceDB(
             name="gone-svc",
             repo_id=repo.id,
-            owner_team_id=team.id,
             deleted_at=datetime.now(UTC),
         )
         test_session.add_all([alive, gone])
