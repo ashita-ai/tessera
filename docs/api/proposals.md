@@ -180,3 +180,21 @@ Withdraw a pending proposal (producer only).
 ### Response
 
 Returns the updated proposal with status `withdrawn`.
+
+## Expire Pending Proposals
+
+```http
+POST /api/v1/proposals/expire-pending
+```
+
+Expire all pending proposals that have passed their `expires_at` deadline. Requires admin scope.
+
+This is a bulk administrative action — it finds all proposals with status `PENDING` and an `expires_at` timestamp in the past, and transitions them to `EXPIRED`.
+
+### Response
+
+```json
+{
+  "expired_count": 3
+}
+```

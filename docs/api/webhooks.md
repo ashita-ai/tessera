@@ -4,7 +4,7 @@ Tessera sends webhooks for key events like proposal creation and contract publis
 
 ## Configuration
 
-Configure webhooks via environment variables:
+Webhooks are configured via environment variables only — there are no API endpoints for managing webhook URLs. The delivery tracking endpoints below are read-only.
 
 ```bash
 WEBHOOK_URL=https://your-service.com/webhooks/tessera

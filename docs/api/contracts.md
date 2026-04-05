@@ -144,21 +144,132 @@ Returns the updated contract.
 POST /api/v1/contracts/compare
 ```
 
-Compare two schemas to see differences.
+Compare two existing contracts by ID and return the schema differences.
 
 ### Request Body
 
 ```json
 {
-  "old_schema": {
-    "type": "object",
-    "properties": {...}
-  },
-  "new_schema": {
-    "type": "object",
-    "properties": {...}
-  },
+  "contract_id_1": "uuid-of-first-contract",
+  "contract_id_2": "uuid-of-second-contract",
   "compatibility_mode": "backward"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `contract_id_1` | UUID | Yes | First contract to compare |
+| `contract_id_2` | UUID | Yes | Second contract to compare |
+| `compatibility_mode` | string | No | Override compatibility mode (`backward`, `forward`, `full`, `none`). Defaults to the first contract's mode. |
+
+### Response
+
+```json
+{
+  "contract_1": {
+    "id": "uuid",
+    "version": "1.0.0",
+    "published_at": "2024-01-01T00:00:00Z",
+    "asset_id": "uuid"
+  },
+  "contract_2": {
+    "id": "uuid",
+    "version": "2.0.0",
+    "published_at": "2024-02-01T00:00:00Z",
+    "asset_id": "uuid"
+  },
+  "change_type": "major",
+  "is_compatible": false,
+  "breaking_changes": [
+    {
+      "type": "property_removed",
+      "path": "properties.email",
+      "message": "Property 'email' was removed",
+      "old_value": {"type": "string"},
+      "new_value": null
+    }
+  ],
+  "all_changes": [...],
+  "compatibility_mode": "backward"
+}
+```
+
+## Contract History
+
+```http
+GET /api/v1/assets/{asset_id}/contracts/history
+```
+
+Get the complete contract version history for an asset with change type annotations.
+
+### Response
+
+```json
+{
+  "asset_id": "uuid",
+  "asset_fqn": "warehouse.schema.table",
+  "contracts": [
+    {
+      "id": "uuid",
+      "version": "2.0.0",
+      "status": "active",
+      "published_at": "2024-02-01T00:00:00Z",
+      "published_by": "uuid",
+      "compatibility_mode": "backward",
+      "change_type": "major",
+      "breaking_changes_count": 1
+    }
+  ]
+}
+```
+
+## Contract Diff
+
+```http
+GET /api/v1/assets/{asset_id}/contracts/diff?from_version=1.0.0&to_version=2.0.0
+```
+
+Compare two contract versions for the same asset. Returns the schema diff between `from_version` and `to_version`.
+
+### Query Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `from_version` | string | Yes | Base version (e.g., `1.0.0`) |
+| `to_version` | string | Yes | Target version (e.g., `2.0.0`) |
+
+### Response
+
+```json
+{
+  "asset_id": "uuid",
+  "asset_fqn": "warehouse.schema.table",
+  "from_version": "1.0.0",
+  "to_version": "2.0.0",
+  "change_type": "major",
+  "is_compatible": false,
+  "breaking_changes": [...],
+  "all_changes": [...],
+  "compatibility_mode": "backward"
+}
+```
+
+## Version Suggestion
+
+```http
+POST /api/v1/assets/{asset_id}/version-suggestion
+```
+
+Preview what version would be suggested for a new schema without actually publishing. Useful for CI dry-run checks.
+
+### Request Body
+
+```json
+{
+  "schema": {
+    "type": "object",
+    "properties": {...}
+  }
 }
 ```
 
@@ -166,21 +277,11 @@ Compare two schemas to see differences.
 
 ```json
 {
-  "is_compatible": false,
-  "changes": [
-    {
-      "type": "property_removed",
-      "path": "$.properties.email",
-      "breaking": true,
-      "description": "Property 'email' was removed"
-    },
-    {
-      "type": "property_added",
-      "path": "$.properties.phone",
-      "breaking": false,
-      "description": "Optional property 'phone' was added"
-    }
-  ]
+  "suggested_version": "2.0.0",
+  "current_version": "1.5.0",
+  "change_type": "major",
+  "reason": "Breaking changes detected: 1 incompatible modification(s)",
+  "is_first_contract": false
 }
 ```
 

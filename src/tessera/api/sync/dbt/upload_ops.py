@@ -153,7 +153,7 @@ async def auto_register_consumers(
     all_fqns = list(node_id_to_fqn.values())
     if all_fqns:
         existing_assets_result = await session.execute(
-            select(AssetDB).where(AssetDB.fqn.in_(all_fqns))
+            select(AssetDB).where(AssetDB.fqn.in_(all_fqns)).where(AssetDB.deleted_at.is_(None))
         )
         for asset in existing_assets_result.scalars().all():
             fqn_to_asset[asset.fqn] = asset

@@ -54,7 +54,9 @@ async def create_asset(
     Requires write scope.
     """
     # Validate owner team exists first (needed for better error messages)
-    result = await session.execute(select(TeamDB).where(TeamDB.id == asset.owner_team_id))
+    result = await session.execute(
+        select(TeamDB).where(TeamDB.id == asset.owner_team_id).where(TeamDB.deleted_at.is_(None))
+    )
     target_team = result.scalar_one_or_none()
     if not target_team:
         raise NotFoundError(ErrorCode.TEAM_NOT_FOUND, "Owner team not found")

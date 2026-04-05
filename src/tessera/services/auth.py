@@ -88,7 +88,9 @@ async def create_api_key(
         Created API key with the raw key (only time it's available)
     """
     # Verify team exists
-    team_result = await session.execute(select(TeamDB).where(TeamDB.id == key_data.team_id))
+    team_result = await session.execute(
+        select(TeamDB).where(TeamDB.id == key_data.team_id).where(TeamDB.deleted_at.is_(None))
+    )
     team = team_result.scalar_one_or_none()
     if not team:
         raise ValueError(f"Team {key_data.team_id} not found")

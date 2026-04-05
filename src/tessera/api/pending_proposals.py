@@ -54,6 +54,8 @@ class PendingProposalsResponse(BaseModel):
 
     pending_proposals: list[PendingProposalItem]
     total: int
+    limit: int
+    offset: int
 
 
 @router.get("/proposals/pending/{team_id}", response_model=PendingProposalsResponse)
@@ -192,4 +194,6 @@ async def get_pending_proposals(
     return PendingProposalsResponse(
         pending_proposals=pending_items,
         total=total,
+        limit=limit,
+        offset=offset,
     )

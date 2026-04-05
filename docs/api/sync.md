@@ -458,6 +458,107 @@ Becomes:
 
 ---
 
+## gRPC Sync
+
+Import assets and contracts from Protocol Buffer (`.proto`) files. Each RPC method becomes an asset with `resource_type=grpc_service`, and the request/response message types are converted to JSON Schema contracts.
+
+### Import from Proto File
+
+```http
+POST /api/v1/sync/grpc
+```
+
+Parse a proto3 file and create assets for each RPC method. Requires admin scope.
+
+#### Request Body
+
+```json
+{
+  "proto_content": "syntax = \"proto3\";\npackage orders;\n...",
+  "owner_team_id": "uuid",
+  "publish_contracts": true,
+  "dry_run": false
+}
+```
+
+#### Response
+
+```json
+{
+  "assets_created": 3,
+  "assets_updated": 1,
+  "contracts_published": 3,
+  "errors": []
+}
+```
+
+### Impact Analysis
+
+```http
+POST /api/v1/sync/grpc/impact
+```
+
+Analyze what would break if a proto file is applied. Returns per-method impact including breaking changes.
+
+#### Request Body
+
+```json
+{
+  "proto_content": "syntax = \"proto3\";\n...",
+  "owner_team_id": "uuid"
+}
+```
+
+### CI Diff (Dry Run)
+
+```http
+POST /api/v1/sync/grpc/diff
+```
+
+Preview what would change if this `.proto` file is applied. Use in PR checks to detect breaking changes before merging.
+
+#### Request Body
+
+```json
+{
+  "proto_content": "syntax = \"proto3\";\n...",
+  "owner_team_id": "uuid",
+  "fail_on_breaking": true
+}
+```
+
+#### Response
+
+```json
+{
+  "status": "breaking_changes_detected",
+  "package": "orders",
+  "summary": {"new": 0, "modified": 2, "unchanged": 1, "breaking": 1},
+  "blocking": true,
+  "methods": [
+    {
+      "fqn": "grpc.orders.OrderService.CreateOrder",
+      "status": "breaking",
+      "change_type": "major",
+      "breaking_changes": [
+        {"type": "property_removed", "path": "properties.old_field", "message": "Field removed"}
+      ]
+    }
+  ],
+  "parse_errors": []
+}
+```
+
+### What Gets Synced (gRPC)
+
+For each RPC method in a proto service:
+
+- Creates an asset with FQN: `grpc.<package>.<ServiceName>.<MethodName>`
+- Extracts request and response message types
+- Converts to JSON Schema for contracts
+
+---
+
 ## Conflict Modes
 
 The dbt sync endpoints support `conflict_mode`:

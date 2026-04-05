@@ -42,7 +42,9 @@ async def _check_dbt_node_impact(
     fqn = f"{database}.{schema_name}.{name}".lower()
 
     # Look up existing asset and active contract
-    asset_result = await session.execute(select(AssetDB).where(AssetDB.fqn == fqn))
+    asset_result = await session.execute(
+        select(AssetDB).where(AssetDB.fqn == fqn).where(AssetDB.deleted_at.is_(None))
+    )
     existing_asset = asset_result.scalar_one_or_none()
 
     if not existing_asset:

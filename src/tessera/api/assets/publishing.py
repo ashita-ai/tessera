@@ -155,7 +155,9 @@ async def create_contract(
         )
 
     # Verify publisher team exists
-    team_result = await session.execute(select(TeamDB).where(TeamDB.id == published_by))
+    team_result = await session.execute(
+        select(TeamDB).where(TeamDB.id == published_by).where(TeamDB.deleted_at.is_(None))
+    )
     publisher_team = team_result.scalar_one_or_none()
     if not publisher_team:
         raise NotFoundError(ErrorCode.TEAM_NOT_FOUND, "Publisher team not found")

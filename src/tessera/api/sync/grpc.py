@@ -106,7 +106,11 @@ async def import_grpc(
     Returns a summary of what was created/updated.
     """
     # Validate owner team exists
-    team_result = await session.execute(select(TeamDB).where(TeamDB.id == import_req.owner_team_id))
+    team_result = await session.execute(
+        select(TeamDB)
+        .where(TeamDB.id == import_req.owner_team_id)
+        .where(TeamDB.deleted_at.is_(None))
+    )
     owner_team = team_result.scalar_one_or_none()
     if not owner_team:
         raise NotFoundError(ErrorCode.TEAM_NOT_FOUND, "Owner team not found")

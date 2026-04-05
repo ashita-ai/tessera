@@ -27,8 +27,8 @@ class ImpactedConsumer(BaseModel):
     pinned_version: str | None = None
 
 
-class BreakingChange(BaseModel):
-    """A breaking change detected in a schema."""
+class WebhookBreakingChange(BaseModel):
+    """A breaking change formatted for webhook payloads."""
 
     change_type: str
     path: str
@@ -45,7 +45,7 @@ class ProposalCreatedPayload(BaseModel):
     producer_team_id: UUID
     producer_team_name: str
     proposed_version: str
-    breaking_changes: list[BreakingChange]
+    breaking_changes: list[WebhookBreakingChange]
     impacted_consumers: list[ImpactedConsumer]
 
 

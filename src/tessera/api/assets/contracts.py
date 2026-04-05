@@ -124,7 +124,9 @@ async def get_contract_history(
     Requires read scope.
     """
     # Verify asset exists
-    asset_result = await session.execute(select(AssetDB).where(AssetDB.id == asset_id))
+    asset_result = await session.execute(
+        select(AssetDB).where(AssetDB.id == asset_id).where(AssetDB.deleted_at.is_(None))
+    )
     asset = asset_result.scalar_one_or_none()
     if not asset:
         raise NotFoundError(ErrorCode.ASSET_NOT_FOUND, "Asset not found")
@@ -191,7 +193,9 @@ async def diff_contract_versions(
     Requires read scope.
     """
     # Verify asset exists
-    asset_result = await session.execute(select(AssetDB).where(AssetDB.id == asset_id))
+    asset_result = await session.execute(
+        select(AssetDB).where(AssetDB.id == asset_id).where(AssetDB.deleted_at.is_(None))
+    )
     asset = asset_result.scalar_one_or_none()
     if not asset:
         raise NotFoundError(ErrorCode.ASSET_NOT_FOUND, "Asset not found")

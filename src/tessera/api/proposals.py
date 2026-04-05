@@ -1088,7 +1088,9 @@ async def file_objection(
         raise NotFoundError(ErrorCode.PROPOSAL_NOT_FOUND, "Proposal not found")
 
     # Load the asset separately (no lock needed — read-only).
-    asset_result = await session.execute(select(AssetDB).where(AssetDB.id == proposal.asset_id))
+    asset_result = await session.execute(
+        select(AssetDB).where(AssetDB.id == proposal.asset_id).where(AssetDB.deleted_at.is_(None))
+    )
     asset: AssetDB | None = asset_result.scalar_one_or_none()
     if not asset:
         raise NotFoundError(ErrorCode.ASSET_NOT_FOUND, "Asset not found")
@@ -1125,7 +1127,11 @@ async def file_objection(
     # Get objector user name if provided
     objector_user_name = None
     if objector_user_id:
-        user_result = await session.execute(select(UserDB).where(UserDB.id == objector_user_id))
+        user_result = await session.execute(
+            select(UserDB)
+            .where(UserDB.id == objector_user_id)
+            .where(UserDB.deactivated_at.is_(None))
+        )
         objector_user = user_result.scalar_one_or_none()
         if objector_user:
             objector_user_name = objector_user.name
@@ -1302,7 +1308,9 @@ async def publish_from_proposal(
         )
 
     # Get the asset
-    asset_result = await session.execute(select(AssetDB).where(AssetDB.id == proposal.asset_id))
+    asset_result = await session.execute(
+        select(AssetDB).where(AssetDB.id == proposal.asset_id).where(AssetDB.deleted_at.is_(None))
+    )
     asset = asset_result.scalar_one_or_none()
     if not asset:
         raise NotFoundError(ErrorCode.ASSET_NOT_FOUND, "Asset not found")
