@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing_extensions import TypedDict
 
-from tessera.api.auth import Auth, RequireAdmin, RequireRead
+from tessera.api.auth import Auth, RequireAdmin, RequireRead, RequireWrite
 from tessera.api.errors import (
     BadRequestError,
     ConflictError,
@@ -62,12 +62,12 @@ async def create_team(
     request: Request,
     team: TeamCreate,
     auth: Auth,
-    _: None = RequireAdmin,
+    _: None = RequireWrite,
     session: AsyncSession = Depends(get_session),
 ) -> TeamDB:
     """Create a new team.
 
-    Requires admin scope or bootstrap API key.
+    Requires write scope.
     """
     db_team = TeamDB(name=team.name, metadata_=team.metadata)
     session.add(db_team)
