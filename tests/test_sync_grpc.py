@@ -9,8 +9,6 @@ from tessera.services.grpc import (
     rpc_methods_to_assets,
 )
 
-pytestmark = pytest.mark.asyncio
-
 # ---------------------------------------------------------------------------
 # Sample .proto files used across tests
 # ---------------------------------------------------------------------------
@@ -519,6 +517,7 @@ class TestRpcMethodsToAssets:
 # ===========================================================================
 
 
+@pytest.mark.asyncio
 class TestGRPCSync:
     """Tests for /api/v1/sync/grpc endpoint."""
 
@@ -680,6 +679,7 @@ message Timestamp {
         assert data["assets_created"] == 4
 
 
+@pytest.mark.asyncio
 class TestGRPCImpact:
     """Tests for /api/v1/sync/grpc/impact endpoint."""
 
@@ -720,6 +720,7 @@ class TestGRPCImpact:
         assert data["methods_with_contracts"] >= 1
 
 
+@pytest.mark.asyncio
 class TestGRPCDiff:
     """Tests for /api/v1/sync/grpc/diff endpoint."""
 

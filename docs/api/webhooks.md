@@ -4,7 +4,7 @@ Tessera sends webhooks for key events like proposal creation and contract publis
 
 ## Configuration
 
-Webhooks are configured via environment variables only — there are no API endpoints for managing webhook URLs. The delivery tracking endpoints below are read-only.
+Webhooks are configured via environment variables only -- there are no API endpoints for managing webhook URLs. The delivery tracking endpoints below are read-only.
 
 ```bash
 WEBHOOK_URL=https://your-service.com/webhooks/tessera
@@ -65,11 +65,15 @@ def verify_signature(payload: bytes, signature: str, secret: str) -> bool:
 
 ## Delivery Tracking
 
+All delivery tracking endpoints require **admin and read scope**.
+
 ### List Deliveries
 
 ```http
 GET /api/v1/webhooks/deliveries
 ```
+
+Requires admin and read scope.
 
 ### Query Parameters
 
@@ -78,6 +82,7 @@ GET /api/v1/webhooks/deliveries
 | `status` | string | Filter by status: `pending`, `delivered`, `failed` |
 | `event_type` | string | Filter by event type |
 | `limit` | int | Number of results (default: 50) |
+| `offset` | int | Pagination offset (default: 0) |
 
 ### Response
 
@@ -87,14 +92,20 @@ GET /api/v1/webhooks/deliveries
     {
       "id": "delivery-uuid",
       "event_type": "proposal.created",
-      "status": "delivered",
+      "payload": { ... },
       "url": "https://your-service.com/webhooks",
+      "status": "delivered",
       "attempts": 1,
+      "last_attempt_at": "2025-01-15T10:00:01Z",
+      "last_error": null,
+      "last_status_code": 200,
       "created_at": "2025-01-15T10:00:00Z",
       "delivered_at": "2025-01-15T10:00:01Z"
     }
   ],
-  "total": 100
+  "total": 100,
+  "limit": 50,
+  "offset": 0
 }
 ```
 
@@ -104,19 +115,21 @@ GET /api/v1/webhooks/deliveries
 GET /api/v1/webhooks/deliveries/{delivery_id}
 ```
 
+Requires admin and read scope.
+
 ### Response
 
 ```json
 {
   "id": "delivery-uuid",
   "event_type": "proposal.created",
-  "status": "delivered",
-  "url": "https://your-service.com/webhooks",
   "payload": { ... },
+  "url": "https://your-service.com/webhooks",
+  "status": "delivered",
   "attempts": 1,
   "last_attempt_at": "2025-01-15T10:00:01Z",
-  "last_status_code": 200,
   "last_error": null,
+  "last_status_code": 200,
   "created_at": "2025-01-15T10:00:00Z",
   "delivered_at": "2025-01-15T10:00:01Z"
 }

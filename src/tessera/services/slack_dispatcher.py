@@ -20,6 +20,7 @@ from tessera.services.slack_delivery import deliver_slack_message
 from tessera.services.slack_formatter import (
     format_contract_published,
     format_force_publish,
+    format_proposal_acknowledged,
     format_proposal_created,
     format_proposal_resolved,
     format_repo_sync_failed,
@@ -171,8 +172,20 @@ def _format_repo_sync_failed(payload: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def _format_proposal_acknowledged(payload: dict[str, Any]) -> dict[str, Any]:
+    """Adapter from event payload to proposal_acknowledged formatter."""
+    return format_proposal_acknowledged(
+        asset_fqn=payload["asset_fqn"],
+        consumer_team=payload["consumer_team"],
+        response=payload["response"],
+        notes=payload.get("notes"),
+        proposal_id=payload.get("proposal_id"),
+    )
+
+
 _FORMATTERS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "proposal.created": _format_proposal_created,
+    "proposal.acknowledged": _format_proposal_acknowledged,
     "proposal.resolved": _format_proposal_resolved,
     "force.publish": _format_force_publish,
     "contract.published": _format_contract_published,

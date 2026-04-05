@@ -38,7 +38,6 @@ from tessera.services.avro import AvroConversionError, avro_to_json_schema, vali
 from tessera.services.cache import cache_contract, invalidate_asset
 from tessera.services.schema_diff import check_compatibility, diff_schemas
 from tessera.services.schema_validator import validate_json_schema
-from tessera.services.slack import notify_proposal_created
 from tessera.services.slack_dispatcher import dispatch_slack_notifications
 from tessera.services.versioning import (
     INITIAL_VERSION,
@@ -1097,14 +1096,6 @@ class ContractPublishingWorkflow:
                 }
                 for c in impacted_consumers
             ],
-        )
-
-        await notify_proposal_created(
-            asset_fqn=self.asset.fqn,
-            version=self.version,
-            producer_team=self.publisher_team.name,
-            affected_consumers=[c.team_name for c in impacted_consumers],
-            breaking_changes=breaking_changes_list,
         )
 
         # Dispatch per-team Slack notifications for proposal_created

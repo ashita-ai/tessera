@@ -9,9 +9,6 @@ import pytest
 
 from tessera.api.sync.helpers import deep_merge_metadata
 
-pytestmark = pytest.mark.asyncio
-
-
 # ---------------------------------------------------------------------------
 # Unit tests for deep_merge_metadata
 # ---------------------------------------------------------------------------
@@ -102,6 +99,7 @@ class TestDeepMergeMetadata:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 class TestOpenAPISyncDeepMerge:
     """Re-importing an OpenAPI spec should deep-merge metadata on existing assets."""
 
@@ -193,6 +191,7 @@ class TestOpenAPISyncDeepMerge:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 class TestDbtSyncDeepMerge:
     """Re-uploading a dbt manifest should deep-merge metadata on existing assets."""
 

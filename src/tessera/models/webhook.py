@@ -2,9 +2,12 @@
 
 from datetime import UTC, datetime
 from enum import StrEnum
+from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+from tessera.models.enums import WebhookDeliveryStatus
 
 
 class WebhookEventType(StrEnum):
@@ -98,3 +101,21 @@ class WebhookEvent(BaseModel):
         | ProposalStatusPayload
         | ContractPublishedPayload
     )
+
+
+class WebhookDelivery(BaseModel):
+    """Response model for a webhook delivery record."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    event_type: str
+    payload: dict[str, Any]
+    url: str
+    status: WebhookDeliveryStatus
+    attempts: int
+    last_attempt_at: datetime | None = None
+    last_error: str | None = None
+    last_status_code: int | None = None
+    created_at: datetime
+    delivered_at: datetime | None = None
