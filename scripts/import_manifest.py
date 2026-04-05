@@ -421,7 +421,7 @@ def create_breaking_change_proposals(
                 result = resp.json()
                 action = result.get("action")
                 print(f"      Result: {action}")
-                if action == "proposal_created":
+                if action == "proposal.created":
                     proposals_created += 1
                     print(f"      Proposal created! Total: {proposals_created}")
                 else:

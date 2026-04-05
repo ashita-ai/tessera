@@ -161,7 +161,7 @@ class TestProposalAuditEvents:
                 },
             },
         )
-        assert resp.json()["action"] == "proposal_created"
+        assert resp.json()["action"] == "proposal.created"
         proposal_id = UUID(resp.json()["proposal"]["id"])
 
         # Withdraw the proposal
@@ -241,7 +241,7 @@ class TestProposalAuditEvents:
                 },
             },
         )
-        assert resp.json()["action"] == "proposal_created"
+        assert resp.json()["action"] == "proposal.created"
         proposal_id = UUID(resp.json()["proposal"]["id"])
 
         # File objection

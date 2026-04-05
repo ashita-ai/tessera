@@ -120,7 +120,7 @@ class TestContractPublishing:
         )
         assert resp.status_code == 201
         data = resp.json()
-        assert data["action"] == "proposal_created"
+        assert data["action"] == "proposal.created"
         assert data["change_type"] == "major"
         assert len(data["breaking_changes"]) > 0
         assert "proposal" in data
@@ -172,7 +172,7 @@ class TestContractPublishing:
         )
         assert resp.status_code == 201
         data = resp.json()
-        assert data["action"] == "force_published"
+        assert data["action"] == "force.published"
         assert "warning" in data
 
     async def test_force_publish_records_reason_in_audit(self, client: AsyncClient):
@@ -560,7 +560,7 @@ class TestCompatibilityModeUsesNewMode:
         data = resp2.json()
         # With the fix, the NEW mode (backward) is used → breaking change detected
         assert (
-            data["action"] == "proposal_created"
+            data["action"] == "proposal.created"
         ), "Tightening compatibility mode to backward should detect the removed field as breaking"
         assert len(data["breaking_changes"]) > 0
 
@@ -610,7 +610,7 @@ class TestCompatibilityModeUsesNewMode:
         # With NONE mode, no breaking change detection → auto-publish
         assert data["action"] in (
             "published",
-            "force_published",
+            "force.published",
         ), "Relaxing to NONE mode should allow publishing without proposals"
 
 
@@ -953,7 +953,7 @@ class TestBulkContractPublishing:
         assert resp.status_code == 200
         data = resp.json()
         assert data["proposals_created"] == 1
-        assert data["results"][0]["status"] == "proposal_created"
+        assert data["results"][0]["status"] == "proposal.created"
         assert data["results"][0]["proposal_id"] is not None
 
     async def test_bulk_invalid_schema_fails(self, client: AsyncClient):

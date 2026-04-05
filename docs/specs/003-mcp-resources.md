@@ -3,7 +3,7 @@
 **Strategy doc**: [Agent Opportunity](../strategy/agent-opportunity.md)
 **Depends on**: [MCP Tool Server (ADR-001 Spec 005)](../adrs/specs/005-mcp-tool-server.md)
 **Priority**: 3 (ship alongside or shortly after the MCP tool server)
-**Status**: Draft
+**Status**: Not Yet Implemented
 **Estimated effort**: 1 week (additive to the MCP server build)
 
 ## Overview

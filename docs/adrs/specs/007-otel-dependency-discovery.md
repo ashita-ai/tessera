@@ -2,7 +2,7 @@
 
 **Related ADR:** ADR-014 (Service Contract Pivot), Phase 2
 **Depends on:** Spec-006 (Repo and Service Registry)
-**Status:** Draft
+**Status:** Not Yet Implemented
 **Date:** 2026-04-02
 
 ## Overview

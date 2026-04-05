@@ -2,7 +2,7 @@
 
 import time
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 from uuid import uuid4
 
 import pytest
@@ -122,57 +122,210 @@ class TestCircuitBreakerUnit:
         assert cb.is_open() is True  # Re-opened, back in cooldown
 
 
+@pytest.mark.asyncio
 class TestDeadLetterQueue:
     """Unit tests for the dead letter queue in the circuit breaker."""
 
-    def test_enqueue_and_drain(self):
-        """Events can be enqueued and drained."""
+    @patch("tessera.services.webhooks.get_redis_client", new_callable=AsyncMock, return_value=None)
+    async def test_enqueue_and_drain(self, _mock_redis):
+        """Events can be enqueued and drained (in-memory fallback)."""
         cb = _CircuitBreaker(threshold=3, cooldown=60)
         event1 = _make_event()
         event2 = _make_event()
 
-        cb.enqueue_dead_letter(event1)
-        cb.enqueue_dead_letter(event2)
+        await cb.enqueue_dead_letter(event1)
+        await cb.enqueue_dead_letter(event2)
 
         assert cb.dead_letter_count == 2
 
-        drained = cb.drain_dead_letters()
+        drained = await cb.drain_dead_letters()
         assert len(drained) == 2
         assert drained[0] is event1
         assert drained[1] is event2
         assert cb.dead_letter_count == 0
 
-    def test_drain_empty_queue(self):
+    @patch("tessera.services.webhooks.get_redis_client", new_callable=AsyncMock, return_value=None)
+    async def test_drain_empty_queue(self, _mock_redis):
         """Draining an empty queue returns empty list."""
         cb = _CircuitBreaker(threshold=3, cooldown=60)
-        assert cb.drain_dead_letters() == []
+        assert await cb.drain_dead_letters() == []
 
-    def test_bounded_queue_drops_oldest(self):
+    @patch("tessera.services.webhooks.get_redis_client", new_callable=AsyncMock, return_value=None)
+    async def test_bounded_queue_drops_oldest(self, _mock_redis):
         """Queue drops oldest events when full."""
         cb = _CircuitBreaker(threshold=3, cooldown=60, dead_letter_max=3)
         events = [_make_event() for _ in range(5)]
 
         for e in events:
-            cb.enqueue_dead_letter(e)
+            await cb.enqueue_dead_letter(e)
 
         assert cb.dead_letter_count == 3
-        drained = cb.drain_dead_letters()
+        drained = await cb.drain_dead_letters()
         # Should have the last 3 events (oldest 2 dropped)
         assert len(drained) == 3
         assert drained[0] is events[2]
         assert drained[1] is events[3]
         assert drained[2] is events[4]
 
-    def test_success_does_not_clear_dead_letters(self):
+    @patch("tessera.services.webhooks.get_redis_client", new_callable=AsyncMock, return_value=None)
+    async def test_success_does_not_clear_dead_letters(self, _mock_redis):
         """record_success resets failure state but does NOT drain dead letters.
 
         The drain happens in _deliver_webhook after record_success, not inside
         the circuit breaker itself.
         """
         cb = _CircuitBreaker(threshold=3, cooldown=60)
-        cb.enqueue_dead_letter(_make_event())
+        await cb.enqueue_dead_letter(_make_event())
         cb.record_success()
         assert cb.dead_letter_count == 1  # Still there, caller must drain
+
+
+@pytest.mark.asyncio
+class TestDeadLetterQueueRedis:
+    """Tests for the Redis-backed dead letter queue path."""
+
+    async def test_enqueue_stores_in_redis(self):
+        """When Redis is available, enqueue pushes to the Redis LIST."""
+        mock_pipe = MagicMock()
+        mock_pipe.execute = AsyncMock(return_value=[True, True, True])
+
+        mock_redis = AsyncMock()
+        mock_redis.pipeline = Mock(return_value=mock_pipe)
+
+        with patch(
+            "tessera.services.webhooks.get_redis_client",
+            new_callable=AsyncMock,
+            return_value=mock_redis,
+        ):
+            cb = _CircuitBreaker(threshold=3, cooldown=60, dead_letter_max=5)
+            event = _make_event()
+            result = await cb.enqueue_dead_letter(event)
+
+            assert result is True
+            # Should NOT fall back to in-memory
+            assert cb.dead_letter_count == 0
+            # Redis pipeline should have received lpush, ltrim, expire
+            mock_pipe.lpush.assert_called_once()
+            mock_pipe.ltrim.assert_called_once_with("tessera:dlq:webhooks", 0, 4)
+            mock_pipe.expire.assert_called_once_with("tessera:dlq:webhooks", 48 * 60 * 60)
+            mock_pipe.execute.assert_awaited_once()
+
+    async def test_drain_reads_from_redis_in_fifo_order(self):
+        """drain_dead_letters reads all events from Redis and restores FIFO order."""
+        event1 = _make_event()
+        event2 = _make_event()
+        # LPUSH reverses insertion order: Redis stores [event2_json, event1_json]
+        raw_events = [event2.model_dump_json().encode(), event1.model_dump_json().encode()]
+
+        mock_pipe = MagicMock()
+        mock_pipe.execute = AsyncMock(return_value=[raw_events, 1])
+
+        mock_redis = AsyncMock()
+        mock_redis.pipeline = Mock(return_value=mock_pipe)
+
+        with patch(
+            "tessera.services.webhooks.get_redis_client",
+            new_callable=AsyncMock,
+            return_value=mock_redis,
+        ):
+            cb = _CircuitBreaker(threshold=3, cooldown=60)
+            drained = await cb.drain_dead_letters()
+
+            assert len(drained) == 2
+            # reversed() should restore FIFO: event1 first, event2 second
+            assert drained[0].payload.contract_id == event1.payload.contract_id
+            assert drained[1].payload.contract_id == event2.payload.contract_id
+            mock_pipe.lrange.assert_called_once_with("tessera:dlq:webhooks", 0, -1)
+            mock_pipe.delete.assert_called_once_with("tessera:dlq:webhooks")
+
+    async def test_enqueue_falls_back_on_redis_error(self):
+        """When Redis raises an exception, enqueue falls back to in-memory."""
+        mock_pipe = MagicMock()
+        mock_pipe.execute = AsyncMock(side_effect=ConnectionError("Redis down"))
+
+        mock_redis = AsyncMock()
+        mock_redis.pipeline = Mock(return_value=mock_pipe)
+
+        with patch(
+            "tessera.services.webhooks.get_redis_client",
+            new_callable=AsyncMock,
+            return_value=mock_redis,
+        ):
+            cb = _CircuitBreaker(threshold=3, cooldown=60)
+            event = _make_event()
+            result = await cb.enqueue_dead_letter(event)
+
+            assert result is True
+            assert cb.dead_letter_count == 1  # Fell back to in-memory
+
+    async def test_drain_falls_back_on_redis_error(self):
+        """When Redis drain fails, in-memory events are still returned."""
+        mock_pipe = MagicMock()
+        mock_pipe.execute = AsyncMock(side_effect=ConnectionError("Redis down"))
+
+        mock_redis = AsyncMock()
+        mock_redis.pipeline = Mock(return_value=mock_pipe)
+
+        with patch(
+            "tessera.services.webhooks.get_redis_client",
+            new_callable=AsyncMock,
+            return_value=mock_redis,
+        ):
+            cb = _CircuitBreaker(threshold=3, cooldown=60)
+            cb._dead_letters = [_make_event()]
+            drained = await cb.drain_dead_letters()
+
+            assert len(drained) == 1
+            assert cb.dead_letter_count == 0
+
+    async def test_drain_skips_malformed_redis_events(self):
+        """Malformed JSON in Redis is skipped without crashing."""
+        valid_event = _make_event()
+        raw_events = [b"not-valid-json", valid_event.model_dump_json().encode()]
+
+        mock_pipe = MagicMock()
+        mock_pipe.execute = AsyncMock(return_value=[raw_events, 1])
+
+        mock_redis = AsyncMock()
+        mock_redis.pipeline = Mock(return_value=mock_pipe)
+
+        with patch(
+            "tessera.services.webhooks.get_redis_client",
+            new_callable=AsyncMock,
+            return_value=mock_redis,
+        ):
+            cb = _CircuitBreaker(threshold=3, cooldown=60)
+            drained = await cb.drain_dead_letters()
+
+            # Only the valid event should be returned (malformed skipped)
+            assert len(drained) == 1
+            assert drained[0].payload.contract_id == valid_event.payload.contract_id
+
+    async def test_drain_merges_redis_and_in_memory(self):
+        """drain_dead_letters returns both Redis and in-memory events."""
+        redis_event = _make_event()
+        memory_event = _make_event()
+
+        mock_pipe = MagicMock()
+        mock_pipe.execute = AsyncMock(return_value=[[redis_event.model_dump_json().encode()], 1])
+
+        mock_redis = AsyncMock()
+        mock_redis.pipeline = Mock(return_value=mock_pipe)
+
+        with patch(
+            "tessera.services.webhooks.get_redis_client",
+            new_callable=AsyncMock,
+            return_value=mock_redis,
+        ):
+            cb = _CircuitBreaker(threshold=3, cooldown=60)
+            cb._dead_letters = [memory_event]
+            drained = await cb.drain_dead_letters()
+
+            assert len(drained) == 2
+            # Redis events come first, then in-memory
+            assert drained[0].payload.contract_id == redis_event.payload.contract_id
+            assert drained[1].payload.contract_id == memory_event.payload.contract_id
+            assert cb.dead_letter_count == 0
 
 
 @pytest.mark.asyncio

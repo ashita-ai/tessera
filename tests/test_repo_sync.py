@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import json
 import textwrap
+from datetime import datetime
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
@@ -27,6 +28,7 @@ from tessera.services.repo_sync import (
     _classify_spec_file,
     _infer_service_name,
     _inject_token,
+    _log_sync_failed,
     _parse_spec,
     _ssh_key_env,
     assign_spec_to_service,
@@ -1230,3 +1232,104 @@ class TestSyncEventPersistence:
         )
 
         assert len(events) == 3
+
+
+class TestLogSyncFailedSlackNotification:
+    """Tests for Slack dispatch in _log_sync_failed."""
+
+    @patch("tessera.services.repo_sync.audit")
+    @patch(
+        "tessera.services.slack_dispatcher.dispatch_slack_notifications",
+        new_callable=AsyncMock,
+    )
+    async def test_dispatches_slack_when_repo_name_provided(
+        self, mock_dispatch: AsyncMock, mock_audit: MagicMock, test_session: AsyncSession
+    ) -> None:
+        """Slack notification fires when repo_name is provided."""
+        mock_audit.log_event = AsyncMock()
+        repo_id = uuid4()
+        team_id = uuid4()
+        last_synced = datetime(2026, 4, 1, 12, 0, 0)
+
+        await _log_sync_failed(
+            test_session,
+            repo_id,
+            team_id,
+            ["Clone timed out"],
+            repo_name="my-repo",
+            last_synced_at=last_synced,
+        )
+
+        mock_dispatch.assert_awaited_once()
+        call_kwargs = mock_dispatch.call_args.kwargs
+        assert call_kwargs["event_type"] == "repo.sync_failed"
+        assert call_kwargs["team_ids"] == [team_id]
+        assert call_kwargs["payload"]["repo_name"] == "my-repo"
+        assert call_kwargs["payload"]["error_message"] == "Clone timed out"
+        assert call_kwargs["payload"]["last_synced_at"] == last_synced.isoformat()
+        assert call_kwargs["payload"]["repo_id"] == str(repo_id)
+
+    @patch("tessera.services.repo_sync.audit")
+    @patch(
+        "tessera.services.slack_dispatcher.dispatch_slack_notifications",
+        new_callable=AsyncMock,
+    )
+    async def test_skips_slack_when_repo_name_is_none(
+        self, mock_dispatch: AsyncMock, mock_audit: MagicMock, test_session: AsyncSession
+    ) -> None:
+        """Slack notification is skipped when repo_name is None (backward compat)."""
+        mock_audit.log_event = AsyncMock()
+
+        await _log_sync_failed(
+            test_session,
+            uuid4(),
+            uuid4(),
+            ["Some error"],
+        )
+
+        mock_dispatch.assert_not_awaited()
+
+    @patch("tessera.services.repo_sync.audit")
+    @patch(
+        "tessera.services.slack_dispatcher.dispatch_slack_notifications",
+        new_callable=AsyncMock,
+    )
+    async def test_handles_multiple_errors(
+        self, mock_dispatch: AsyncMock, mock_audit: MagicMock, test_session: AsyncSession
+    ) -> None:
+        """Multiple errors are joined with semicolons in the payload."""
+        mock_audit.log_event = AsyncMock()
+
+        await _log_sync_failed(
+            test_session,
+            uuid4(),
+            uuid4(),
+            ["Error one", "Error two"],
+            repo_name="multi-error-repo",
+        )
+
+        payload = mock_dispatch.call_args.kwargs["payload"]
+        assert payload["error_message"] == "Error one; Error two"
+
+    @patch("tessera.services.repo_sync.audit")
+    @patch(
+        "tessera.services.slack_dispatcher.dispatch_slack_notifications",
+        new_callable=AsyncMock,
+    )
+    async def test_handles_none_last_synced_at(
+        self, mock_dispatch: AsyncMock, mock_audit: MagicMock, test_session: AsyncSession
+    ) -> None:
+        """last_synced_at=None produces null in the payload."""
+        mock_audit.log_event = AsyncMock()
+
+        await _log_sync_failed(
+            test_session,
+            uuid4(),
+            uuid4(),
+            ["Error"],
+            repo_name="new-repo",
+            last_synced_at=None,
+        )
+
+        payload = mock_dispatch.call_args.kwargs["payload"]
+        assert payload["last_synced_at"] is None

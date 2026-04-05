@@ -900,7 +900,7 @@ async def acknowledge_proposal(
         ]
         await dispatch_slack_notifications(
             session=session,
-            event_type="proposal_resolved",
+            event_type="proposal.resolved",
             team_ids=[UUID(tid) if isinstance(tid, str) else tid for tid in affected_team_ids],
             payload={
                 "asset_fqn": asset.fqn,
@@ -966,7 +966,7 @@ async def acknowledge_proposal(
         ]
         await dispatch_slack_notifications(
             session=session,
-            event_type="proposal_resolved",
+            event_type="proposal.resolved",
             team_ids=[UUID(tid) if isinstance(tid, str) else tid for tid in affected_team_ids],
             payload={
                 "asset_fqn": asset.fqn,

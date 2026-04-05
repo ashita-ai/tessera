@@ -78,7 +78,7 @@ class TestProposalWorkflowIntegration:
             },
         )
         assert breaking_resp.status_code == 201
-        assert breaking_resp.json()["action"] == "proposal_created"
+        assert breaking_resp.json()["action"] == "proposal.created"
         proposal_id = breaking_resp.json()["proposal"]["id"]
 
         # Verify proposal is pending with 2 consumers
@@ -179,7 +179,7 @@ class TestProposalWorkflowIntegration:
             },
         )
         assert breaking_resp.status_code == 201
-        assert breaking_resp.json()["action"] == "proposal_created"
+        assert breaking_resp.json()["action"] == "proposal.created"
         proposal_id = breaking_resp.json()["proposal"]["id"]
 
         # Proposal stays pending even with no consumers
@@ -461,7 +461,7 @@ class TestContractVersionPropagation:
             },
         )
         assert break_resp.status_code == 201
-        assert break_resp.json()["action"] == "proposal_created"
+        assert break_resp.json()["action"] == "proposal.created"
         assert "proposal" in break_resp.json()
 
 

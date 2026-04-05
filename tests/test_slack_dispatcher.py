@@ -29,7 +29,7 @@ async def _create_team_and_config(
         team_id=team.id,
         channel_id=channel_id,
         webhook_url="https://hooks.slack.com/services/T/B/x",
-        notify_on=notify_on or ["proposal_created", "proposal_resolved", "force_publish"],
+        notify_on=notify_on or ["proposal.created", "proposal.resolved", "force.publish"],
         enabled=enabled,
     )
     session.add(config)
@@ -59,7 +59,7 @@ class TestDispatchSlackNotifications:
 
             await dispatch_slack_notifications(
                 session=test_session,
-                event_type="proposal_created",
+                event_type="proposal.created",
                 team_ids=[team.id],
                 payload={
                     "asset_fqn": "analytics.users",
@@ -88,7 +88,7 @@ class TestDispatchSlackNotifications:
 
             await dispatch_slack_notifications(
                 session=test_session,
-                event_type="proposal_created",
+                event_type="proposal.created",
                 team_ids=[team.id],
                 payload={},
             )
@@ -111,7 +111,7 @@ class TestDispatchSlackNotifications:
 
             await dispatch_slack_notifications(
                 session=test_session,
-                event_type="proposal_created",
+                event_type="proposal.created",
                 team_ids=[team.id],
                 payload={
                     "asset_fqn": "test",
@@ -129,7 +129,7 @@ class TestDispatchSlackNotifications:
         """Only dispatches for event types in the config's notify_on."""
         team, _config = await _create_team_and_config(
             test_session,
-            notify_on=["force_publish"],  # Only subscribed to force_publish
+            notify_on=["force.publish"],  # Only subscribed to force_publish
         )
 
         with (
@@ -145,7 +145,7 @@ class TestDispatchSlackNotifications:
             # Send proposal_created event — should be skipped
             await dispatch_slack_notifications(
                 session=test_session,
-                event_type="proposal_created",
+                event_type="proposal.created",
                 team_ids=[team.id],
                 payload={
                     "asset_fqn": "test",
@@ -172,7 +172,7 @@ class TestDispatchSlackNotifications:
 
             await dispatch_slack_notifications(
                 session=test_session,
-                event_type="proposal_created",
+                event_type="proposal.created",
                 team_ids=[],
                 payload={},
             )
@@ -194,7 +194,7 @@ class TestDispatchSlackNotifications:
             # Use a UUID that has no config
             await dispatch_slack_notifications(
                 session=test_session,
-                event_type="proposal_created",
+                event_type="proposal.created",
                 team_ids=[uuid4()],
                 payload={},
             )
@@ -219,7 +219,7 @@ class TestDispatchSlackNotifications:
             # Should not raise
             await dispatch_slack_notifications(
                 session=test_session,
-                event_type="proposal_created",
+                event_type="proposal.created",
                 team_ids=[team.id],
                 payload={
                     "asset_fqn": "test",

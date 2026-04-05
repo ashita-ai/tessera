@@ -989,7 +989,12 @@ async def _poll_once(session_maker: Any) -> None:
                 await _log_sync_event(
                     session, target.repo_id, target.owner_team_id, sync_result
                 ) if sync_result.success else await _log_sync_failed(
-                    session, target.repo_id, target.owner_team_id, sync_result.errors
+                    session,
+                    target.repo_id,
+                    target.owner_team_id,
+                    sync_result.errors,
+                    repo_name=target.name,
+                    last_synced_at=target.last_synced_at,
                 )
                 await session.commit()
 
@@ -1010,7 +1015,12 @@ async def _poll_once(session_maker: Any) -> None:
                         triggered_by="worker",
                     )
                     await _log_sync_failed(
-                        session, target.repo_id, target.owner_team_id, ["Sync timed out"]
+                        session,
+                        target.repo_id,
+                        target.owner_team_id,
+                        ["Sync timed out"],
+                        repo_name=target.name,
+                        last_synced_at=target.last_synced_at,
                     )
                     await session.commit()
                 except Exception:
@@ -1036,6 +1046,8 @@ async def _poll_once(session_maker: Any) -> None:
                         target.repo_id,
                         target.owner_team_id,
                         ["Unexpected error — see server logs"],
+                        repo_name=target.name,
+                        last_synced_at=target.last_synced_at,
                     )
                     await session.commit()
                 except Exception:
@@ -1076,8 +1088,12 @@ async def _log_sync_failed(
     repo_id: UUID,
     owner_team_id: UUID,
     errors: list[str],
+    repo_name: str | None = None,
+    last_synced_at: datetime | None = None,
 ) -> None:
-    """Log a failed sync audit event."""
+    """Log a failed sync audit event and dispatch Slack notification."""
+    from tessera.services.slack_dispatcher import dispatch_slack_notifications
+
     await audit.log_event(
         session=session,
         entity_type="repo",
@@ -1087,6 +1103,19 @@ async def _log_sync_failed(
         actor_type="agent",
         payload={"errors": errors},
     )
+
+    if repo_name:
+        await dispatch_slack_notifications(
+            session=session,
+            event_type="repo.sync_failed",
+            team_ids=[owner_team_id],
+            payload={
+                "repo_name": repo_name,
+                "error_message": "; ".join(errors) if errors else "Unknown error",
+                "last_synced_at": last_synced_at.isoformat() if last_synced_at else None,
+                "repo_id": str(repo_id),
+            },
+        )
 
 
 async def start_background_worker() -> asyncio.Task[None]:

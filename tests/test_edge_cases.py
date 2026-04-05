@@ -305,7 +305,7 @@ class TestCompatibilityModes:
         assert resp.status_code == 201
         data = resp.json()
         # Full mode treats any change as breaking
-        assert data["action"] in ["published", "proposal_created"]
+        assert data["action"] in ["published", "proposal.created"]
 
 
 class TestPaginationEdgeCases:

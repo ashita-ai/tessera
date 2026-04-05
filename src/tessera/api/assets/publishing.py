@@ -246,7 +246,7 @@ async def create_contract(
             return JSONResponse(
                 status_code=200,
                 content={
-                    "action": "version_required",
+                    "action": "version.required",
                     "message": msg,
                     "version_suggestion": version_suggestion.model_dump(),
                 },
