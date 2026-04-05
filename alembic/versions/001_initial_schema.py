@@ -322,8 +322,8 @@ def upgrade() -> None:
         "proposals",
         ["asset_id"],
         unique=True,
-        postgresql_where=sa.text("status = 'PENDING'"),
-        sqlite_where=sa.text("status = 'PENDING'"),
+        postgresql_where=sa.text("status = 'pending'"),
+        sqlite_where=sa.text("status = 'pending'"),
     )
 
     # ── 9. acknowledgments ────────────────────────────────────────────────

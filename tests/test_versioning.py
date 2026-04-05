@@ -58,7 +58,7 @@ class TestParseSemverLenient:
         assert caplog.records == []
 
     def test_malformed_version_logs_warning(self, caplog: pytest.LogCaptureFixture) -> None:
-        with caplog.at_level(logging.WARNING, logger="tessera.services.versioning"):
+        with caplog.at_level(logging.WARNING):
             result = parse_semver_lenient("not-a-version")
         assert result == (1, 0, 0)
         assert len(caplog.records) == 1
@@ -66,7 +66,7 @@ class TestParseSemverLenient:
         assert "not-a-version" in caplog.records[0].message
 
     def test_empty_string_logs_warning(self, caplog: pytest.LogCaptureFixture) -> None:
-        with caplog.at_level(logging.WARNING, logger="tessera.services.versioning"):
+        with caplog.at_level(logging.WARNING):
             result = parse_semver_lenient("")
         assert result == (1, 0, 0)
         assert len(caplog.records) == 1
