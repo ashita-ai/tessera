@@ -3,6 +3,7 @@
 from tessera.services.affected_parties import get_affected_parties
 from tessera.services.audit import (
     AuditAction,
+    compute_schema_hash,
     log_contract_deprecated,
     log_contract_published,
     log_event,
@@ -103,6 +104,7 @@ __all__ = [
     "validate_schema_or_raise",
     # Audit logging
     "AuditAction",
+    "compute_schema_hash",
     "log_event",
     "log_contract_deprecated",
     "log_contract_published",
