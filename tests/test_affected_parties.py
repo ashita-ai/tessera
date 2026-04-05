@@ -63,7 +63,7 @@ class TestAffectedParties:
         )
         assert result.status_code == 201
         data = result.json()
-        assert data.get("action") == "proposal_created", f"Expected proposal, got: {data}"
+        assert data.get("action") == "proposal.created", f"Expected proposal, got: {data}"
         proposal_id = data["proposal"]["id"]
 
         # Fetch the proposal and verify affected parties
@@ -123,7 +123,7 @@ class TestAffectedParties:
         )
         assert result.status_code == 201
         data = result.json()
-        assert data.get("action") == "proposal_created"
+        assert data.get("action") == "proposal.created"
         proposal_id = data["proposal"]["id"]
 
         proposal = (await client.get(f"/api/v1/proposals/{proposal_id}")).json()
@@ -407,7 +407,7 @@ class TestGetAffectedPartiesService:
         assert result.status_code == 201
 
         data = result.json()
-        assert data.get("action") == "proposal_created"
+        assert data.get("action") == "proposal.created"
         proposal_id = data["proposal"]["id"]
 
         proposal = (await client.get(f"/api/v1/proposals/{proposal_id}")).json()
@@ -471,7 +471,7 @@ class TestDuplicateProposalPrevention:
         )
         assert result1.status_code == 201
         data1 = result1.json()
-        assert data1.get("action") == "proposal_created"
+        assert data1.get("action") == "proposal.created"
 
         # Second breaking change while first proposal is pending should fail
         schema_v3 = {
@@ -558,4 +558,4 @@ class TestDuplicateProposalPrevention:
             json={"schema": schema_v3, "compatibility_mode": "backward"},
         )
         assert result2.status_code == 201
-        assert result2.json().get("action") == "proposal_created"
+        assert result2.json().get("action") == "proposal.created"

@@ -27,7 +27,7 @@ def _slack_config_body(
         "team_id": team_id,
         "channel_id": channel_id,
         "webhook_url": webhook_url,
-        "notify_on": ["proposal_created", "force_publish"],
+        "notify_on": ["proposal.created", "force.publish"],
     }
     body.update(overrides)
     return body
@@ -55,7 +55,7 @@ class TestCreateSlackConfig:
         assert data["has_webhook_url"] is True
         assert data["has_bot_token"] is False
         assert data["enabled"] is True
-        assert "proposal_created" in data["notify_on"]
+        assert "proposal.created" in data["notify_on"]
         # Secrets should not be in response
         assert "webhook_url" not in data
         assert "bot_token" not in data
@@ -84,7 +84,7 @@ class TestCreateSlackConfig:
         body = {
             "team_id": team["id"],
             "channel_id": "CABC123",
-            "notify_on": ["proposal_created"],
+            "notify_on": ["proposal.created"],
         }
         resp = await client.post("/api/v1/slack/configs", json=body)
         assert resp.status_code == 422
@@ -110,7 +110,7 @@ class TestCreateSlackConfig:
         """Rejects invalid event types in notify_on."""
         team = await _create_team(client)
         body = _slack_config_body(team["id"])
-        body["notify_on"] = ["proposal_created", "nonexistent_event"]
+        body["notify_on"] = ["proposal.created", "nonexistent_event"]
         resp = await client.post("/api/v1/slack/configs", json=body)
         assert resp.status_code == 422
 
@@ -255,10 +255,10 @@ class TestUpdateSlackConfig:
         config_id = create_resp.json()["id"]
         resp = await client.patch(
             f"/api/v1/slack/configs/{config_id}",
-            json={"notify_on": ["contract_published", "repo_sync_failed"]},
+            json={"notify_on": ["contract.published", "repo.sync_failed"]},
         )
         assert resp.status_code == 200
-        assert resp.json()["notify_on"] == ["contract_published", "repo_sync_failed"]
+        assert resp.json()["notify_on"] == ["contract.published", "repo.sync_failed"]
 
     async def test_update_enabled(self, client):
         """Toggles enabled flag."""

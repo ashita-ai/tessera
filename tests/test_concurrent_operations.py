@@ -99,7 +99,7 @@ class TestProposalAcknowledgment:
             },
         )
         assert proposal_resp.status_code == 201
-        assert proposal_resp.json()["action"] == "proposal_created"
+        assert proposal_resp.json()["action"] == "proposal.created"
         proposal_id = proposal_resp.json()["proposal"]["id"]
 
         return {
@@ -606,7 +606,7 @@ class TestProposalCreation:
             },
         )
         assert resp1.status_code == 201
-        assert resp1.json()["action"] == "proposal_created"
+        assert resp1.json()["action"] == "proposal.created"
 
         # Second breaking change should fail
         resp2 = await client.post(
@@ -791,7 +791,7 @@ class TestPublishFromProposal:
             },
         )
         assert proposal_resp.status_code == 201
-        assert proposal_resp.json()["action"] == "proposal_created"
+        assert proposal_resp.json()["action"] == "proposal.created"
         proposal_id = proposal_resp.json()["proposal"]["id"]
 
         # Acknowledge to approve
@@ -957,7 +957,7 @@ class TestObjectionConcurrency:
             },
         )
         assert proposal_resp.status_code == 201
-        assert proposal_resp.json()["action"] == "proposal_created"
+        assert proposal_resp.json()["action"] == "proposal.created"
         proposal_id = proposal_resp.json()["proposal"]["id"]
 
         return {
@@ -1088,7 +1088,7 @@ class TestBulkAckEdgeCases:
             },
         )
         assert proposal_resp.status_code == 201
-        assert proposal_resp.json()["action"] == "proposal_created"
+        assert proposal_resp.json()["action"] == "proposal.created"
         proposal_id = proposal_resp.json()["proposal"]["id"]
 
         return {
@@ -1245,7 +1245,7 @@ class TestExpirationConcurrency:
             },
         )
         assert breaking_resp.status_code == 201
-        assert breaking_resp.json()["action"] == "proposal_created"
+        assert breaking_resp.json()["action"] == "proposal.created"
         proposal_id = breaking_resp.json()["proposal"]["id"]
 
         return {

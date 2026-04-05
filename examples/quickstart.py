@@ -218,7 +218,7 @@ def example_3_http(asset: dict, producer: dict, client):
 
     print(f"\nAction: {result['action']}")
 
-    if result["action"] == "proposal_created":
+    if result["action"] == "proposal.created":
         print(f"Change type: {result['change_type']}")
         print("\nBreaking changes:")
         for bc in result["breaking_changes"]:
@@ -426,7 +426,7 @@ def example_3_sdk(asset, producer, client):
 
     print(f"\nAction: {result.action}")
 
-    if result.action == "proposal_created":
+    if result.action == "proposal.created":
         print(f"Change type: {result.change_type}")
         print("\nBreaking changes:")
         for bc in result.breaking_changes:

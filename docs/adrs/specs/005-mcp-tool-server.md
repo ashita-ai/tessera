@@ -2,7 +2,7 @@
 
 **ADR**: 001-ai-enablement, 014-service-contract-pivot
 **Priority**: Phase 3 (depends on specs 001, 003, 004, 006, 007)
-**Status**: Draft (updated 2026-04-02 for service contract pivot)
+**Status**: Not Yet Implemented (updated 2026-04-02 for service contract pivot)
 
 ## Overview
 

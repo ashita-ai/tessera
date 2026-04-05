@@ -694,7 +694,7 @@ class SlackConfigDB(Base):
     notify_on: Mapped[list[str]] = mapped_column(
         JSON,
         nullable=False,
-        default=lambda: ["proposal_created", "proposal_resolved", "force_publish"],
+        default=lambda: ["proposal.created", "proposal.resolved", "force.publish"],
     )
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)

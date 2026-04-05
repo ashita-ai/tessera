@@ -172,9 +172,9 @@ def _format_repo_sync_failed(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 _FORMATTERS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
-    "proposal_created": _format_proposal_created,
-    "proposal_resolved": _format_proposal_resolved,
-    "force_publish": _format_force_publish,
-    "contract_published": _format_contract_published,
-    "repo_sync_failed": _format_repo_sync_failed,
+    "proposal.created": _format_proposal_created,
+    "proposal.resolved": _format_proposal_resolved,
+    "force.publish": _format_force_publish,
+    "contract.published": _format_contract_published,
+    "repo.sync_failed": _format_repo_sync_failed,
 }

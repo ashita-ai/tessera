@@ -179,7 +179,7 @@ class BulkContractResultStatus(str):
     # Execution statuses
     PUBLISHED = "published"
     SKIPPED = "skipped"
-    PROPOSAL_CREATED = "proposal_created"
+    PROPOSAL_CREATED = "proposal.created"
     FAILED = "failed"
 
 

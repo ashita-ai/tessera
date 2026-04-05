@@ -383,7 +383,7 @@ class TestAffectedPartiesUsesTableOnly:
         data = result.json()
 
         # Without a table row, this should NOT be found by affected_parties
-        if data.get("action") == "proposal_created":
+        if data.get("action") == "proposal.created":
             proposal = (await client.get(f"/api/v1/proposals/{data['proposal']['id']}")).json()
             assert len(proposal["affected_assets"]) == 0
         else:
@@ -433,7 +433,7 @@ class TestAffectedPartiesUsesTableOnly:
         )
         assert result.status_code == 201
         data = result.json()
-        assert data["action"] == "proposal_created"
+        assert data["action"] == "proposal.created"
 
         proposal = (await client.get(f"/api/v1/proposals/{data['proposal']['id']}")).json()
         assert len(proposal["affected_assets"]) == 1

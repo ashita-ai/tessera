@@ -160,9 +160,9 @@ class ContractPublishResponse(TypedDict, total=False):
 
     The response structure varies based on the action taken:
     - published: New contract was published
-    - force_published: Breaking change was force-published
-    - proposal_created: Breaking change requires consumer acknowledgment
-    - version_required: Version suggestion returned (semver_mode=suggest)
+    - force.published: Breaking change was force-published
+    - proposal.created: Breaking change requires consumer acknowledgment
+    - version.required: Version suggestion returned (semver_mode=suggest)
     """
 
     action: str

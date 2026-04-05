@@ -1414,7 +1414,7 @@ def create_proposals(team_ids: dict[str, str]) -> int:
                 if pub_resp.status_code == 201:
                     result = pub_resp.json()
                     action = result.get("action", "unknown")
-                    if action == "proposal_created":
+                    if action == "proposal.created":
                         proposal_id = result["proposal"]["id"]
                         print(f"      Proposal created: {proposal_id[:8]}...")
                         proposals_created += 1

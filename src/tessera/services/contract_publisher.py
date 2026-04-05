@@ -45,9 +45,8 @@ from tessera.services.versioning import (
     compute_version_suggestion,
     is_graduation,
     is_prerelease,
-    parse_semver_lenient,
 )
-from tessera.services.webhooks import send_proposal_created
+from tessera.services.webhooks import send_contract_published, send_proposal_created
 
 logger = logging.getLogger(__name__)
 
@@ -55,11 +54,19 @@ logger = logging.getLogger(__name__)
 def _extract_field_paths(schema: dict[str, Any], prefix: str = "$.properties") -> set[str]:
     """Extract all field paths from a JSON Schema as JSONPath strings.
 
-    Recurses into nested objects and arrays to discover all leaf field paths.
+    Recurses into nested objects, arrays, and composition keywords
+    (allOf, anyOf, oneOf) to discover all leaf field paths.
     """
     paths: set[str] = set()
     if not isinstance(schema, dict):
         return paths
+
+    # Traverse composition keywords — merge field paths from all branches.
+    # OpenAPI uses allOf for inheritance; GraphQL produces anyOf for unions.
+    for keyword in ("allOf", "anyOf", "oneOf"):
+        for subschema in schema.get(keyword, []):
+            if isinstance(subschema, dict):
+                paths.update(_extract_field_paths(subschema, prefix))
 
     properties = schema.get("properties", {})
     for prop_name, prop_schema in properties.items():
@@ -112,25 +119,6 @@ class BulkPublishResult:
     proposals_created: int = 0
     failed: int = 0
     results: list[PublishResult] = field(default_factory=list)
-
-
-def compute_next_version(
-    current_version: str | None,
-    is_compatible: bool,
-    change_type: ChangeType,
-) -> str:
-    """Compute the next version based on compatibility and change type."""
-    if current_version is None:
-        return INITIAL_VERSION
-
-    major, minor, patch = parse_semver_lenient(current_version)
-
-    if not is_compatible:
-        return f"{major + 1}.0.0"
-    elif change_type in (ChangeType.MAJOR, ChangeType.MINOR):
-        return f"{major}.{minor + 1}.0"
-    else:
-        return f"{major}.{minor}.{patch + 1}"
 
 
 async def bulk_publish_contracts(
@@ -324,9 +312,9 @@ async def bulk_publish_contracts(
                     skipped_count += 1
                     continue
 
-                suggested_version = compute_next_version(
-                    current_version, is_compatible, diff_result.change_type
-                )
+                suggested_version = compute_version_suggestion(
+                    current_version, diff_result.change_type, is_compatible
+                ).suggested_version
 
                 # Compatible change - can publish
                 if is_compatible:
@@ -474,7 +462,7 @@ async def bulk_publish_contracts(
                         PublishResult(
                             asset_id=item.asset_id,
                             asset_fqn=asset.fqn,
-                            status="proposal_created",
+                            status="proposal.created",
                             proposal_id=proposal.id,
                             suggested_version=suggested_version,
                             current_version=current_version,
@@ -538,9 +526,9 @@ class PublishAction(StrEnum):
     """Actions that can result from contract publishing."""
 
     PUBLISHED = "published"
-    FORCE_PUBLISHED = "force_published"
-    PROPOSAL_CREATED = "proposal_created"
-    VERSION_REQUIRED = "version_required"
+    FORCE_PUBLISHED = "force.published"
+    PROPOSAL_CREATED = "proposal.created"
+    VERSION_REQUIRED = "version.required"
 
 
 @dataclass
@@ -805,6 +793,35 @@ class ContractPublishingWorkflow:
             )
         return consumers
 
+    async def _notify_contract_published(self, contract: ContractDB) -> None:
+        """Send webhook and Slack notifications for a published contract."""
+        publisher_team = await self.session.get(TeamDB, self.published_by)
+        publisher_team_name = publisher_team.name if publisher_team else "unknown"
+
+        await send_contract_published(
+            contract_id=contract.id,
+            asset_id=self.asset.id,
+            asset_fqn=self.asset.fqn,
+            version=contract.version,
+            producer_team_id=self.published_by,
+            producer_team_name=publisher_team_name,
+        )
+
+        # Notify registered consumer teams via Slack
+        consumer_team_ids = [c.team_id for c in await self._get_impacted_consumers()]
+        if consumer_team_ids:
+            await dispatch_slack_notifications(
+                session=self.session,
+                event_type="contract.published",
+                team_ids=consumer_team_ids,
+                payload={
+                    "asset_fqn": self.asset.fqn,
+                    "version": contract.version,
+                    "publisher_team": publisher_team_name,
+                    "contract_id": str(contract.id),
+                },
+            )
+
     def _build_result(
         self,
         action: PublishAction,
@@ -885,6 +902,7 @@ class ContractPublishingWorkflow:
             )
             await invalidate_asset(str(self.asset.id))
             await cache_contract(str(contract.id), Contract.model_validate(contract).model_dump())
+            await self._notify_contract_published(contract)
 
             return self._build_result(PublishAction.PUBLISHED, contract=contract)
 
@@ -910,6 +928,7 @@ class ContractPublishingWorkflow:
             )
             await invalidate_asset(str(self.asset.id))
             await cache_contract(str(contract.id), Contract.model_validate(contract).model_dump())
+            await self._notify_contract_published(contract)
 
             return self._build_result(
                 PublishAction.PUBLISHED,
@@ -932,12 +951,13 @@ class ContractPublishingWorkflow:
             )
             await invalidate_asset(str(self.asset.id))
             await cache_contract(str(contract.id), Contract.model_validate(contract).model_dump())
+            await self._notify_contract_published(contract)
 
             # Notify affected teams via Slack about force publish
             affected_team_ids = [ap.team_id for ap in await self._get_impacted_consumers()]
             await dispatch_slack_notifications(
                 session=self.session,
-                event_type="force_publish",
+                event_type="force.publish",
                 team_ids=affected_team_ids,
                 payload={
                     "asset_fqn": self.asset.fqn,
@@ -1090,7 +1110,7 @@ class ContractPublishingWorkflow:
         # Dispatch per-team Slack notifications for proposal_created
         await dispatch_slack_notifications(
             session=self.session,
-            event_type="proposal_created",
+            event_type="proposal.created",
             team_ids=[c.team_id for c in impacted_consumers],
             payload={
                 "asset_fqn": self.asset.fqn,

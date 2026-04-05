@@ -165,11 +165,11 @@ class DependencySource(StrEnum):
 class SlackNotificationEventType(StrEnum):
     """Event types that can trigger Slack notifications."""
 
-    PROPOSAL_CREATED = "proposal_created"
-    PROPOSAL_RESOLVED = "proposal_resolved"
-    FORCE_PUBLISH = "force_publish"
-    CONTRACT_PUBLISHED = "contract_published"
-    REPO_SYNC_FAILED = "repo_sync_failed"
+    PROPOSAL_CREATED = "proposal.created"
+    PROPOSAL_RESOLVED = "proposal.resolved"
+    FORCE_PUBLISH = "force.publish"
+    CONTRACT_PUBLISHED = "contract.published"
+    REPO_SYNC_FAILED = "repo.sync_failed"
 
 
 class ResourceType(StrEnum):

@@ -27,7 +27,7 @@ class SlackConfigCreate(BaseModel):
     webhook_url: str | None = Field(default=None, max_length=500)
     bot_token: str | None = Field(default=None, max_length=500)
     notify_on: list[str] = Field(
-        default=["proposal_created", "proposal_resolved", "force_publish"],
+        default=["proposal.created", "proposal.resolved", "force.publish"],
     )
     enabled: bool = True
 

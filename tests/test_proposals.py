@@ -1015,7 +1015,7 @@ class TestProposalAutoApproval:
         assert resp.status_code == 201
         data = resp.json()
         # Without consumers, breaking change publishes directly
-        assert data["action"] in ["published", "proposal_created"]
+        assert data["action"] in ["published", "proposal.created"]
 
 
 class TestPublishFromProposal:

@@ -1,6 +1,7 @@
 """FastAPI application entry point."""
 
 import asyncio
+import importlib.metadata
 import logging
 import time
 from collections.abc import AsyncGenerator
@@ -187,7 +188,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 app = FastAPI(
     title="Tessera",
     description="Service contract coordination",
-    version="0.1.0",
+    version=importlib.metadata.version("tessera-contracts"),
     lifespan=lifespan,
 )
 app.state.limiter = limiter

@@ -163,7 +163,7 @@ class TestSuggestSemverMode:
         # SUGGEST mode returns version_required action with suggestion
         assert resp.status_code == 200
         data = resp.json()
-        assert data["action"] == "version_required"
+        assert data["action"] == "version.required"
         assert "version_suggestion" in data
         assert data["version_suggestion"]["suggested_version"] == "1.0.0"
         assert data["version_suggestion"]["is_first_contract"] is True
@@ -228,7 +228,7 @@ class TestSuggestSemverMode:
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert data["action"] == "version_required"
+        assert data["action"] == "version.required"
         assert data["version_suggestion"]["suggested_version"] == "1.1.0"
         assert data["version_suggestion"]["change_type"] == "minor"
 
@@ -582,7 +582,7 @@ class TestPrereleaseVersions:
         )
         assert resp.status_code == 201
         data = resp.json()
-        assert data["action"] == "proposal_created"
+        assert data["action"] == "proposal.created"
 
 
 class TestPrereleaseGraduation:

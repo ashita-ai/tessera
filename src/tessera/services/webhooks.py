@@ -1,15 +1,11 @@
 """Webhook delivery service.
 
-Limitations
------------
-- The circuit breaker and dead letter queue are **in-memory, per-process**.
-  In a multi-worker deployment each worker has independent state.  Events
-  queued in one worker's dead letter queue are invisible to others and are
-  **lost on process restart**.
-- Dead-lettered events are persisted to the ``webhook_deliveries`` table
-  with status ``DEAD_LETTERED`` so there is a durable record even if the
-  process crashes before replay.  However, replay itself is best-effort
-  and triggered only when the circuit closes in the same process.
+The dead letter queue is backed by Redis when available, ensuring events
+survive process restarts and are visible across workers.  When Redis is
+unavailable the DLQ falls back to a bounded in-memory list (events lost
+on restart).  Dead-lettered events are also persisted to the
+``webhook_deliveries`` table with status ``DEAD_LETTERED`` as a durable
+audit record regardless of DLQ backend.
 """
 
 import asyncio
@@ -41,6 +37,7 @@ from tessera.models.webhook import (
     WebhookEvent,
     WebhookEventType,
 )
+from tessera.services.cache import get_redis_client
 
 logger = logging.getLogger(__name__)
 
@@ -63,18 +60,24 @@ CIRCUIT_BREAKER_COOLDOWN = 60  # seconds
 # are dropped to bound memory usage. 100 events × ~2KB each ≈ 200KB worst case.
 DEAD_LETTER_MAX_SIZE = 100
 
+# Redis key for the durable dead letter queue. Events are serialized as JSON
+# and stored in a Redis LIST (LPUSH/RPOP for FIFO ordering). A 48-hour TTL
+# prevents unbounded growth if replay never runs.
+_DLQ_REDIS_KEY = "tessera:dlq:webhooks"
+_DLQ_TTL_SECONDS = 48 * 60 * 60  # 48 hours
+
 
 class _CircuitBreaker:
-    """Circuit breaker with dead letter queue for webhook delivery.
+    """Circuit breaker with Redis-backed dead letter queue for webhook delivery.
 
     Tracks consecutive failures per URL. When failures exceed the threshold,
     the circuit opens and deliveries fail fast until the cooldown expires.
     After cooldown, a single probe request is allowed through (half-open state).
     If it succeeds, the circuit closes and the dead letter queue is drained.
 
-    Events that arrive while the circuit is open are stored in a bounded
-    dead letter queue. When the circuit closes (via a successful probe), the
-    queued events are replayed in order.
+    Events that arrive while the circuit is open are stored in a Redis LIST
+    for durability across process restarts. When Redis is unavailable, events
+    fall back to a bounded in-memory list.
     """
 
     def __init__(
@@ -88,6 +91,7 @@ class _CircuitBreaker:
         self._consecutive_failures: int = 0
         self._opened_at: float | None = None
         self._dead_letter_max = dead_letter_max
+        # In-memory fallback when Redis is unavailable
         self._dead_letters: list[WebhookEvent] = []
 
     def record_success(self) -> None:
@@ -125,18 +129,30 @@ class _CircuitBreaker:
             return False
         elapsed = time.monotonic() - self._opened_at
         if elapsed >= self._cooldown:
-            # Cooldown elapsed: allow a probe request (half-open)
             return False
         return True
 
-    def enqueue_dead_letter(self, event: WebhookEvent) -> bool:
+    async def enqueue_dead_letter(self, event: WebhookEvent) -> bool:
         """Add a failed event to the dead letter queue.
 
-        Returns True if the event was added, False if the queue is full
-        (oldest events have been dropped).
+        Tries Redis first for cross-worker durability. Falls back to an
+        in-memory list if Redis is unavailable.
         """
+        serialized = event.model_dump_json()
+        redis_client = await get_redis_client()
+        if redis_client is not None:
+            try:
+                pipe = redis_client.pipeline()
+                pipe.lpush(_DLQ_REDIS_KEY, serialized)
+                pipe.ltrim(_DLQ_REDIS_KEY, 0, self._dead_letter_max - 1)
+                pipe.expire(_DLQ_REDIS_KEY, _DLQ_TTL_SECONDS)
+                await pipe.execute()
+                return True
+            except Exception:
+                logger.warning("Redis DLQ push failed, falling back to in-memory")
+
+        # In-memory fallback
         if len(self._dead_letters) >= self._dead_letter_max:
-            # Drop the oldest event to make room
             dropped = self._dead_letters.pop(0)
             logger.warning(
                 "Dead letter queue full (%d), dropped oldest event: %s",
@@ -146,20 +162,46 @@ class _CircuitBreaker:
         self._dead_letters.append(event)
         return True
 
-    def drain_dead_letters(self) -> list[WebhookEvent]:
+    async def drain_dead_letters(self) -> list[WebhookEvent]:
         """Remove and return all dead letter events for replay.
 
-        Called after the circuit closes to replay queued events.
+        Drains Redis first (durable, cross-worker), then any remaining
+        in-memory events. Called after the circuit closes.
         """
-        events = self._dead_letters
-        self._dead_letters = []
+        events: list[WebhookEvent] = []
+
+        # Drain Redis DLQ atomically: read all, then delete the key
+        redis_client = await get_redis_client()
+        if redis_client is not None:
+            try:
+                pipe = redis_client.pipeline()
+                pipe.lrange(_DLQ_REDIS_KEY, 0, -1)
+                pipe.delete(_DLQ_REDIS_KEY)
+                results = await pipe.execute()
+                raw_events: list[bytes] = results[0] or []
+                for raw in reversed(raw_events):  # LPUSH reverses order; reverse back to FIFO
+                    try:
+                        events.append(WebhookEvent.model_validate_json(raw))
+                    except Exception:
+                        logger.warning("Skipping malformed DLQ event from Redis")
+            except Exception:
+                logger.warning("Redis DLQ drain failed, falling back to in-memory only")
+
+        # Also drain in-memory fallback events
+        if self._dead_letters:
+            events.extend(self._dead_letters)
+            self._dead_letters = []
+
         if events:
             logger.info("Draining %d events from dead letter queue for replay", len(events))
         return events
 
     @property
     def dead_letter_count(self) -> int:
-        """Number of events waiting in the dead letter queue."""
+        """Number of events waiting in the in-memory dead letter queue.
+
+        Does not include Redis-backed events (use for monitoring only).
+        """
         return len(self._dead_letters)
 
 
@@ -359,7 +401,7 @@ async def _deliver_webhook(event: WebhookEvent, delivery_id: UUID | None = None)
             "Webhook circuit breaker is open, queueing event for later: %s",
             event.event.value,
         )
-        _circuit_breaker.enqueue_dead_letter(event)
+        await _circuit_breaker.enqueue_dead_letter(event)
         if delivery_id:
             await _update_delivery_status(
                 delivery_id,
@@ -416,7 +458,7 @@ async def _deliver_webhook(event: WebhookEvent, delivery_id: UUID | None = None)
                         )
                         _circuit_breaker.record_success()
                         # Replay dead letter queue if the circuit just closed
-                        dead_letters = _circuit_breaker.drain_dead_letters()
+                        dead_letters = await _circuit_breaker.drain_dead_letters()
                         for dl_event in dead_letters:
                             _fire_and_forget(dl_event)
                         # Update delivery record on success
