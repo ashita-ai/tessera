@@ -42,6 +42,7 @@ dev = [
     "pytest>=8.0.0,<9.0.0",
     "pytest-asyncio>=0.24.0,<1.0.0",
     "pytest-cov>=6.0.0,<7.0.0",
+    "pytest-xdist>=3.5.0,<4.0.0",
     "ruff>=0.8.0,<1.0.0",
     "mypy>=1.13.0,<2.0.0",
 ]
@@ -82,6 +83,9 @@ warn_unused_ignores = false  # Allow type ignores that may not be needed in all 
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
+markers = [
+    "postgres: test requires PostgreSQL-specific behavior (row locking, schema creation)",
+]
 
 [tool.coverage.run]
 source = ["src/tessera"]

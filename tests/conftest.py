@@ -19,6 +19,11 @@ os.environ["RATE_LIMIT_ENABLED"] = "false"
 if "REDIS_URL" not in os.environ:
     os.environ["REDIS_URL"] = ""
 
+# PostgreSQL marker convention: tests requiring PostgreSQL-specific behavior
+# (FOR UPDATE, CREATE SCHEMA, etc.) must use @pytest.mark.postgres.
+# CI runs only marked tests on PostgreSQL; everything else runs on SQLite.
+# If you use @pytest.mark.skipif(_USE_SQLITE, ...), also add @pytest.mark.postgres.
+
 import pytest  # noqa: E402
 from httpx import ASGITransport, AsyncClient  # noqa: E402
 from sqlalchemy import event  # noqa: E402

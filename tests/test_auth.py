@@ -24,6 +24,8 @@ from tessera.services.auth import (
 TEST_DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 _USE_SQLITE = TEST_DATABASE_URL.startswith("sqlite")
 
+pytestmark = pytest.mark.postgres
+
 
 def create_tables(connection):
     """Create all tables."""
