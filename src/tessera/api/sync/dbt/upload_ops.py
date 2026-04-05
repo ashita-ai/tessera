@@ -25,6 +25,7 @@ from tessera.services import audit, get_affected_parties
 from tessera.services.audit import AuditAction, compute_schema_hash, log_proposal_created
 from tessera.services.contract_publisher import ContractToPublish, bulk_publish_contracts
 from tessera.services.schema_diff import check_compatibility, diff_schemas
+from tessera.services.versioning import compute_version_suggestion
 
 logger = logging.getLogger(__name__)
 
@@ -293,6 +294,10 @@ async def auto_create_proposals(
         session.add(db_proposal)
         await session.flush()
 
+        suggested_version = compute_version_suggestion(
+            existing_contract.version, diff_result.change_type, is_compatible
+        ).suggested_version
+
         await log_proposal_created(
             session,
             proposal_id=db_proposal.id,
@@ -300,6 +305,7 @@ async def auto_create_proposals(
             proposer_id=team_id,
             change_type=diff_result.change_type.value,
             breaking_changes=[bc.to_dict() for bc in breaking_changes_list],
+            proposed_version=suggested_version,
             proposed_schema_hash=compute_schema_hash(proposed_schema),
         )
 
