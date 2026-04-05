@@ -502,10 +502,22 @@ async def bulk_publish_contracts(
             # If this is a session-level error (connection lost, etc.), stop
             # processing. Subsequent items will fail the same way.
             if isinstance(exc, DBAPIError):
+                remaining = len(contracts) - len(results)
                 logger.error(
                     "Database-level error detected; aborting remaining %d items",
-                    len(contracts) - len(results),
+                    remaining,
                 )
+                # Account for remaining unprocessed items
+                for skip_item in contracts[len(results) :]:
+                    results.append(
+                        PublishResult(
+                            asset_id=skip_item.asset_id,
+                            asset_fqn=None,
+                            status="failed",
+                            error="Skipped — database connection lost",
+                        )
+                    )
+                    failed_count += 1
                 break
 
     return BulkPublishResult(

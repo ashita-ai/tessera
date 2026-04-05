@@ -187,6 +187,16 @@ async def bulk_create_registrations(
                 )
             )
             failed += 1
+            # Account for remaining unprocessed items
+            for skip_idx in range(idx + 1, len(bulk_request.registrations)):
+                results.append(
+                    BulkItemResult(
+                        success=False,
+                        index=skip_idx,
+                        error="Skipped — database connection lost",
+                    )
+                )
+                failed += 1
             break
         except Exception:
             logger.exception("Unexpected error in bulk registration at index %d", idx)
@@ -336,6 +346,16 @@ async def bulk_create_assets(
                 )
             )
             failed += 1
+            # Account for remaining unprocessed items
+            for skip_idx in range(idx + 1, len(bulk_request.assets)):
+                results.append(
+                    BulkItemResult(
+                        success=False,
+                        index=skip_idx,
+                        error="Skipped — database connection lost",
+                    )
+                )
+                failed += 1
             break
         except Exception:
             logger.exception("Unexpected error in bulk asset create at index %d", idx)
@@ -559,6 +579,16 @@ async def bulk_acknowledge_proposals(
                 )
             )
             failed += 1
+            # Account for remaining unprocessed items
+            for skip_idx in range(idx + 1, len(bulk_request.acknowledgments)):
+                results.append(
+                    BulkItemResult(
+                        success=False,
+                        index=skip_idx,
+                        error="Skipped — database connection lost",
+                    )
+                )
+                failed += 1
             break
         except Exception:
             logger.exception("Unexpected error in bulk acknowledgment at index %d", idx)
