@@ -25,6 +25,11 @@ from tessera.services import diff_schemas
 
 router = APIRouter()
 
+# Maximum number of YAML alias references (*anchor) allowed in user-supplied
+# specs.  PyYAML's safe_load does not limit alias expansion, so a crafted
+# payload with nested anchors can expand to gigabytes in memory.
+_MAX_YAML_ALIASES = 100
+
 
 # ---------------------------------------------------------------------------
 # Request / response models
@@ -108,6 +113,14 @@ def _parse_openapi(
 ) -> tuple[list[tuple[str, dict[str, Any]]], list[str]]:
     """Parse OpenAPI and return ``[(fqn, combined_schema), ...]``."""
     from tessera.services.openapi import parse_openapi
+
+    # Guard against YAML alias-based memory amplification ("billion laughs").
+    alias_count = raw.count("*")
+    if alias_count > _MAX_YAML_ALIASES:
+        return [], [
+            f"YAML alias limit exceeded ({alias_count} > {_MAX_YAML_ALIASES}). "
+            "Reduce the number of YAML aliases/anchors in your spec."
+        ]
 
     try:
         spec_dict = yaml.safe_load(raw)

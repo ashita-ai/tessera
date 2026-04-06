@@ -55,6 +55,7 @@ from tessera.models.proposal import (
     PendingProposalSummary,
     Proposal,
     ProposalCreate,
+    ProposalStatusResponse,
 )
 from tessera.models.registration import Registration, RegistrationCreate, RegistrationUpdate
 from tessera.models.repo import Repo, RepoCreate, RepoUpdate
@@ -125,6 +126,7 @@ __all__ = [
     "PendingProposalsResponse",
     "Proposal",
     "ProposalCreate",
+    "ProposalStatusResponse",
     # Acknowledgment
     "Acknowledgment",
     "AcknowledgmentCreate",

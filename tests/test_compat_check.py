@@ -395,5 +395,6 @@ class TestCompatCheckResponseShape:
                 "spec_format": "graphql",
             },
         )
-        # May return 400 (parse error) or 200 with empty results depending on parser
-        assert resp.status_code in (200, 400)
+        # parse_graphql_introspection returns an error when __schema is missing,
+        # which _parse_graphql propagates as a BadRequestError (400).
+        assert resp.status_code == 400
