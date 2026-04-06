@@ -1,7 +1,14 @@
 """Tests for contract history and version diffing endpoints."""
 
+from datetime import UTC, datetime
+from uuid import UUID
+
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from tessera.db.models import AssetDB
 
 pytestmark = pytest.mark.asyncio
 
@@ -228,6 +235,97 @@ class TestContractDiff:
         resp = await client.get(
             "/api/v1/assets/00000000-0000-0000-0000-000000000000/contracts/diff"
             "?from_version=1.0.0&to_version=2.0.0"
+        )
+        assert resp.status_code == 404
+
+
+class TestSoftDeletedAssetHistory:
+    """Tests that contract history and diff return 404 for soft-deleted assets."""
+
+    async def test_history_returns_404_for_soft_deleted_asset(
+        self, client: AsyncClient, session: AsyncSession
+    ):
+        """GET /assets/{id}/contracts/history returns 404 when asset is soft-deleted."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "hist-softdel"})
+        team_id = team_resp.json()["id"]
+        asset_resp = await client.post(
+            "/api/v1/assets",
+            json={"fqn": "softdel.history.table", "owner_team_id": team_id},
+        )
+        asset_id = asset_resp.json()["id"]
+
+        # Publish a contract so the asset has history
+        await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            json={
+                "version": "1.0.0",
+                "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
+                "compatibility_mode": "backward",
+            },
+        )
+
+        # Verify history works before soft-delete
+        resp = await client.get(f"/api/v1/assets/{asset_id}/contracts/history")
+        assert resp.status_code == 200
+
+        # Soft-delete the asset via ORM
+        result = await session.execute(select(AssetDB).where(AssetDB.id == UUID(asset_id)))
+        asset_db = result.scalar_one()
+        asset_db.deleted_at = datetime.now(UTC)
+        await session.commit()
+
+        # History must now return 404
+        resp = await client.get(f"/api/v1/assets/{asset_id}/contracts/history")
+        assert resp.status_code == 404
+
+    async def test_diff_returns_404_for_soft_deleted_asset(
+        self, client: AsyncClient, session: AsyncSession
+    ):
+        """GET /assets/{id}/contracts/diff returns 404 when asset is soft-deleted."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "diff-softdel"})
+        team_id = team_resp.json()["id"]
+        asset_resp = await client.post(
+            "/api/v1/assets",
+            json={"fqn": "softdel.diff.table", "owner_team_id": team_id},
+        )
+        asset_id = asset_resp.json()["id"]
+
+        # Publish two versions so we can diff them
+        await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            json={
+                "version": "1.0.0",
+                "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
+                "compatibility_mode": "backward",
+            },
+        )
+        await client.post(
+            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            json={
+                "version": "1.1.0",
+                "schema": {
+                    "type": "object",
+                    "properties": {"id": {"type": "integer"}, "name": {"type": "string"}},
+                },
+                "compatibility_mode": "backward",
+            },
+        )
+
+        # Verify diff works before soft-delete
+        resp = await client.get(
+            f"/api/v1/assets/{asset_id}/contracts/diff?from_version=1.0.0&to_version=1.1.0"
+        )
+        assert resp.status_code == 200
+
+        # Soft-delete the asset via ORM
+        result = await session.execute(select(AssetDB).where(AssetDB.id == UUID(asset_id)))
+        asset_db = result.scalar_one()
+        asset_db.deleted_at = datetime.now(UTC)
+        await session.commit()
+
+        # Diff must now return 404
+        resp = await client.get(
+            f"/api/v1/assets/{asset_id}/contracts/diff?from_version=1.0.0&to_version=1.1.0"
         )
         assert resp.status_code == 404
 
