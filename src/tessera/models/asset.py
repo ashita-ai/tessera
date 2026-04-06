@@ -88,6 +88,7 @@ class Asset(BaseModel):
     description: str | None = None
     owner_team_id: UUID
     owner_user_id: UUID | None = None
+    service_id: UUID | None = None
     environment: str
     resource_type: ResourceType = ResourceType.OTHER
     guarantee_mode: GuaranteeMode = GuaranteeMode.NOTIFY

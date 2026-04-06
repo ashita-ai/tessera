@@ -6,6 +6,7 @@ import { RepoDetail } from "@/pages/RepoDetail";
 import { Services } from "@/pages/Services";
 import { ServiceDetail } from "@/pages/ServiceDetail";
 import { Assets } from "@/pages/Assets";
+import { AssetDetail } from "@/pages/AssetDetail";
 import { Proposals } from "@/pages/Proposals";
 import { Teams } from "@/pages/Teams";
 import { AuditLog } from "@/pages/AuditLog";
@@ -23,6 +24,7 @@ export function App() {
           <Route path="services" element={<Services />} />
           <Route path="services/:id" element={<ServiceDetail />} />
           <Route path="assets" element={<Assets />} />
+          <Route path="assets/:id" element={<AssetDetail />} />
           <Route path="proposals" element={<Proposals />} />
           <Route path="teams" element={<Teams />} />
           <Route path="audit" element={<AuditLog />} />
