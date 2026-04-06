@@ -21,6 +21,10 @@ class RegistrationBase(BaseModel):
 class RegistrationCreate(RegistrationBase):
     """Fields for creating a registration."""
 
+    contract_id: UUID | None = Field(
+        None,
+        description="Contract ID to register for (preferred over query param)",
+    )
     consumer_team_id: UUID
 
 

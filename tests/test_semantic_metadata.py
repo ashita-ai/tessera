@@ -34,7 +34,7 @@ class TestPublishWithFieldMetadata:
         asset_id = asset_resp.json()["id"]
 
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts",
+            f"/api/v1/assets/{asset_id}/publish",
             params={"published_by": team_id},
             json={
                 "schema": {
@@ -75,7 +75,7 @@ class TestPublishWithFieldMetadata:
         asset_id = asset_resp.json()["id"]
 
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts",
+            f"/api/v1/assets/{asset_id}/publish",
             params={"published_by": team_id},
             json={
                 "schema": {
@@ -107,7 +107,7 @@ class TestFieldMetadataCarryForward:
 
         # Publish v1 with metadata on customer_id and email
         v1_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts",
+            f"/api/v1/assets/{asset_id}/publish",
             params={"published_by": team_id},
             json={
                 "schema": {
@@ -131,7 +131,7 @@ class TestFieldMetadataCarryForward:
 
         # Publish v2: add a new field, keep existing fields
         v2_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts",
+            f"/api/v1/assets/{asset_id}/publish",
             params={"published_by": team_id},
             json={
                 "schema": {
@@ -169,7 +169,7 @@ class TestFieldMetadataCarryForward:
 
         # Publish v1 with metadata on both fields
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts",
+            f"/api/v1/assets/{asset_id}/publish",
             params={"published_by": team_id},
             json={
                 "schema": {
@@ -188,7 +188,7 @@ class TestFieldMetadataCarryForward:
 
         # Publish v2: remove remove_field (force publish since breaking)
         v2_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts",
+            f"/api/v1/assets/{asset_id}/publish",
             params={
                 "published_by": team_id,
                 "force": True,
@@ -224,7 +224,7 @@ class TestFieldMetadataCarryForward:
 
         # Publish v1 with description
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts",
+            f"/api/v1/assets/{asset_id}/publish",
             params={"published_by": team_id},
             json={
                 "schema": {
@@ -239,7 +239,7 @@ class TestFieldMetadataCarryForward:
 
         # Publish v2 with updated description
         v2_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts",
+            f"/api/v1/assets/{asset_id}/publish",
             params={"published_by": team_id},
             json={
                 "schema": {
@@ -1042,7 +1042,7 @@ class TestSemanticMetadataErrorCases:
         asset_id = asset_resp.json()["id"]
 
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts",
+            f"/api/v1/assets/{asset_id}/publish",
             params={"published_by": team_id},
             json={
                 "schema": {
@@ -1069,7 +1069,7 @@ class TestSemanticMetadataErrorCases:
         asset_id = asset_resp.json()["id"]
 
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts",
+            f"/api/v1/assets/{asset_id}/publish",
             params={"published_by": team_id},
             json={
                 "schema": {

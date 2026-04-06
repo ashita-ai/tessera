@@ -29,6 +29,7 @@ from tessera.api import (
     audit,
     audits,
     bulk,
+    compat_check,
     contracts,
     dependencies,
     discovery,
@@ -259,6 +260,7 @@ api_v1.include_router(discovery.router, prefix="/discovery", tags=["discovery"])
 api_v1.include_router(graph.router, prefix="/graph", tags=["graph"])
 api_v1.include_router(otel.router, prefix="/otel", tags=["otel"])
 api_v1.include_router(otel.reconciliation_router, prefix="/dependencies", tags=["dependencies"])
+api_v1.include_router(compat_check.router, prefix="/compat", tags=["compatibility"])
 api_v1.include_router(bulk.router, prefix="/bulk", tags=["bulk"])
 
 app.include_router(api_v1)

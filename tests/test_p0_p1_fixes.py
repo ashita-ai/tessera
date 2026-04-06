@@ -203,7 +203,7 @@ class TestSoftDeletedRegistrationExclusion:
         asset_id = asset_resp.json()["id"]
 
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -234,7 +234,7 @@ class TestSoftDeletedRegistrationExclusion:
 
         # Create breaking change -> proposal
         prop_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "2.0.0",
                 "schema": {

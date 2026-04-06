@@ -357,7 +357,7 @@ class TestAffectedPartiesUsesTableOnly:
 
         schema_v1 = {"type": "object", "properties": {"x": {"type": "integer"}}}
         await client.post(
-            f"/api/v1/assets/{upstream['id']}/contracts",
+            f"/api/v1/assets/{upstream['id']}/publish",
             params={"published_by": owner_team["id"]},
             json={"schema": schema_v1, "compatibility_mode": "backward"},
         )
@@ -375,7 +375,7 @@ class TestAffectedPartiesUsesTableOnly:
         # Publish breaking change
         schema_v2 = {"type": "object", "properties": {"x": {"type": "string"}}}
         result = await client.post(
-            f"/api/v1/assets/{upstream['id']}/contracts",
+            f"/api/v1/assets/{upstream['id']}/publish",
             params={"published_by": owner_team["id"]},
             json={"schema": schema_v2, "compatibility_mode": "backward"},
         )
@@ -406,7 +406,7 @@ class TestAffectedPartiesUsesTableOnly:
 
         schema_v1 = {"type": "object", "properties": {"y": {"type": "integer"}}}
         await client.post(
-            f"/api/v1/assets/{upstream['id']}/contracts",
+            f"/api/v1/assets/{upstream['id']}/publish",
             params={"published_by": owner_team["id"]},
             json={"schema": schema_v1, "compatibility_mode": "backward"},
         )
@@ -427,7 +427,7 @@ class TestAffectedPartiesUsesTableOnly:
         # Publish breaking change
         schema_v2 = {"type": "object", "properties": {"y": {"type": "string"}}}
         result = await client.post(
-            f"/api/v1/assets/{upstream['id']}/contracts",
+            f"/api/v1/assets/{upstream['id']}/publish",
             params={"published_by": owner_team["id"]},
             json={"schema": schema_v2, "compatibility_mode": "backward"},
         )

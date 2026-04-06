@@ -291,7 +291,7 @@ def check(
 
                             publish_resp = make_request(
                                 "POST",
-                                f"/assets/{asset_id}/contracts",
+                                f"/assets/{asset_id}/publish",
                                 json_data={
                                     "version": new_version,
                                     "schema": model["schema"],
@@ -467,7 +467,7 @@ def sync(
                                 new_v = f"{parts[0]}.{int(parts[1]) + 1}.0"
                                 make_request(
                                     "POST",
-                                    f"/assets/{asset_id}/contracts",
+                                    f"/assets/{asset_id}/publish",
                                     json_data={
                                         "version": new_v,
                                         "schema": model["schema"],
@@ -502,7 +502,7 @@ def sync(
                 if model["schema"]:
                     make_request(
                         "POST",
-                        f"/assets/{asset['id']}/contracts",
+                        f"/assets/{asset['id']}/publish",
                         json_data={
                             "version": "1.0.0",
                             "schema": model["schema"],

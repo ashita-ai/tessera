@@ -242,7 +242,7 @@ def publish_contract(
             payload["guarantees"] = guarantees
 
         resp = httpx.post(
-            f"{API_URL}/api/v1/assets/{asset_id}/contracts",
+            f"{API_URL}/api/v1/assets/{asset_id}/publish",
             params={"published_by": team_id},
             json=payload,
             timeout=10,
@@ -408,7 +408,7 @@ def create_breaking_change_proposals(
 
             # Publish with breaking change
             resp = httpx.post(
-                f"{API_URL}/api/v1/assets/{asset_id}/contracts",
+                f"{API_URL}/api/v1/assets/{asset_id}/publish",
                 params={"published_by": owner_team_id},
                 json={
                     "version": "2.0.0",

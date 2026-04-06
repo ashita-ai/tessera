@@ -23,7 +23,7 @@ async def _create_contract(client: AsyncClient) -> tuple[str, str]:
     asset_id = asset_resp.json()["id"]
 
     contract_resp = await client.post(
-        f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+        f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
         json={
             "version": "1.0.0",
             "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},

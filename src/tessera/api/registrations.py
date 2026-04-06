@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from tessera.api.auth import Auth, RequireRead, RequireWrite
 from tessera.api.errors import (
+    BadRequestError,
     ErrorCode,
     ForbiddenError,
     NotFoundError,
@@ -31,14 +32,27 @@ async def create_registration(
     request: Request,
     auth: Auth,
     registration: RegistrationCreate,
-    contract_id: UUID = Query(..., description="Contract ID to register for"),
+    contract_id: UUID | None = Query(
+        None,
+        description="Contract ID to register for (deprecated — prefer body field)",
+    ),
     _: None = RequireWrite,
     session: AsyncSession = Depends(get_session),
 ) -> RegistrationDB:
     """Register a consumer for a contract.
 
-    Requires write scope.
+    Requires write scope. The ``contract_id`` can be provided in the request
+    body (preferred) or as a query parameter for backward compatibility. If
+    both are provided, the body value takes precedence.
     """
+    # Resolve contract_id: body takes precedence over query param
+    resolved_contract_id = registration.contract_id or contract_id
+    if resolved_contract_id is None:
+        raise BadRequestError(
+            "contract_id is required — provide it in the request body or as a query parameter",
+            code=ErrorCode.INVALID_INPUT,
+        )
+
     # Resource-level auth: consumer_team_id must match auth.team_id or be admin
     if registration.consumer_team_id != auth.team_id and not auth.has_scope(APIKeyScope.ADMIN):
         raise ForbiddenError(
@@ -47,13 +61,13 @@ async def create_registration(
         )
 
     # Verify contract exists
-    result = await session.execute(select(ContractDB).where(ContractDB.id == contract_id))
+    result = await session.execute(select(ContractDB).where(ContractDB.id == resolved_contract_id))
     contract = result.scalar_one_or_none()
     if not contract:
         raise NotFoundError(ErrorCode.CONTRACT_NOT_FOUND, "Contract not found")
 
     db_registration = RegistrationDB(
-        contract_id=contract_id,
+        contract_id=resolved_contract_id,
         consumer_team_id=registration.consumer_team_id,
         pinned_version=registration.pinned_version,
     )
@@ -68,7 +82,7 @@ async def create_registration(
         entity_id=db_registration.id,
         action=AuditAction.REGISTRATION_CREATED,
         actor_id=registration.consumer_team_id,
-        payload={"contract_id": str(contract_id)},
+        payload={"contract_id": str(resolved_contract_id)},
     )
 
     return db_registration

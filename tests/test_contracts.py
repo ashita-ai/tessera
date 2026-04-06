@@ -19,7 +19,7 @@ class TestContractPublishing:
         asset_id = asset_resp.json()["id"]
 
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -46,7 +46,7 @@ class TestContractPublishing:
 
         # First contract
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -60,7 +60,7 @@ class TestContractPublishing:
 
         # Add optional field (backward compatible)
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.1.0",
                 "schema": {
@@ -90,7 +90,7 @@ class TestContractPublishing:
 
         # First contract with two fields
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -107,7 +107,7 @@ class TestContractPublishing:
 
         # Remove required field (breaking)
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "2.0.0",
                 "schema": {
@@ -136,7 +136,7 @@ class TestContractPublishing:
 
         # First contract
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -149,7 +149,7 @@ class TestContractPublishing:
 
         # Force publish without reason should fail
         resp_no_reason = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}&force=true",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}&force=true",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -162,7 +162,7 @@ class TestContractPublishing:
         # Force publish with reason should succeed
         reason = "Removing deprecated field per Q2 migration plan agreed with consumers"
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}&force=true"
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}&force=true"
             f"&force_reason={reason}",
             json={
                 "version": "2.0.0",
@@ -186,7 +186,7 @@ class TestContractPublishing:
 
         # First contract
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -200,7 +200,7 @@ class TestContractPublishing:
         # Force publish with reason
         reason = "Emergency hotfix: name field type was wrong from initial release"
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}&force=true"
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}&force=true"
             f"&force_reason={reason}",
             json={
                 "version": "2.0.0",
@@ -229,7 +229,7 @@ class TestContractPublishing:
         asset_id = asset_resp.json()["id"]
 
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -241,7 +241,7 @@ class TestContractPublishing:
         )
 
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}&force=true"
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}&force=true"
             "&force_reason=short",
             json={
                 "version": "2.0.0",
@@ -261,7 +261,7 @@ class TestContractPublishing:
         asset_id = asset_resp.json()["id"]
 
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -292,7 +292,7 @@ class TestContractsEndpoint:
 
         # Create a contract
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -322,7 +322,7 @@ class TestContractsEndpoint:
         asset_id = asset_resp.json()["id"]
 
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -356,7 +356,7 @@ class TestContractsEndpoint:
         asset_id = asset_resp.json()["id"]
 
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "1.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -401,7 +401,7 @@ class TestContractFiltering:
 
         # Create contracts
         await client.post(
-            f"/api/v1/assets/{a1_id}/contracts?published_by={t1_id}",
+            f"/api/v1/assets/{a1_id}/publish?published_by={t1_id}",
             json={
                 "version": "1.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -409,7 +409,7 @@ class TestContractFiltering:
             },
         )
         await client.post(
-            f"/api/v1/assets/{a2_id}/contracts?published_by={t1_id}",
+            f"/api/v1/assets/{a2_id}/publish?published_by={t1_id}",
             json={
                 "version": "1.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -435,7 +435,7 @@ class TestContractFiltering:
 
         # Create active contract (v1)
         resp1 = await client.post(
-            f"/api/v1/assets/{a1_id}/contracts?published_by={t1_id}",
+            f"/api/v1/assets/{a1_id}/publish?published_by={t1_id}",
             json={
                 "version": "1.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -447,7 +447,7 @@ class TestContractFiltering:
         # Create new version (v2), making v1 deprecated (assuming standard behavior)
 
         await client.post(
-            f"/api/v1/assets/{a1_id}/contracts?published_by={t1_id}",
+            f"/api/v1/assets/{a1_id}/publish?published_by={t1_id}",
             json={
                 "version": "2.0.0",  # Major change
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -457,7 +457,7 @@ class TestContractFiltering:
 
         # Create second contract (deprecates first)
         await client.post(
-            f"/api/v1/assets/{a1_id}/contracts?published_by={t1_id}",
+            f"/api/v1/assets/{a1_id}/publish?published_by={t1_id}",
             json={
                 "version": "1.1.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -485,7 +485,7 @@ class TestContractFiltering:
 
         # v1.0.0
         await client.post(
-            f"/api/v1/assets/{a1_id}/contracts?published_by={t1_id}",
+            f"/api/v1/assets/{a1_id}/publish?published_by={t1_id}",
             json={
                 "version": "1.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -494,7 +494,7 @@ class TestContractFiltering:
         )
         # v1.1.0 (deprecates v1.0.0)
         await client.post(
-            f"/api/v1/assets/{a1_id}/contracts?published_by={t1_id}",
+            f"/api/v1/assets/{a1_id}/publish?published_by={t1_id}",
             json={
                 "version": "1.1.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -527,7 +527,7 @@ class TestCompatibilityModeUsesNewMode:
 
         # v1 with NONE mode — anything goes
         resp1 = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -545,7 +545,7 @@ class TestCompatibilityModeUsesNewMode:
 
         # v2 tightens to BACKWARD and removes a required field — this is breaking
         resp2 = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "2.0.0",
                 "schema": {
@@ -576,7 +576,7 @@ class TestCompatibilityModeUsesNewMode:
 
         # v1 with BACKWARD mode
         resp1 = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -594,7 +594,7 @@ class TestCompatibilityModeUsesNewMode:
 
         # v2 relaxes to NONE and removes a field — should auto-publish
         resp2 = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "2.0.0",
                 "schema": {
@@ -628,7 +628,7 @@ class TestGuaranteesUpdate:
         asset_id = asset_resp.json()["id"]
 
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -672,7 +672,7 @@ class TestGuaranteesUpdate:
 
         # First contract
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -683,7 +683,7 @@ class TestGuaranteesUpdate:
 
         # Second contract (deprecates first)
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.1.0",
                 "schema": {
@@ -714,7 +714,7 @@ class TestGuaranteesUpdate:
 
         # Create contract with initial guarantees
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -831,7 +831,7 @@ class TestBulkContractPublishing:
         )
         a1_id = a1_resp.json()["id"]
         await client.post(
-            f"/api/v1/assets/{a1_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{a1_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -845,7 +845,7 @@ class TestBulkContractPublishing:
         )
         a2_id = a2_resp.json()["id"]
         await client.post(
-            f"/api/v1/assets/{a2_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{a2_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {"type": "object", "properties": {"name": {"type": "string"}}},
@@ -859,7 +859,7 @@ class TestBulkContractPublishing:
         )
         a3_id = a3_resp.json()["id"]
         await client.post(
-            f"/api/v1/assets/{a3_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{a3_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -926,7 +926,7 @@ class TestBulkContractPublishing:
         )
         a1_id = a1_resp.json()["id"]
         await client.post(
-            f"/api/v1/assets/{a1_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{a1_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {

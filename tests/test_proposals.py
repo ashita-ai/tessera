@@ -23,7 +23,7 @@ class TestProposals:
 
         # Create initial contract
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -43,7 +43,7 @@ class TestProposals:
 
         # Create breaking change (creates proposal)
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -75,7 +75,7 @@ class TestProposals:
 
         # Create initial contract
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -88,7 +88,7 @@ class TestProposals:
 
         # Create breaking change (creates proposal)
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -119,7 +119,7 @@ class TestProposals:
 
         # Create initial contract
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -132,7 +132,7 @@ class TestProposals:
 
         # Create breaking change
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -141,12 +141,15 @@ class TestProposals:
         )
         proposal_id = proposal_resp.json()["proposal"]["id"]
 
-        # Get the proposal
+        # Get the proposal (enriched response with ack status)
         resp = await client.get(f"/api/v1/proposals/{proposal_id}")
         assert resp.status_code == 200
         data = resp.json()
-        assert data["id"] == proposal_id
+        assert data["proposal_id"] == proposal_id
         assert data["status"] == "pending"
+        # Enriched response includes acknowledgment data
+        assert "consumers" in data
+        assert "acknowledgments" in data
 
     async def test_get_proposal_not_found(self, client: AsyncClient):
         """Getting a nonexistent proposal should 404."""
@@ -167,7 +170,7 @@ class TestProposals:
 
         # Create initial contract
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -187,7 +190,7 @@ class TestProposals:
 
         # Create breaking change
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -217,7 +220,7 @@ class TestProposals:
 
         # Create initial contract
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -230,7 +233,7 @@ class TestProposals:
 
         # Create breaking change
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -257,7 +260,7 @@ class TestProposals:
 
         # Create initial contract
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -270,7 +273,7 @@ class TestProposals:
 
         # Create breaking change
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -300,7 +303,7 @@ class TestProposals:
 
         # Create initial contract
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -320,7 +323,7 @@ class TestProposals:
 
         # Create breaking change
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -347,7 +350,7 @@ class TestProposals:
 
         # Create initial contract
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -360,7 +363,7 @@ class TestProposals:
 
         # Create breaking change
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -394,7 +397,7 @@ class TestProposals:
 
         # Create initial contract
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -407,7 +410,7 @@ class TestProposals:
 
         # Create breaking change (creates pending proposal)
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -437,7 +440,7 @@ class TestProposals:
 
         # Create initial contract
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -450,7 +453,7 @@ class TestProposals:
 
         # Create breaking change
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -483,7 +486,7 @@ class TestProposals:
 
         # Create initial contract
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -503,7 +506,7 @@ class TestProposals:
 
         # Create breaking change
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -539,7 +542,7 @@ class TestProposals:
 
         # Create initial contract
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -559,7 +562,7 @@ class TestProposals:
 
         # Create breaking change
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -601,7 +604,7 @@ class TestProposalFiltering:
         # Create contracts and proposals for both assets
         for asset_id in [asset1_id, asset2_id]:
             await client.post(
-                f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+                f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
                 json={
                     "version": "1.0.0",
                     "schema": {
@@ -612,7 +615,7 @@ class TestProposalFiltering:
                 },
             )
             await client.post(
-                f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+                f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
                 json={
                     "version": "2.0.0",
                     "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -644,7 +647,7 @@ class TestProposalFiltering:
 
         # Create initial contract
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team1_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team1_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -657,7 +660,7 @@ class TestProposalFiltering:
 
         # Create breaking change (proposal by team1)
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team1_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team1_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -699,7 +702,7 @@ class TestProposalFiltering:
 
         # Create initial contract
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -712,7 +715,7 @@ class TestProposalFiltering:
 
         # Create breaking change
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -742,7 +745,7 @@ class TestProposalStatusDetails:
 
         # Create initial contract
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -755,7 +758,7 @@ class TestProposalStatusDetails:
 
         # Create breaking change
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -786,7 +789,7 @@ class TestProposalStatusDetails:
 
         # Create initial contract
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -806,7 +809,7 @@ class TestProposalStatusDetails:
 
         # Create breaking change
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -852,7 +855,7 @@ class TestProposalStatusDetails:
 
         # Create initial contract
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -876,7 +879,7 @@ class TestProposalStatusDetails:
 
         # Create breaking change
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -927,7 +930,7 @@ class TestProposalAutoApproval:
 
         # Create initial contract
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -951,7 +954,7 @@ class TestProposalAutoApproval:
 
         # Create breaking change
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -992,7 +995,7 @@ class TestProposalAutoApproval:
 
         # Create initial contract (no consumers register)
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -1005,7 +1008,7 @@ class TestProposalAutoApproval:
 
         # Create breaking change - should auto-publish, no proposal
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -1033,7 +1036,7 @@ class TestPublishFromProposal:
 
         # Create initial contract
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -1046,7 +1049,7 @@ class TestPublishFromProposal:
 
         # Create breaking change
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -1079,7 +1082,7 @@ class TestPublishFromProposal:
 
         # Create initial contract
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -1093,7 +1096,7 @@ class TestPublishFromProposal:
 
         # Create breaking change
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -1128,7 +1131,7 @@ class TestPublishFromProposal:
 
         # Create initial contract
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -1141,7 +1144,7 @@ class TestPublishFromProposal:
 
         # Create breaking change
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -1174,7 +1177,7 @@ class TestPublishFromProposal:
 
         # Create initial contract
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -1194,7 +1197,7 @@ class TestPublishFromProposal:
 
         # Create breaking change
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -1243,7 +1246,7 @@ class TestForceProposal:
 
         # Create initial contract
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -1256,7 +1259,7 @@ class TestForceProposal:
 
         # Create breaking change
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -1318,7 +1321,7 @@ class TestAcknowledgmentEdgeCases:
 
         # Create initial contract
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -1331,7 +1334,7 @@ class TestAcknowledgmentEdgeCases:
 
         # Create breaking change
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -1365,7 +1368,7 @@ class TestAcknowledgmentEdgeCases:
 
         # Create initial contract
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -1385,7 +1388,7 @@ class TestAcknowledgmentEdgeCases:
 
         # Create breaking change
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -1423,7 +1426,7 @@ class TestProposalExpiration:
 
         # Create initial contract
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -1436,7 +1439,7 @@ class TestProposalExpiration:
 
         # Create breaking change
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -1463,7 +1466,7 @@ class TestProposalExpiration:
 
         # Create initial contract
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -1476,7 +1479,7 @@ class TestProposalExpiration:
 
         # Create breaking change
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -1509,7 +1512,7 @@ class TestProposalExpiration:
 
         # Create initial contract
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -1522,7 +1525,7 @@ class TestProposalExpiration:
 
         # Create breaking change
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -1563,7 +1566,7 @@ class TestProposalExpiration:
 
         # Create initial contract
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -1583,7 +1586,7 @@ class TestProposalExpiration:
 
         # Create breaking change
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -1614,7 +1617,7 @@ class TestProposalExpiration:
 
         # Create initial contract
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -1627,7 +1630,7 @@ class TestProposalExpiration:
 
         # Create breaking change
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},

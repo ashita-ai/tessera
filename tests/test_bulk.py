@@ -29,7 +29,7 @@ class TestBulkRegistrations:
 
         # Create contracts
         contract1_resp = await client.post(
-            f"/api/v1/assets/{asset1_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset1_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -37,7 +37,7 @@ class TestBulkRegistrations:
             },
         )
         contract2_resp = await client.post(
-            f"/api/v1/assets/{asset2_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset2_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -80,7 +80,7 @@ class TestBulkRegistrations:
         asset_id = asset_resp.json()["id"]
 
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -124,7 +124,7 @@ class TestBulkRegistrations:
         asset_id = asset_resp.json()["id"]
 
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -311,7 +311,7 @@ class TestBulkAcknowledgments:
 
             # Create initial contract
             contract_resp = await client.post(
-                f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+                f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
                 json={
                     "version": "1.0.0",
                     "schema": {
@@ -331,7 +331,7 @@ class TestBulkAcknowledgments:
 
             # Create breaking change to generate proposal
             proposal_resp = await client.post(
-                f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+                f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
                 json={
                     "version": "2.0.0",
                     "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -382,7 +382,7 @@ class TestBulkAcknowledgments:
         asset_id = asset_resp.json()["id"]
 
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -400,7 +400,7 @@ class TestBulkAcknowledgments:
         )
 
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -439,7 +439,7 @@ class TestBulkAcknowledgments:
         asset_id = asset_resp.json()["id"]
 
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -457,7 +457,7 @@ class TestBulkAcknowledgments:
         )
 
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -482,7 +482,7 @@ class TestBulkAcknowledgments:
 
         # Create new proposal since first was auto-approved
         proposal_resp2 = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "3.0.0",
                 "schema": {"type": "object", "properties": {}},
@@ -559,7 +559,7 @@ class TestBulkAcknowledgments:
         asset_id = asset_resp.json()["id"]
 
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -577,7 +577,7 @@ class TestBulkAcknowledgments:
         )
 
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -677,7 +677,7 @@ class TestBulkMultiStatus:
         asset_id = asset_resp.json()["id"]
 
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},

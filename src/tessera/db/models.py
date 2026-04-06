@@ -262,6 +262,7 @@ class AssetDB(Base):
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
     fqn: Mapped[str] = mapped_column(String(1000), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(2000), nullable=True)
     owner_team_id: Mapped[UUID] = mapped_column(
         Uuid, ForeignKey("teams.id"), nullable=False, index=True
     )

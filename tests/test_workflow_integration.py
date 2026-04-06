@@ -38,7 +38,7 @@ class TestProposalWorkflowIntegration:
 
         # Create initial contract v1.0.0
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -67,7 +67,7 @@ class TestProposalWorkflowIntegration:
 
         # Create breaking change (removes 'email' field) -> creates proposal
         breaking_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "2.0.0",
                 "schema": {
@@ -160,7 +160,7 @@ class TestProposalWorkflowIntegration:
 
         # Create initial contract
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -172,7 +172,7 @@ class TestProposalWorkflowIntegration:
 
         # Create breaking change with NO consumers registered
         breaking_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -215,7 +215,7 @@ class TestProposalWorkflowIntegration:
 
         # Create v1 contract
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -236,7 +236,7 @@ class TestProposalWorkflowIntegration:
 
         # Create breaking change -> proposal
         breaking_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -387,7 +387,7 @@ class TestContractVersionPropagation:
 
         # Create v1.0.0
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -397,7 +397,7 @@ class TestContractVersionPropagation:
 
         # Add new optional field (backward compatible)
         compat_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.1.0",
                 "schema": {
@@ -433,7 +433,7 @@ class TestContractVersionPropagation:
 
         # Create v1.0.0
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -453,7 +453,7 @@ class TestContractVersionPropagation:
 
         # Remove field (breaking change)
         break_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -484,7 +484,7 @@ class TestMultipleConsumerScenarios:
         asset_id = asset_resp.json()["id"]
 
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -507,7 +507,7 @@ class TestMultipleConsumerScenarios:
 
         # Create breaking change
         prop_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -549,7 +549,7 @@ class TestMultipleConsumerScenarios:
         asset_id = asset_resp.json()["id"]
 
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -569,7 +569,7 @@ class TestMultipleConsumerScenarios:
 
         # Create breaking change
         prop_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -609,7 +609,7 @@ class TestMultipleConsumerScenarios:
         asset_id = asset_resp.json()["id"]
 
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -628,7 +628,7 @@ class TestMultipleConsumerScenarios:
 
         # Create breaking change
         prop_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},

@@ -156,3 +156,72 @@ class Proposal(ProposalBase):
     def model_post_init(self, __context: object) -> None:
         """Compute has_objections from objections list."""
         object.__setattr__(self, "has_objections", len(self.objections) > 0)
+
+
+# ---------------------------------------------------------------------------
+# Proposal status (enriched) response models
+# ---------------------------------------------------------------------------
+
+
+class ProposalStatusProposer(BaseModel):
+    """Team/user that proposed the change."""
+
+    team_id: str
+    team_name: str
+    user_id: str | None = None
+    user_name: str | None = None
+
+
+class ProposalStatusConsumers(BaseModel):
+    """Aggregated consumer acknowledgment counts."""
+
+    total: int
+    acknowledged: int
+    pending: int
+    blocked: int
+
+
+class ProposalStatusAcknowledgment(BaseModel):
+    """A single consumer acknowledgment in the status response."""
+
+    consumer_team_id: str
+    consumer_team_name: str
+    acknowledged_by_user_id: str | None = None
+    acknowledged_by_user_name: str | None = None
+    response: str
+    responded_at: str
+    notes: str | None = None
+
+
+class ProposalStatusPendingConsumer(BaseModel):
+    """A consumer that has not yet acknowledged."""
+
+    team_id: str
+    team_name: str
+    registered_at: str
+
+
+class ProposalStatusResponse(BaseModel):
+    """Full proposal status including acknowledgment progress and audit info."""
+
+    proposal_id: str
+    status: str
+    asset_id: str
+    asset_fqn: str | None = None
+    change_type: str
+    breaking_changes: list[ProposalBreakingChangeDict] = Field(default_factory=list)
+    proposed_by: ProposalStatusProposer
+    proposed_at: str
+    resolved_at: str | None = None
+    expires_at: str | None = None
+    auto_expire: bool = False
+    proposed_schema: dict[str, object] = Field(default_factory=dict)
+    affected_teams: list[AffectedTeam] = Field(default_factory=list)
+    affected_assets: list[AffectedAsset] = Field(default_factory=list)
+    objections: list[Objection] = Field(default_factory=list)
+    has_objections: bool = False
+    consumers: ProposalStatusConsumers
+    acknowledgments: list[ProposalStatusAcknowledgment] = Field(default_factory=list)
+    pending_consumers: list[ProposalStatusPendingConsumer] = Field(default_factory=list)
+    audit_status: dict[str, Any] | None = None
+    warnings: list[str] = Field(default_factory=list)

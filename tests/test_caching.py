@@ -253,7 +253,7 @@ class TestCachingIntegration:
         asset_id = asset_resp.json()["id"]
 
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {"type": "object", "properties": {"foo": {"type": "string"}}},
@@ -282,7 +282,7 @@ class TestCachingIntegration:
 
         # Publish first contract
         contract1_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {"type": "object", "properties": {"foo": {"type": "string"}}},
@@ -292,7 +292,7 @@ class TestCachingIntegration:
 
         # Publish second contract (compatible change - adds optional field)
         contract2_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "2.0.0",
                 "schema": {

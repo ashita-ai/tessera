@@ -258,7 +258,7 @@ def contract_publish(
         "force": force,
     }
 
-    response = make_request("POST", f"/assets/{asset_id}/contracts", json_data=data)
+    response = make_request("POST", f"/assets/{asset_id}/publish", json_data=data)
     result = handle_response(response)
 
     if "proposal" in result:

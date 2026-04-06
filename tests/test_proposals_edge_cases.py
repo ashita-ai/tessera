@@ -31,7 +31,7 @@ class TestProposalEdgeCases:
 
         # Create initial contract
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -51,7 +51,7 @@ class TestProposalEdgeCases:
 
         # Create breaking change (creates proposal)
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -84,7 +84,7 @@ class TestListProposals:
         # Create contracts for both
         for asset_id in [asset1_id, asset2_id]:
             await client.post(
-                f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+                f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
                 json={
                     "version": "1.0.0",
                     "schema": {
@@ -96,7 +96,7 @@ class TestListProposals:
             )
             # Create breaking change
             await client.post(
-                f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+                f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
                 json={
                     "version": "2.0.0",
                     "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -126,7 +126,7 @@ class TestListProposals:
             asset_id = asset_resp.json()["id"]
 
             await client.post(
-                f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+                f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
                 json={
                     "version": "1.0.0",
                     "schema": {
@@ -137,7 +137,7 @@ class TestListProposals:
                 },
             )
             await client.post(
-                f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+                f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
                 json={
                     "version": "2.0.0",
                     "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -165,7 +165,7 @@ class TestListProposals:
             asset_id = asset_resp.json()["id"]
 
             await client.post(
-                f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+                f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
                 json={
                     "version": "1.0.0",
                     "schema": {
@@ -176,7 +176,7 @@ class TestListProposals:
                 },
             )
             await client.post(
-                f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+                f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
                 json={
                     "version": "2.0.0",
                     "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -216,7 +216,7 @@ class TestAcknowledgeEdgeCases:
         asset_id = asset_resp.json()["id"]
 
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -228,7 +228,7 @@ class TestAcknowledgeEdgeCases:
         )
 
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -269,7 +269,7 @@ class TestAcknowledgeEdgeCases:
         asset_id = asset_resp.json()["id"]
 
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -287,7 +287,7 @@ class TestAcknowledgeEdgeCases:
         )
 
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -329,7 +329,7 @@ class TestMultipleConsumerApproval:
         asset_id = asset_resp.json()["id"]
 
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -352,7 +352,7 @@ class TestMultipleConsumerApproval:
         )
 
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -393,7 +393,7 @@ class TestMultipleConsumerApproval:
         asset_id = asset_resp.json()["id"]
 
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -415,7 +415,7 @@ class TestMultipleConsumerApproval:
         )
 
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -463,7 +463,7 @@ class TestForceApproveEdgeCases:
         asset_id = asset_resp.json()["id"]
 
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -475,7 +475,7 @@ class TestForceApproveEdgeCases:
         )
 
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -531,7 +531,7 @@ class TestPublishEdgeCases:
         asset_id = asset_resp.json()["id"]
 
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -549,7 +549,7 @@ class TestPublishEdgeCases:
         )
 
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -583,7 +583,7 @@ class TestPublishEdgeCases:
         asset_id = asset_resp.json()["id"]
 
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -595,7 +595,7 @@ class TestPublishEdgeCases:
         )
 
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -640,7 +640,7 @@ class TestProposalStatusDetails:
         asset_id = asset_resp.json()["id"]
 
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -662,7 +662,7 @@ class TestProposalStatusDetails:
         )
 
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -699,7 +699,7 @@ class TestProposalStatusDetails:
         asset_id = asset_resp.json()["id"]
 
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -711,7 +711,7 @@ class TestProposalStatusDetails:
         )
 
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},

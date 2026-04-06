@@ -53,7 +53,7 @@ router = APIRouter()
 
 
 @router.post(
-    "/{asset_id}/contracts",
+    "/{asset_id}/publish",
     status_code=201,
     response_model=None,
     responses={k: _E[k] for k in (400, 401, 403, 404, 409, 412)},

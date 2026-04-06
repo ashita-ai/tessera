@@ -31,7 +31,7 @@ class TestAffectedParties:
             "required": ["id"],
         }
         await client.post(
-            f"/api/v1/assets/{upstream['id']}/contracts",
+            f"/api/v1/assets/{upstream['id']}/publish",
             params={"published_by": owner_team["id"]},
             json={"schema": schema_v1, "compatibility_mode": "backward"},
         )
@@ -57,7 +57,7 @@ class TestAffectedParties:
             "required": ["id"],
         }  # type changed
         result = await client.post(
-            f"/api/v1/assets/{upstream['id']}/contracts",
+            f"/api/v1/assets/{upstream['id']}/publish",
             params={"published_by": owner_team["id"]},
             json={"schema": schema_v2, "compatibility_mode": "backward"},
         )
@@ -95,7 +95,7 @@ class TestAffectedParties:
 
         schema_v1 = {"type": "object", "properties": {"id": {"type": "integer"}}}
         await client.post(
-            f"/api/v1/assets/{upstream['id']}/contracts",
+            f"/api/v1/assets/{upstream['id']}/publish",
             params={"published_by": owner_team["id"]},
             json={"schema": schema_v1, "compatibility_mode": "backward"},
         )
@@ -117,7 +117,7 @@ class TestAffectedParties:
         # Publish breaking change
         schema_v2 = {"type": "object", "properties": {"id": {"type": "string"}}}
         result = await client.post(
-            f"/api/v1/assets/{upstream['id']}/contracts",
+            f"/api/v1/assets/{upstream['id']}/publish",
             params={"published_by": owner_team["id"]},
             json={"schema": schema_v2, "compatibility_mode": "backward"},
         )
@@ -151,7 +151,7 @@ class TestObjections:
 
         schema_v1 = {"type": "object", "properties": {"id": {"type": "integer"}}}
         await client.post(
-            f"/api/v1/assets/{upstream['id']}/contracts",
+            f"/api/v1/assets/{upstream['id']}/publish",
             params={"published_by": owner_team["id"]},
             json={"schema": schema_v1, "compatibility_mode": "backward"},
         )
@@ -171,7 +171,7 @@ class TestObjections:
         # Create proposal via breaking change
         schema_v2 = {"type": "object", "properties": {"id": {"type": "string"}}}
         result = await client.post(
-            f"/api/v1/assets/{upstream['id']}/contracts",
+            f"/api/v1/assets/{upstream['id']}/publish",
             params={"published_by": owner_team["id"]},
             json={"schema": schema_v2, "compatibility_mode": "backward"},
         )
@@ -211,7 +211,7 @@ class TestObjections:
 
         schema_v1 = {"type": "object", "properties": {"id": {"type": "integer"}}}
         await client.post(
-            f"/api/v1/assets/{upstream['id']}/contracts",
+            f"/api/v1/assets/{upstream['id']}/publish",
             params={"published_by": owner_team["id"]},
             json={"schema": schema_v1, "compatibility_mode": "backward"},
         )
@@ -219,7 +219,7 @@ class TestObjections:
         # Create breaking change proposal (no dependencies, so no affected teams)
         schema_v2 = {"type": "object", "properties": {"id": {"type": "string"}}}
         result = await client.post(
-            f"/api/v1/assets/{upstream['id']}/contracts",
+            f"/api/v1/assets/{upstream['id']}/publish",
             params={"published_by": owner_team["id"]},
             json={"schema": schema_v2, "compatibility_mode": "backward"},
         )
@@ -254,7 +254,7 @@ class TestObjections:
 
         schema_v1 = {"type": "object", "properties": {"x": {"type": "integer"}}}
         await client.post(
-            f"/api/v1/assets/{upstream['id']}/contracts",
+            f"/api/v1/assets/{upstream['id']}/publish",
             params={"published_by": owner_team["id"]},
             json={"schema": schema_v1, "compatibility_mode": "backward"},
         )
@@ -273,7 +273,7 @@ class TestObjections:
 
         schema_v2 = {"type": "object", "properties": {"x": {"type": "string"}}}
         result = await client.post(
-            f"/api/v1/assets/{upstream['id']}/contracts",
+            f"/api/v1/assets/{upstream['id']}/publish",
             params={"published_by": owner_team["id"]},
             json={"schema": schema_v2, "compatibility_mode": "backward"},
         )
@@ -313,7 +313,7 @@ class TestObjections:
 
         schema_v1 = {"type": "object", "properties": {"y": {"type": "integer"}}}
         await client.post(
-            f"/api/v1/assets/{upstream['id']}/contracts",
+            f"/api/v1/assets/{upstream['id']}/publish",
             params={"published_by": owner_team["id"]},
             json={"schema": schema_v1, "compatibility_mode": "backward"},
         )
@@ -332,7 +332,7 @@ class TestObjections:
 
         schema_v2 = {"type": "object", "properties": {"y": {"type": "string"}}}
         result = await client.post(
-            f"/api/v1/assets/{upstream['id']}/contracts",
+            f"/api/v1/assets/{upstream['id']}/publish",
             params={"published_by": owner_team["id"]},
             json={"schema": schema_v2, "compatibility_mode": "backward"},
         )
@@ -376,7 +376,7 @@ class TestGetAffectedPartiesService:
 
         schema_v1 = {"type": "object", "properties": {"z": {"type": "integer"}}}
         await client.post(
-            f"/api/v1/assets/{upstream['id']}/contracts",
+            f"/api/v1/assets/{upstream['id']}/publish",
             params={"published_by": owner_team["id"]},
             json={"schema": schema_v1, "compatibility_mode": "backward"},
         )
@@ -400,7 +400,7 @@ class TestGetAffectedPartiesService:
         # Publish breaking change
         schema_v2 = {"type": "object", "properties": {"z": {"type": "string"}}}
         result = await client.post(
-            f"/api/v1/assets/{upstream['id']}/contracts",
+            f"/api/v1/assets/{upstream['id']}/publish",
             params={"published_by": owner_team["id"]},
             json={"schema": schema_v2, "compatibility_mode": "backward"},
         )
@@ -444,7 +444,7 @@ class TestDuplicateProposalPrevention:
             "required": ["id"],
         }
         await client.post(
-            f"/api/v1/assets/{upstream['id']}/contracts",
+            f"/api/v1/assets/{upstream['id']}/publish",
             params={"published_by": owner_team["id"]},
             json={"schema": schema_v1, "compatibility_mode": "backward"},
         )
@@ -465,7 +465,7 @@ class TestDuplicateProposalPrevention:
         # First breaking change should create a proposal
         schema_v2 = {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}
         result1 = await client.post(
-            f"/api/v1/assets/{upstream['id']}/contracts",
+            f"/api/v1/assets/{upstream['id']}/publish",
             params={"published_by": owner_team["id"]},
             json={"schema": schema_v2, "compatibility_mode": "backward"},
         )
@@ -480,7 +480,7 @@ class TestDuplicateProposalPrevention:
             "required": ["id"],
         }
         result2 = await client.post(
-            f"/api/v1/assets/{upstream['id']}/contracts",
+            f"/api/v1/assets/{upstream['id']}/publish",
             params={"published_by": owner_team["id"]},
             json={"schema": schema_v3, "compatibility_mode": "backward"},
         )
@@ -513,7 +513,7 @@ class TestDuplicateProposalPrevention:
 
         schema_v1 = {"type": "object", "properties": {"x": {"type": "integer"}}, "required": ["x"]}
         await client.post(
-            f"/api/v1/assets/{upstream['id']}/contracts",
+            f"/api/v1/assets/{upstream['id']}/publish",
             params={"published_by": owner_team["id"]},
             json={"schema": schema_v1, "compatibility_mode": "backward"},
         )
@@ -536,7 +536,7 @@ class TestDuplicateProposalPrevention:
         # First breaking change creates proposal
         schema_v2 = {"type": "object", "properties": {"x": {"type": "string"}}, "required": ["x"]}
         result1 = await client.post(
-            f"/api/v1/assets/{upstream['id']}/contracts",
+            f"/api/v1/assets/{upstream['id']}/publish",
             params={"published_by": owner_team["id"]},
             json={"schema": schema_v2, "compatibility_mode": "backward"},
         )
@@ -553,7 +553,7 @@ class TestDuplicateProposalPrevention:
         # Now we should be able to create a new proposal
         schema_v3 = {"type": "object", "properties": {"x": {"type": "boolean"}}, "required": ["x"]}
         result2 = await client.post(
-            f"/api/v1/assets/{upstream['id']}/contracts",
+            f"/api/v1/assets/{upstream['id']}/publish",
             params={"published_by": owner_team["id"]},
             json={"schema": schema_v3, "compatibility_mode": "backward"},
         )

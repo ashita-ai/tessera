@@ -50,7 +50,7 @@ class TestContractEdgeCases:
         team_id = team_resp.json()["id"]
 
         resp = await client.post(
-            f"/api/v1/assets/{NONEXISTENT_UUID}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{NONEXISTENT_UUID}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {"type": "object"},
@@ -70,7 +70,7 @@ class TestContractEdgeCases:
         asset_id = asset_resp.json()["id"]
 
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={NONEXISTENT_UUID}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={NONEXISTENT_UUID}",
             json={
                 "version": "1.0.0",
                 "schema": {"type": "object"},
@@ -90,7 +90,7 @@ class TestContractEdgeCases:
         asset_id = asset_resp.json()["id"]
 
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {"type": "not_a_valid_type"},
@@ -125,7 +125,7 @@ class TestRegistrationEdgeCases:
         asset_id = asset_resp.json()["id"]
 
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {"type": "object"},
@@ -166,7 +166,7 @@ class TestProposalEdgeCases:
 
         # Create initial contract
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -179,7 +179,7 @@ class TestProposalEdgeCases:
 
         # Create breaking change
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -241,7 +241,7 @@ class TestCompatibilityModes:
 
         # First contract with none mode
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -255,7 +255,7 @@ class TestCompatibilityModes:
 
         # Breaking change with none mode should auto-publish
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "2.0.0",
                 "schema": {
@@ -282,7 +282,7 @@ class TestCompatibilityModes:
 
         # First contract with full mode
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -292,7 +292,7 @@ class TestCompatibilityModes:
 
         # Adding a field with full mode creates a proposal
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.1.0",
                 "schema": {
@@ -344,7 +344,7 @@ class TestGuaranteesInContracts:
         asset_id = asset_resp.json()["id"]
 
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},

@@ -60,7 +60,7 @@ class TestProposalAcknowledgment:
 
         # Create initial contract with required field
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -87,7 +87,7 @@ class TestProposalAcknowledgment:
 
         # Create breaking change (remove required field) - creates proposal
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "2.0.0",
                 "schema": {
@@ -332,7 +332,7 @@ class TestContractPublish:
 
         # First publish
         resp1 = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -346,7 +346,7 @@ class TestContractPublish:
 
         # Second publish with same version should fail
         resp2 = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -381,7 +381,7 @@ class TestContractPublish:
         versions = ["1.0.0", "1.1.0", "1.2.0"]
         for version in versions:
             resp = await client.post(
-                f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+                f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
                 json={
                     "version": version,
                     "schema": {
@@ -413,7 +413,7 @@ class TestContractPublish:
 
         # Publish first version
         resp1 = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -427,7 +427,7 @@ class TestContractPublish:
 
         # Publish different version
         resp2 = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "2.0.0",
                 "schema": {
@@ -466,7 +466,7 @@ class TestContractPublish:
 
         # Publish a seed contract so subsequent auto-versions increment from 1.0.0.
         seed_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -498,11 +498,11 @@ class TestContractPublish:
 
         results = await asyncio.gather(
             client.post(
-                f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+                f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
                 json={"schema": schema_additive_a, "compatibility_mode": "backward"},
             ),
             client.post(
-                f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+                f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
                 json={"schema": schema_additive_b, "compatibility_mode": "backward"},
             ),
             return_exceptions=True,
@@ -558,7 +558,7 @@ class TestProposalCreation:
         asset_id = asset_resp.json()["id"]
 
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -596,7 +596,7 @@ class TestProposalCreation:
 
         # First breaking change creates proposal
         resp1 = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "2.0.0",
                 "schema": {
@@ -611,7 +611,7 @@ class TestProposalCreation:
 
         # Second breaking change should fail
         resp2 = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "3.0.0",
                 "schema": {
@@ -651,7 +651,7 @@ class TestRegistration:
         asset_id = asset_resp.json()["id"]
 
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -693,7 +693,7 @@ class TestRegistration:
         asset_id = asset_resp.json()["id"]
 
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -754,7 +754,7 @@ class TestPublishFromProposal:
 
         # Create initial contract
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -780,7 +780,7 @@ class TestPublishFromProposal:
 
         # Create breaking change → proposal
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "2.0.0",
                 "schema": {
@@ -918,7 +918,7 @@ class TestObjectionConcurrency:
 
         # Create initial contract
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -946,7 +946,7 @@ class TestObjectionConcurrency:
         # Create breaking change → proposal (affected_teams auto-populated
         # from the downstream dependencies created above)
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "2.0.0",
                 "schema": {
@@ -1052,7 +1052,7 @@ class TestBulkAckEdgeCases:
         asset_id = asset_resp.json()["id"]
 
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -1077,7 +1077,7 @@ class TestBulkAckEdgeCases:
             assert reg_resp.status_code == 201
 
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "2.0.0",
                 "schema": {
@@ -1208,7 +1208,7 @@ class TestExpirationConcurrency:
 
         # Publish initial contract with two required fields
         pub_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "schema": {
                     "type": "object",
@@ -1234,7 +1234,7 @@ class TestExpirationConcurrency:
 
         # Publish breaking change (remove required field) → creates proposal
         breaking_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "schema": {
                     "type": "object",

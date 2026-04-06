@@ -137,9 +137,9 @@ class TestMetricsService:
         """Test that UUIDs are replaced with {id}."""
         from tessera.services.metrics import _normalize_path
 
-        path = "/api/v1/assets/550e8400-e29b-41d4-a716-446655440000/contracts"
+        path = "/api/v1/assets/550e8400-e29b-41d4-a716-446655440000/publish"
         normalized = _normalize_path(path)
-        assert normalized == "/api/v1/assets/{id}/contracts"
+        assert normalized == "/api/v1/assets/{id}/publish"
 
     def test_normalize_path_replaces_numeric_ids(self):
         """Test that numeric IDs are replaced with {id}."""

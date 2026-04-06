@@ -125,7 +125,7 @@ class TestProposalCreatedAuditPayload:
 
         # Publish initial contract
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -153,7 +153,7 @@ class TestProposalCreatedAuditPayload:
             "required": ["id"],
         }
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={"version": "2.0.0", "schema": breaking_schema},
         )
         assert resp.status_code == 201
@@ -194,7 +194,7 @@ class TestProposalAuditEvents:
 
         # Publish initial contract
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -220,7 +220,7 @@ class TestProposalAuditEvents:
 
         # Publish breaking change to create a proposal
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "2.0.0",
                 "schema": {
@@ -278,7 +278,7 @@ class TestProposalAuditEvents:
 
         # Publish initial contract on upstream
         await client.post(
-            f"/api/v1/assets/{upstream_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{upstream_id}/publish?published_by={producer_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -300,7 +300,7 @@ class TestProposalAuditEvents:
 
         # Publish breaking change to create a proposal
         resp = await client.post(
-            f"/api/v1/assets/{upstream_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{upstream_id}/publish?published_by={producer_id}",
             json={
                 "version": "2.0.0",
                 "schema": {

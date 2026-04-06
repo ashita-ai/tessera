@@ -31,7 +31,7 @@ async def test_asset_context_full_data(client: AsyncClient) -> None:
         "$.properties.email": "Customer email address",
     }
     contract_resp = await client.post(
-        f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+        f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
         json=contract_payload,
     )
     assert contract_resp.status_code == 201
@@ -174,7 +174,7 @@ async def test_asset_context_no_consumers(client: AsyncClient) -> None:
 
     schema = make_schema(id="integer")
     await client.post(
-        f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+        f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
         json=make_contract("1.0.0", schema),
     )
 
@@ -221,7 +221,7 @@ async def test_asset_context_active_proposal(client: AsyncClient) -> None:
     # Publish initial contract
     schema_v1 = make_schema(id="integer", name="string")
     await client.post(
-        f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+        f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
         json=make_contract("1.0.0", schema_v1),
     )
 
@@ -243,7 +243,7 @@ async def test_asset_context_active_proposal(client: AsyncClient) -> None:
     # Publish breaking change (remove required field) — should create proposal
     schema_v2 = make_schema(id="integer")  # removed "name"
     await client.post(
-        f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+        f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
         json=make_contract("2.0.0", schema_v2),
     )
 
@@ -330,7 +330,7 @@ async def test_asset_context_multiple_contracts(client: AsyncClient) -> None:
     # Publish two compatible versions (adding an optional field is backward-compatible)
     schema_v1 = make_schema(id="integer")
     resp1 = await client.post(
-        f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+        f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
         json=make_contract("1.0.0", schema_v1),
     )
     assert resp1.status_code == 201
@@ -345,7 +345,7 @@ async def test_asset_context_multiple_contracts(client: AsyncClient) -> None:
         "required": ["id"],
     }
     resp2 = await client.post(
-        f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+        f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
         json=make_contract("1.1.0", schema_v2),
     )
     assert resp2.status_code == 201
@@ -410,7 +410,7 @@ async def test_asset_context_returns_field_metadata_from_columns(
     }
 
     resp = await client.post(
-        f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+        f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
         json=contract_payload,
     )
     assert resp.status_code == 201
@@ -453,7 +453,7 @@ async def test_asset_context_field_metadata_empty_when_not_provided(
     schema["properties"]["name"]["description"] = "Should not appear"
 
     resp = await client.post(
-        f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+        f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
         json=make_contract("1.0.0", schema),
     )
     assert resp.status_code == 201

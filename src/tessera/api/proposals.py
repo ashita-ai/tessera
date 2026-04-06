@@ -39,6 +39,7 @@ from tessera.models import (
     ObjectionCreate,
     PendingProposalsResponse,
     Proposal,
+    ProposalStatusResponse,
 )
 from tessera.models.enums import (
     AcknowledgmentResponseType,
@@ -560,7 +561,7 @@ async def get_pending_proposals(
 
 @router.get(
     "/{proposal_id}",
-    response_model=Proposal,
+    response_model=Proposal | ProposalStatusResponse,
     responses={k: _E[k] for k in (401, 403, 404)},
 )
 @limit_read
@@ -568,21 +569,39 @@ async def get_proposal(
     request: Request,
     auth: Auth,
     proposal_id: UUID,
+    include_status: bool = Query(
+        True,
+        description=(
+            "Include acknowledgment status and consumer details. "
+            "Set to false for a lightweight response matching the Proposal model only."
+        ),
+    ),
     _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
-) -> ProposalDB:
+) -> Proposal | ProposalStatusResponse:
     """Get a proposal by ID.
+
+    By default returns the full proposal with acknowledgment progress,
+    consumer details, and audit status (same shape as ``/{proposal_id}/status``).
+    Pass ``include_status=false`` for a lightweight response.
 
     Requires read scope.
     """
-    result = await session.execute(select(ProposalDB).where(ProposalDB.id == proposal_id))
-    proposal = result.scalar_one_or_none()
-    if not proposal:
-        raise NotFoundError(ErrorCode.PROPOSAL_NOT_FOUND, "Proposal not found")
-    return proposal
+    if not include_status:
+        result = await session.execute(select(ProposalDB).where(ProposalDB.id == proposal_id))
+        proposal = result.scalar_one_or_none()
+        if not proposal:
+            raise NotFoundError(ErrorCode.PROPOSAL_NOT_FOUND, "Proposal not found")
+        return Proposal.model_validate(proposal)
+
+    return await _build_proposal_status(proposal_id, session)
 
 
-@router.get("/{proposal_id}/status", responses={k: _E[k] for k in (401, 403, 404)})
+@router.get(
+    "/{proposal_id}/status",
+    response_model=ProposalStatusResponse,
+    responses={k: _E[k] for k in (401, 403, 404)},
+)
 @limit_read
 async def get_proposal_status(
     request: Request,
@@ -590,11 +609,26 @@ async def get_proposal_status(
     proposal_id: UUID,
     _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
-) -> dict[str, Any]:
+) -> ProposalStatusResponse:
     """Get detailed status of a proposal including acknowledgment progress.
 
     Requires read scope.
     """
+    return await _build_proposal_status(proposal_id, session)
+
+
+async def _build_proposal_status(
+    proposal_id: UUID,
+    session: AsyncSession,
+) -> ProposalStatusResponse:
+    """Build the full proposal status response with acknowledgment progress."""
+    from tessera.models.proposal import (
+        ProposalStatusAcknowledgment,
+        ProposalStatusConsumers,
+        ProposalStatusPendingConsumer,
+        ProposalStatusProposer,
+    )
+
     # Get proposal with asset in single query
     result = await session.execute(
         select(ProposalDB, AssetDB)
@@ -661,7 +695,7 @@ async def get_proposal_status(
         users_map = {u.id: u for u in users_result.scalars().all()}
 
     # Build acknowledgment details
-    ack_list = []
+    ack_list: list[ProposalStatusAcknowledgment] = []
     acknowledged_team_ids = set()
     blocked_count = 0
     for ack in acknowledgments:
@@ -671,30 +705,30 @@ async def get_proposal_status(
         if str(ack.response) == "blocked":
             blocked_count += 1
         ack_list.append(
-            {
-                "consumer_team_id": str(ack.consumer_team_id),
-                "consumer_team_name": team.name if team else "Unknown",
-                "acknowledged_by_user_id": str(ack.acknowledged_by_user_id)
+            ProposalStatusAcknowledgment(
+                consumer_team_id=str(ack.consumer_team_id),
+                consumer_team_name=team.name if team else "Unknown",
+                acknowledged_by_user_id=str(ack.acknowledged_by_user_id)
                 if ack.acknowledged_by_user_id
                 else None,
-                "acknowledged_by_user_name": user.name if user else None,
-                "response": str(ack.response),
-                "responded_at": ack.responded_at.isoformat(),
-                "notes": ack.notes,
-            }
+                acknowledged_by_user_name=user.name if user else None,
+                response=str(ack.response),
+                responded_at=ack.responded_at.isoformat(),
+                notes=ack.notes,
+            )
         )
 
     # Find consumers who haven't acknowledged yet
-    pending_consumers = []
+    pending_consumer_list: list[ProposalStatusPendingConsumer] = []
     for reg in registrations:
         if reg.consumer_team_id not in acknowledged_team_ids:
             team = teams_map.get(reg.consumer_team_id)
-            pending_consumers.append(
-                {
-                    "team_id": str(reg.consumer_team_id),
-                    "team_name": team.name if team else "Unknown",
-                    "registered_at": reg.registered_at.isoformat(),
-                }
+            pending_consumer_list.append(
+                ProposalStatusPendingConsumer(
+                    team_id=str(reg.consumer_team_id),
+                    team_name=team.name if team else "Unknown",
+                    registered_at=reg.registered_at.isoformat(),
+                )
             )
 
     proposer = teams_map.get(proposal.proposed_by)
@@ -715,31 +749,42 @@ async def get_proposal_status(
             "Consider fixing audits before publishing."
         )
 
-    return {
-        "proposal_id": str(proposal.id),
-        "status": str(proposal.status),
-        "asset_fqn": asset.fqn if asset else None,
-        "change_type": str(proposal.change_type),
-        "breaking_changes": proposal.breaking_changes,
-        "proposed_by": {
-            "team_id": str(proposal.proposed_by),
-            "team_name": proposer.name if proposer else "Unknown",
-            "user_id": str(proposal.proposed_by_user_id) if proposal.proposed_by_user_id else None,
-            "user_name": proposer_user.name if proposer_user else None,
-        },
-        "proposed_at": proposal.proposed_at.isoformat(),
-        "resolved_at": proposal.resolved_at.isoformat() if proposal.resolved_at else None,
-        "consumers": {
-            "total": total_consumers,
-            "acknowledged": len(acknowledgments),
-            "pending": len(pending_consumers),
-            "blocked": blocked_count,
-        },
-        "acknowledgments": ack_list,
-        "pending_consumers": pending_consumers,
-        "audit_status": audit_info,
-        "warnings": warnings,
-    }
+    # Build the full proposal model to include affected parties and objections
+    proposal_model = Proposal.model_validate(proposal)
+
+    return ProposalStatusResponse(
+        proposal_id=str(proposal.id),
+        status=str(proposal.status),
+        asset_id=str(proposal.asset_id),
+        asset_fqn=asset.fqn if asset else None,
+        change_type=str(proposal.change_type),
+        breaking_changes=proposal.breaking_changes,
+        proposed_by=ProposalStatusProposer(
+            team_id=str(proposal.proposed_by),
+            team_name=proposer.name if proposer else "Unknown",
+            user_id=str(proposal.proposed_by_user_id) if proposal.proposed_by_user_id else None,
+            user_name=proposer_user.name if proposer_user else None,
+        ),
+        proposed_at=proposal.proposed_at.isoformat(),
+        resolved_at=proposal.resolved_at.isoformat() if proposal.resolved_at else None,
+        expires_at=proposal.expires_at.isoformat() if proposal.expires_at else None,
+        auto_expire=proposal.auto_expire,
+        proposed_schema=proposal.proposed_schema,
+        affected_teams=proposal_model.affected_teams,
+        affected_assets=proposal_model.affected_assets,
+        objections=proposal_model.objections,
+        has_objections=proposal_model.has_objections,
+        consumers=ProposalStatusConsumers(
+            total=total_consumers,
+            acknowledged=len(acknowledgments),
+            pending=len(pending_consumer_list),
+            blocked=blocked_count,
+        ),
+        acknowledgments=ack_list,
+        pending_consumers=pending_consumer_list,
+        audit_status=audit_info,
+        warnings=warnings,
+    )
 
 
 @router.post(

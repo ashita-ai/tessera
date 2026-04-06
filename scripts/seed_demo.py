@@ -526,7 +526,7 @@ def create_kafka_assets(team_ids: dict[str, str]) -> int:
 
                 # Publish contract with Avro schema
                 contract_resp = httpx.post(
-                    f"{API_URL}/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+                    f"{API_URL}/api/v1/assets/{asset_id}/publish?published_by={team_id}",
                     json={
                         "version": "1.0.0",
                         "schema": kafka_asset["schema"],
@@ -1401,7 +1401,7 @@ def create_proposals(team_ids: dict[str, str]) -> int:
 
             try:
                 pub_resp = httpx.post(
-                    f"{API_URL}/api/v1/assets/{asset_id}/contracts?published_by={owner_team_id}",
+                    f"{API_URL}/api/v1/assets/{asset_id}/publish?published_by={owner_team_id}",
                     json={
                         "version": new_version,
                         "schema": new_schema,
