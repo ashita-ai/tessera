@@ -1,9 +1,14 @@
 """Additional edge case tests for proposals API."""
 
-from uuid import uuid4
+from datetime import UTC, datetime
+from uuid import UUID, uuid4
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from tessera.db.models import AssetDB
 
 pytestmark = pytest.mark.asyncio
 
@@ -725,3 +730,166 @@ class TestProposalStatusDetails:
         data = resp.json()
         assert "breaking_changes" in data
         assert len(data["breaking_changes"]) > 0
+
+
+class TestProposalSoftDeletedAssets:
+    """Tests that proposal endpoints correctly return 404 for soft-deleted assets."""
+
+    async def _create_proposal_with_affected_team(
+        self, client: AsyncClient, suffix: str
+    ) -> tuple[str, str, str, str, str]:
+        """Create a proposal setup that includes an affected downstream team.
+
+        Returns: (owner_id, affected_team_id, upstream_asset_id, downstream_asset_id, proposal_id)
+        """
+        owner_resp = await client.post("/api/v1/teams", json={"name": f"sd-owner-{suffix}"})
+        assert owner_resp.status_code == 201, f"Team create failed: {owner_resp.text}"
+        owner = owner_resp.json()
+
+        affected_resp = await client.post("/api/v1/teams", json={"name": f"sd-affected-{suffix}"})
+        assert affected_resp.status_code == 201, f"Team create failed: {affected_resp.text}"
+        affected = affected_resp.json()
+
+        upstream_resp = await client.post(
+            "/api/v1/assets",
+            json={"fqn": f"sd.upstream.{suffix}", "owner_team_id": owner["id"]},
+        )
+        assert upstream_resp.status_code == 201, f"Asset create failed: {upstream_resp.text}"
+        upstream = upstream_resp.json()
+
+        # Publish initial contract
+        schema_v1 = {
+            "type": "object",
+            "properties": {"id": {"type": "integer"}, "name": {"type": "string"}},
+        }
+        await client.post(
+            f"/api/v1/assets/{upstream['id']}/publish",
+            params={"published_by": owner["id"]},
+            json={"schema": schema_v1, "compatibility_mode": "backward"},
+        )
+
+        # Create downstream asset and dependency so affected_teams is populated
+        downstream = (
+            await client.post(
+                "/api/v1/assets",
+                json={
+                    "fqn": f"sd.downstream.{suffix}",
+                    "owner_team_id": affected["id"],
+                },
+            )
+        ).json()
+
+        await client.post(
+            f"/api/v1/assets/{downstream['id']}/dependencies",
+            json={"depends_on_asset_id": upstream["id"]},
+        )
+
+        # Breaking change creates a proposal
+        schema_v2 = {"type": "object", "properties": {"id": {"type": "string"}}}
+        result = await client.post(
+            f"/api/v1/assets/{upstream['id']}/publish",
+            params={"published_by": owner["id"]},
+            json={"schema": schema_v2, "compatibility_mode": "backward"},
+        )
+        assert result.status_code == 201
+        proposal_id = result.json()["proposal"]["id"]
+
+        return (
+            owner["id"],
+            affected["id"],
+            upstream["id"],
+            downstream["id"],
+            proposal_id,
+        )
+
+    async def _soft_delete_asset(self, session: AsyncSession, asset_id: str) -> None:
+        """Soft-delete an asset directly via ORM."""
+        result = await session.execute(select(AssetDB).where(AssetDB.id == UUID(asset_id)))
+        asset_db = result.scalar_one()
+        asset_db.deleted_at = datetime.now(UTC)
+        await session.commit()
+
+    async def test_file_objection_returns_404_for_soft_deleted_asset(
+        self, client: AsyncClient, session: AsyncSession
+    ) -> None:
+        """file_objection returns 404 when the proposal's asset is soft-deleted."""
+        (
+            owner_id,
+            affected_id,
+            asset_id,
+            _,
+            proposal_id,
+        ) = await self._create_proposal_with_affected_team(client, "obj_sd")
+
+        # Soft-delete the upstream asset
+        await self._soft_delete_asset(session, asset_id)
+
+        # Attempt to file an objection — should 404 because the asset is gone
+        resp = await client.post(
+            f"/api/v1/proposals/{proposal_id}/object",
+            params={"objector_team_id": affected_id},
+            json={"reason": "This should not work"},
+        )
+        assert resp.status_code == 404
+
+    async def test_publish_from_proposal_returns_404_for_soft_deleted_asset(
+        self, client: AsyncClient, session: AsyncSession
+    ) -> None:
+        """publish_from_proposal returns 404 when the proposal's asset is soft-deleted."""
+        owner_id, _, asset_id, _, proposal_id = await self._create_proposal_with_affected_team(
+            client, "pub_sd"
+        )
+
+        # Force-approve so we can attempt to publish
+        await client.post(
+            f"/api/v1/proposals/{proposal_id}/force",
+            params={"actor_id": owner_id},
+        )
+
+        # Soft-delete the upstream asset
+        await self._soft_delete_asset(session, asset_id)
+
+        # Attempt to publish from the approved proposal — should 404
+        resp = await client.post(
+            f"/api/v1/proposals/{proposal_id}/publish",
+            json={"version": "2.0.0", "published_by": owner_id},
+        )
+        assert resp.status_code == 404
+
+    async def test_file_objection_deactivated_user_sets_name_to_none(
+        self, client: AsyncClient
+    ) -> None:
+        """Deactivated objector_user_id succeeds but sets objector_user_name to None."""
+        (
+            owner_id,
+            affected_id,
+            asset_id,
+            _,
+            proposal_id,
+        ) = await self._create_proposal_with_affected_team(client, "deact_user")
+
+        # Create a user and then deactivate them
+        user_resp = await client.post(
+            "/api/v1/users",
+            json={"username": "deact-objector", "name": "Soon Deactivated"},
+        )
+        assert user_resp.status_code == 201
+        user_id = user_resp.json()["id"]
+
+        deact_resp = await client.delete(f"/api/v1/users/{user_id}")
+        assert deact_resp.status_code == 204
+
+        # File objection with the deactivated user
+        resp = await client.post(
+            f"/api/v1/proposals/{proposal_id}/object",
+            params={
+                "objector_team_id": affected_id,
+                "objector_user_id": user_id,
+            },
+            json={"reason": "Filing with deactivated user"},
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["action"] == "objection_filed"
+        assert data["objection"]["objected_by_user_id"] == user_id
+        assert data["objection"]["objected_by_user_name"] is None
