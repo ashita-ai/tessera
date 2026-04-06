@@ -48,7 +48,8 @@ class CompatCheckRequest(BaseModel):
         max_length=5_000_000,
         description=(
             "The raw API specification content.  For OpenAPI pass YAML or JSON; "
-            "for protobuf pass the .proto file text; for GraphQL pass the SDL string."
+            "for protobuf pass the .proto file text; "
+            "for GraphQL pass a JSON introspection result."
         ),
     )
     spec_format: SpecFormat = Field(..., description="Specification format")
@@ -133,12 +134,11 @@ def _parse_graphql(
     service_name: str | None,
     environment: str,
 ) -> tuple[list[tuple[str, dict[str, Any]]], list[str]]:
-    """Parse GraphQL SDL/introspection and return ``[(fqn, schema), ...]``."""
+    """Parse GraphQL introspection JSON and return ``[(fqn, schema), ...]``."""
     import json
 
     from tessera.services.graphql import parse_graphql_introspection
 
-    # Accept SDL or JSON introspection
     try:
         spec_dict = json.loads(raw)
     except json.JSONDecodeError:

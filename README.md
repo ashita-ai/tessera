@@ -93,6 +93,9 @@ Force-publish is available for emergencies (admin-only, audit-logged).
 - **Semantic metadata** — Tag assets with labels (e.g., `pii`, `financial`) and annotate individual fields with descriptions and tags via JSONPath keys
 - **Service management** — Register services as deployable units within repositories, track which assets belong to each service, filter by repo/team/OTel name
 - **Team-based ownership** — Assets belong to teams (survives personnel changes), with optional user-level stewardship
+- **Pre-publish compatibility check** — `POST /api/v1/compat/check-compat` accepts a raw API spec (OpenAPI, protobuf, or GraphQL introspection) and diffs it against active contracts without publishing anything. Supports per-endpoint results, compatibility mode overrides, and FQN-scoped checks
+- **Asset descriptions** — Optional free-text description on assets for discoverability
+- **Advanced search filters** — Filter assets by `resource_type` and `team` in `GET /api/v1/search`
 - **AI agent integration** — Agents register as consumers, check contracts before modifying schemas, and participate in the proposal workflow
 - **Webhooks** — Signed delivery (HMAC-SHA256) with SSRF protection, retry with backoff, delivery tracking
 - **API keys** — Scoped (read, write, admin), revocable, expiring. Supports agent identity with separate rate limit tiers
