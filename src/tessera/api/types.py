@@ -58,6 +58,10 @@ class AssetWithOwnerInfo(TypedDict, total=False):
     owner_team_name: str | None
     owner_user_name: str | None
     owner_user_email: str | None
+    service_id: UUID | None
+    service_name: str | None
+    repo_id: UUID | None
+    repo_name: str | None
     active_contract_version: str | None
 
 

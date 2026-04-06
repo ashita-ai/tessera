@@ -18,7 +18,7 @@ from tessera.api.errors import (
 )
 from tessera.api.rate_limit import limit_read, limit_write
 from tessera.api.types import AssetWithOwnerInfo
-from tessera.db import AssetDB, TeamDB, UserDB, get_session
+from tessera.db import AssetDB, RepoDB, ServiceDB, TeamDB, UserDB, get_session
 from tessera.models import Asset, AssetCreate, AssetUpdate
 from tessera.models.enums import APIKeyScope
 from tessera.services import audit
@@ -152,16 +152,21 @@ async def get_asset(
     if cached:
         return cached  # type: ignore[return-value]
 
-    # Query with joins to get team and user names
+    # Query with joins to get team, user, service, and repo names
     result = await session.execute(
         select(
             AssetDB,
             TeamDB.name.label("team_name"),
             UserDB.name.label("user_name"),
             UserDB.email.label("user_email"),
+            ServiceDB.name.label("service_name"),
+            RepoDB.id.label("repo_id"),
+            RepoDB.name.label("repo_name"),
         )
         .outerjoin(TeamDB, AssetDB.owner_team_id == TeamDB.id)
         .outerjoin(UserDB, AssetDB.owner_user_id == UserDB.id)
+        .outerjoin(ServiceDB, AssetDB.service_id == ServiceDB.id)
+        .outerjoin(RepoDB, ServiceDB.repo_id == RepoDB.id)
         .where(AssetDB.id == asset_id)
         .where(AssetDB.deleted_at.is_(None))
     )
@@ -169,11 +174,14 @@ async def get_asset(
     if not row:
         raise NotFoundError(ErrorCode.ASSET_NOT_FOUND, "Asset not found")
 
-    asset, team_name, user_name, user_email = row
+    asset, team_name, user_name, user_email, service_name, repo_id, repo_name = row
     asset_dict: AssetWithOwnerInfo = Asset.model_validate(asset).model_dump()  # type: ignore[assignment]
     asset_dict["owner_team_name"] = team_name
     asset_dict["owner_user_name"] = user_name
     asset_dict["owner_user_email"] = user_email
+    asset_dict["service_name"] = service_name
+    asset_dict["repo_id"] = repo_id
+    asset_dict["repo_name"] = repo_name
 
     # Cache result
     await cache_asset(str(asset_id), asset_dict)  # type: ignore[arg-type]

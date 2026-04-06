@@ -1,7 +1,10 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
+
+const PAGE_SIZE = 50;
 
 const TYPE_LABEL: Record<string, string> = {
   api_endpoint: "api",
@@ -15,12 +18,24 @@ const TYPE_LABEL: Record<string, string> = {
 export function Assets() {
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
+  const [page, setPage] = useState(0);
+
+  // Reset to first page when filters change
+  const handleSearch = (value: string) => {
+    setSearch(value);
+    setPage(0);
+  };
+  const handleTypeFilter = (value: string) => {
+    setTypeFilter(value);
+    setPage(0);
+  };
 
   const assetsQuery = useQuery({
-    queryKey: ["assets", search, typeFilter],
+    queryKey: ["assets", search, typeFilter, page],
     queryFn: () =>
       api.listAssets({
-        limit: 50,
+        limit: PAGE_SIZE,
+        offset: page * PAGE_SIZE,
         ...(search ? { fqn: search } : {}),
         ...(typeFilter ? { resource_type: typeFilter } : {}),
       }),
@@ -28,6 +43,7 @@ export function Assets() {
 
   const assets = assetsQuery.data?.results ?? [];
   const total = assetsQuery.data?.total ?? 0;
+  const totalPages = Math.ceil(total / PAGE_SIZE);
 
   return (
     <div className="animate-enter space-y-5">
@@ -39,12 +55,12 @@ export function Assets() {
           type="text"
           placeholder="Search by FQN..."
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => handleSearch(e.target.value)}
           className="flex-1 rounded-md border border-line bg-bg-raised px-3 py-1.5 font-mono text-xs text-t1 placeholder:text-t3 focus:border-accent/40 focus:outline-none"
         />
         <select
           value={typeFilter}
-          onChange={(e) => setTypeFilter(e.target.value)}
+          onChange={(e) => handleTypeFilter(e.target.value)}
           className="rounded-md border border-line bg-bg-raised px-3 py-1.5 text-xs text-t2 focus:border-accent/40 focus:outline-none"
         >
           <option value="">All types</option>
@@ -73,7 +89,9 @@ export function Assets() {
             {assets.map((asset) => (
               <tr key={asset.id} className="transition-colors hover:bg-bg-hover">
                 <td className="px-4 py-2.5">
-                  <span className="font-mono text-[11px] font-medium text-t1">{asset.fqn}</span>
+                  <Link to={`/assets/${asset.id}`} className="font-mono text-[11px] font-medium text-accent hover:underline">
+                    {asset.fqn}
+                  </Link>
                 </td>
                 <td className="px-4 py-2.5">
                   <span className="rounded bg-bg-surface px-1.5 py-0.5 font-mono text-[10px] text-t2">
@@ -85,7 +103,9 @@ export function Assets() {
                 </td>
                 <td className="px-4 py-2.5">
                   {asset.active_contract_version ? (
-                    <span className="font-mono text-[11px] text-accent">v{asset.active_contract_version}</span>
+                    <Link to={`/assets/${asset.id}`} className="font-mono text-[11px] text-accent hover:underline">
+                      v{asset.active_contract_version}
+                    </Link>
                   ) : (
                     <span className="text-[10px] text-t3">none</span>
                   )}
@@ -105,8 +125,29 @@ export function Assets() {
         )}
 
         {total > 0 && (
-          <div className="border-t border-line px-4 py-2 text-[10px] text-t3">
-            {assets.length} of {total}
+          <div className="flex items-center justify-between border-t border-line px-4 py-2">
+            <span className="text-[10px] text-t3">
+              {page * PAGE_SIZE + 1}\u2013{Math.min((page + 1) * PAGE_SIZE, total)} of {total}
+            </span>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setPage((p) => p - 1)}
+                disabled={page === 0}
+                className="rounded px-2 py-0.5 text-[10px] text-t2 transition-colors hover:bg-bg-hover disabled:cursor-default disabled:text-t3/40"
+              >
+                Prev
+              </button>
+              <span className="px-1 text-[10px] text-t3">
+                {page + 1} / {totalPages}
+              </span>
+              <button
+                onClick={() => setPage((p) => p + 1)}
+                disabled={page >= totalPages - 1}
+                className="rounded px-2 py-0.5 text-[10px] text-t2 transition-colors hover:bg-bg-hover disabled:cursor-default disabled:text-t3/40"
+              >
+                Next
+              </button>
+            </div>
           </div>
         )}
       </div>

@@ -47,6 +47,10 @@ export interface Asset {
   owner_user_id?: string;
   owner_user_name?: string;
   owner_user_email?: string;
+  service_id?: string;
+  service_name?: string;
+  repo_id?: string;
+  repo_name?: string;
   active_contract_version?: string;
   metadata: Record<string, unknown>;
   tags: string[];
@@ -248,6 +252,8 @@ export const api = {
   listAssets: (params?: QueryParams) =>
     request<PaginatedResponse<Asset>>("/assets", {}, params),
   getAsset: (id: string) => request<Asset>(`/assets/${id}`),
+  listAssetContracts: (assetId: string, params?: QueryParams) =>
+    request<PaginatedResponse<Contract>>(`/assets/${assetId}/contracts`, {}, params),
 
   // Proposals
   listProposals: (params?: QueryParams) =>

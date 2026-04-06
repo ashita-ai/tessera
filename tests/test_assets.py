@@ -2,6 +2,9 @@
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from tessera.db.models import AssetDB, RepoDB, ServiceDB, TeamDB  # type: ignore[import-untyped]
 
 pytestmark = pytest.mark.asyncio
 
@@ -9,7 +12,7 @@ pytestmark = pytest.mark.asyncio
 class TestAssetsAPI:
     """Tests for /api/v1/assets endpoints."""
 
-    async def test_create_asset(self, client: AsyncClient):
+    async def test_create_asset(self, client: AsyncClient) -> None:
         """Create an asset."""
         team_resp = await client.post("/api/v1/teams", json={"name": "asset-owner"})
         team_id = team_resp.json()["id"]
@@ -23,7 +26,7 @@ class TestAssetsAPI:
         assert data["fqn"] == "warehouse.schema.table"
         assert data["owner_team_id"] == team_id
 
-    async def test_create_asset_invalid_owner(self, client: AsyncClient):
+    async def test_create_asset_invalid_owner(self, client: AsyncClient) -> None:
         """Creating an asset with nonexistent owner should fail."""
         resp = await client.post(
             "/api/v1/assets",
@@ -34,7 +37,7 @@ class TestAssetsAPI:
         )
         assert resp.status_code == 404
 
-    async def test_list_assets(self, client: AsyncClient):
+    async def test_list_assets(self, client: AsyncClient) -> None:
         """List all assets."""
         team_resp = await client.post("/api/v1/teams", json={"name": "list-owner"})
         team_id = team_resp.json()["id"]
@@ -46,7 +49,7 @@ class TestAssetsAPI:
         assert resp.status_code == 200
         assert len(resp.json()) >= 2
 
-    async def test_filter_assets_by_owner(self, client: AsyncClient):
+    async def test_filter_assets_by_owner(self, client: AsyncClient) -> None:
         """Filter assets by owner team."""
         team1_resp = await client.post("/api/v1/teams", json={"name": "filter-owner-1"})
         team2_resp = await client.post("/api/v1/teams", json={"name": "filter-owner-2"})
@@ -61,7 +64,7 @@ class TestAssetsAPI:
         assets = data["results"]
         assert all(a["owner_team_id"] == team1_id for a in assets)
 
-    async def test_update_asset(self, client: AsyncClient):
+    async def test_update_asset(self, client: AsyncClient) -> None:
         """Update an asset."""
         team_resp = await client.post("/api/v1/teams", json={"name": "update-asset-team"})
         team_id = team_resp.json()["id"]
@@ -79,12 +82,71 @@ class TestAssetsAPI:
         data = resp.json()
         assert data["fqn"] == "updated.asset.name"
 
-    async def test_get_asset_not_found(self, client: AsyncClient):
+    async def test_get_asset_not_found(self, client: AsyncClient) -> None:
         """Getting nonexistent asset should 404."""
         resp = await client.get("/api/v1/assets/00000000-0000-0000-0000-000000000000")
         assert resp.status_code == 404
 
-    async def test_get_asset_lineage(self, client: AsyncClient):
+    async def test_get_asset_with_service_and_repo(
+        self, client: AsyncClient, session: AsyncSession
+    ) -> None:
+        """get_asset returns service_name, repo_id, and repo_name when linked."""
+        team = TeamDB(name="svc-repo-team")
+        session.add(team)
+        await session.flush()
+
+        repo = RepoDB(
+            name="order-repo",
+            git_url="https://github.com/acme/order-repo.git",
+            owner_team_id=team.id,
+        )
+        session.add(repo)
+        await session.flush()
+
+        service = ServiceDB(
+            name="order-service",
+            repo_id=repo.id,
+        )
+        session.add(service)
+        await session.flush()
+
+        asset = AssetDB(
+            fqn="orders.public.orders",
+            owner_team_id=team.id,
+            service_id=service.id,
+        )
+        session.add(asset)
+        await session.flush()
+
+        resp = await client.get(f"/api/v1/assets/{asset.id}")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["service_id"] == str(service.id)
+        assert data["service_name"] == "order-service"
+        assert data["repo_id"] == str(repo.id)
+        assert data["repo_name"] == "order-repo"
+        assert data["owner_team_name"] == "svc-repo-team"
+
+    async def test_get_asset_without_service(self, client: AsyncClient) -> None:
+        """get_asset returns null service/repo fields when asset has no service."""
+        team_resp = await client.post("/api/v1/teams", json={"name": "no-svc-team"})
+        team_id = team_resp.json()["id"]
+
+        asset_resp = await client.post(
+            "/api/v1/assets",
+            json={"fqn": "raw.events.clicks", "owner_team_id": team_id},
+        )
+        asset_id = asset_resp.json()["id"]
+
+        resp = await client.get(f"/api/v1/assets/{asset_id}")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["service_id"] is None
+        assert data["service_name"] is None
+        assert data["repo_id"] is None
+        assert data["repo_name"] is None
+
+    async def test_get_asset_lineage(self, client: AsyncClient) -> None:
         """Get asset lineage (downstream consumers)."""
         producer_resp = await client.post("/api/v1/teams", json={"name": "lineage-prod"})
         consumer_resp = await client.post("/api/v1/teams", json={"name": "lineage-cons"})
@@ -124,7 +186,7 @@ class TestAssetsAPI:
 class TestImpactAnalysis:
     """Tests for impact analysis endpoint."""
 
-    async def test_impact_analysis_no_contract(self, client: AsyncClient):
+    async def test_impact_analysis_no_contract(self, client: AsyncClient) -> None:
         """Impact analysis on asset with no contract should be safe."""
         team_resp = await client.post("/api/v1/teams", json={"name": "impact-team"})
         team_id = team_resp.json()["id"]
@@ -142,7 +204,7 @@ class TestImpactAnalysis:
         assert data["safe_to_publish"] is True
         assert data["breaking_changes"] == []
 
-    async def test_impact_analysis_breaking_change(self, client: AsyncClient):
+    async def test_impact_analysis_breaking_change(self, client: AsyncClient) -> None:
         """Impact analysis should detect breaking changes."""
         team_resp = await client.post("/api/v1/teams", json={"name": "impact-break"})
         team_id = team_resp.json()["id"]
@@ -183,7 +245,7 @@ class TestImpactAnalysis:
         assert data["change_type"] == "major"
         assert len(data["breaking_changes"]) > 0
 
-    async def test_impact_analysis_with_consumers(self, client: AsyncClient):
+    async def test_impact_analysis_with_consumers(self, client: AsyncClient) -> None:
         """Impact analysis should list impacted consumers."""
         producer_resp = await client.post("/api/v1/teams", json={"name": "impact-producer"})
         consumer_resp = await client.post("/api/v1/teams", json={"name": "impact-consumer"})
@@ -222,7 +284,7 @@ class TestImpactAnalysis:
         assert len(data["impacted_consumers"]) == 1
         assert data["impacted_consumers"][0]["team_name"] == "impact-consumer"
 
-    async def test_impact_analysis_invalid_schema(self, client: AsyncClient):
+    async def test_impact_analysis_invalid_schema(self, client: AsyncClient) -> None:
         """Impact analysis with invalid schema should fail."""
         team_resp = await client.post("/api/v1/teams", json={"name": "impact-invalid"})
         team_id = team_resp.json()["id"]
@@ -237,7 +299,7 @@ class TestImpactAnalysis:
         )
         assert resp.status_code == 400  # BadRequestError for invalid schema
 
-    async def test_impact_analysis_asset_not_found(self, client: AsyncClient):
+    async def test_impact_analysis_asset_not_found(self, client: AsyncClient) -> None:
         """Impact analysis on nonexistent asset should 404."""
         resp = await client.post(
             "/api/v1/assets/00000000-0000-0000-0000-000000000000/impact",
@@ -249,7 +311,7 @@ class TestImpactAnalysis:
 class TestAssetSearch:
     """Tests for asset search endpoint."""
 
-    async def test_search_assets(self, client: AsyncClient):
+    async def test_search_assets(self, client: AsyncClient) -> None:
         """Search assets by FQN pattern."""
         team_resp = await client.post("/api/v1/teams", json={"name": "search-owner"})
         team_id = team_resp.json()["id"]
@@ -270,7 +332,7 @@ class TestAssetSearch:
         assert data["total"] >= 2
         assert all("search.test" in r["fqn"] for r in data["results"])
 
-    async def test_search_assets_with_owner_filter(self, client: AsyncClient):
+    async def test_search_assets_with_owner_filter(self, client: AsyncClient) -> None:
         """Search assets filtered by owner."""
         team1_resp = await client.post("/api/v1/teams", json={"name": "search-owner-1"})
         team2_resp = await client.post("/api/v1/teams", json={"name": "search-owner-2"})
@@ -289,7 +351,7 @@ class TestAssetSearch:
         data = resp.json()
         assert all(r["owner_team_id"] == team1_id for r in data["results"])
 
-    async def test_search_query_max_length_validation(self, client: AsyncClient):
+    async def test_search_query_max_length_validation(self, client: AsyncClient) -> None:
         """Search query exceeding 100 characters returns 422 error with appropriate message."""
         long_query = "a" * 101
         resp = await client.get(f"/api/v1/assets/search?q={long_query}")
@@ -300,7 +362,7 @@ class TestAssetSearch:
         error_detail = str(resp_data)
         assert "string should have at most 100 characters" in error_detail.lower()
 
-    async def test_search_query_min_length_validation(self, client: AsyncClient):
+    async def test_search_query_min_length_validation(self, client: AsyncClient) -> None:
         """Empty search query returns 422 error (min_length=1 validation)."""
         resp = await client.get("/api/v1/assets/search?q=")
         assert resp.status_code == 422
@@ -312,7 +374,7 @@ class TestAssetSearch:
 class TestAssetDependencies:
     """Tests for asset dependencies endpoints."""
 
-    async def test_create_dependency(self, client: AsyncClient):
+    async def test_create_dependency(self, client: AsyncClient) -> None:
         """Create a dependency between assets."""
         team_resp = await client.post("/api/v1/teams", json={"name": "dep-owner"})
         team_id = team_resp.json()["id"]
@@ -336,7 +398,7 @@ class TestAssetDependencies:
         assert data["dependency_asset_id"] == upstream_id
         assert data["dependency_type"] == "transforms"
 
-    async def test_list_dependencies(self, client: AsyncClient):
+    async def test_list_dependencies(self, client: AsyncClient) -> None:
         """List dependencies for an asset."""
         team_resp = await client.post("/api/v1/teams", json={"name": "list-dep-owner"})
         team_id = team_resp.json()["id"]
@@ -363,7 +425,7 @@ class TestAssetDependencies:
         assert len(data["results"]) == 1
         assert data["results"][0]["dependency_asset_id"] == upstream_id
 
-    async def test_delete_dependency(self, client: AsyncClient):
+    async def test_delete_dependency(self, client: AsyncClient) -> None:
         """Delete a dependency."""
         team_resp = await client.post("/api/v1/teams", json={"name": "del-dep-owner"})
         team_id = team_resp.json()["id"]
@@ -392,7 +454,7 @@ class TestAssetDependencies:
         assert list_resp.json()["total"] == 0
         assert len(list_resp.json()["results"]) == 0
 
-    async def test_self_dependency_fails(self, client: AsyncClient):
+    async def test_self_dependency_fails(self, client: AsyncClient) -> None:
         """Asset cannot depend on itself."""
         team_resp = await client.post("/api/v1/teams", json={"name": "self-dep-owner"})
         team_id = team_resp.json()["id"]
@@ -411,7 +473,7 @@ class TestAssetDependencies:
         error_msg = data.get("detail") or data.get("error", {}).get("message", "")
         assert "cannot depend on itself" in error_msg
 
-    async def test_duplicate_dependency_fails(self, client: AsyncClient):
+    async def test_duplicate_dependency_fails(self, client: AsyncClient) -> None:
         """Duplicate dependencies should fail."""
         team_resp = await client.post("/api/v1/teams", json={"name": "dup-dep-owner"})
         team_id = team_resp.json()["id"]
@@ -440,7 +502,7 @@ class TestAssetDependencies:
         error_msg = data.get("detail") or data.get("error", {}).get("message", "")
         assert "already exists" in error_msg
 
-    async def test_dependency_asset_not_found(self, client: AsyncClient):
+    async def test_dependency_asset_not_found(self, client: AsyncClient) -> None:
         """Dependency on nonexistent asset should fail."""
         team_resp = await client.post("/api/v1/teams", json={"name": "notfound-dep-owner"})
         team_id = team_resp.json()["id"]
@@ -459,7 +521,7 @@ class TestAssetDependencies:
         )
         assert resp.status_code == 404
 
-    async def test_delete_dependency_not_found(self, client: AsyncClient):
+    async def test_delete_dependency_not_found(self, client: AsyncClient) -> None:
         """Deleting nonexistent dependency should 404."""
         team_resp = await client.post("/api/v1/teams", json={"name": "del-notfound-owner"})
         team_id = team_resp.json()["id"]
@@ -478,7 +540,7 @@ class TestAssetDependencies:
 class TestAssetLineage:
     """Tests for asset lineage endpoint."""
 
-    async def test_lineage_with_upstream_dependencies(self, client: AsyncClient):
+    async def test_lineage_with_upstream_dependencies(self, client: AsyncClient) -> None:
         """Lineage should show upstream dependencies."""
         team_resp = await client.post("/api/v1/teams", json={"name": "lineage-up-owner"})
         team_id = team_resp.json()["id"]
@@ -504,7 +566,7 @@ class TestAssetLineage:
         assert len(data["upstream"]) == 1
         assert data["upstream"][0]["asset_fqn"] == "lineageup.upstream.table"
 
-    async def test_lineage_with_downstream_assets(self, client: AsyncClient):
+    async def test_lineage_with_downstream_assets(self, client: AsyncClient) -> None:
         """Lineage should show downstream assets (reverse dependencies)."""
         team_resp = await client.post("/api/v1/teams", json={"name": "lineage-down-owner"})
         team_id = team_resp.json()["id"]
@@ -530,7 +592,7 @@ class TestAssetLineage:
         assert len(data["downstream_assets"]) == 1
         assert data["downstream_assets"][0]["asset_fqn"] == "lineagedown.downstream.table"
 
-    async def test_lineage_asset_not_found(self, client: AsyncClient):
+    async def test_lineage_asset_not_found(self, client: AsyncClient) -> None:
         """Lineage on nonexistent asset should 404."""
         resp = await client.get("/api/v1/assets/00000000-0000-0000-0000-000000000000/lineage")
         assert resp.status_code == 404
@@ -539,7 +601,7 @@ class TestAssetLineage:
 class TestAssetUpdate:
     """Tests for asset update endpoint."""
 
-    async def test_update_asset_owner(self, client: AsyncClient):
+    async def test_update_asset_owner(self, client: AsyncClient) -> None:
         """Update asset owner team."""
         team1_resp = await client.post("/api/v1/teams", json={"name": "update-owner-1"})
         team2_resp = await client.post("/api/v1/teams", json={"name": "update-owner-2"})
@@ -558,7 +620,7 @@ class TestAssetUpdate:
         assert resp.status_code == 200
         assert resp.json()["owner_team_id"] == team2_id
 
-    async def test_update_asset_metadata(self, client: AsyncClient):
+    async def test_update_asset_metadata(self, client: AsyncClient) -> None:
         """Update asset metadata."""
         team_resp = await client.post("/api/v1/teams", json={"name": "update-meta-owner"})
         team_id = team_resp.json()["id"]
@@ -575,7 +637,7 @@ class TestAssetUpdate:
         assert resp.status_code == 200
         assert resp.json()["metadata"]["tier"] == "gold"
 
-    async def test_update_asset_not_found(self, client: AsyncClient):
+    async def test_update_asset_not_found(self, client: AsyncClient) -> None:
         """Updating nonexistent asset should 404."""
         resp = await client.patch(
             "/api/v1/assets/00000000-0000-0000-0000-000000000000",
@@ -587,7 +649,7 @@ class TestAssetUpdate:
 class TestVersionSuggestionPreview:
     """Tests for POST /api/v1/assets/{asset_id}/version-suggestion endpoint."""
 
-    async def test_first_contract_suggests_1_0_0(self, client: AsyncClient):
+    async def test_first_contract_suggests_1_0_0(self, client: AsyncClient) -> None:
         """First contract for an asset should suggest version 1.0.0."""
         team_resp = await client.post("/api/v1/teams", json={"name": "version-first"})
         team_id = team_resp.json()["id"]
@@ -608,7 +670,7 @@ class TestVersionSuggestionPreview:
         assert data["is_first_contract"] is True
         assert data["breaking_changes"] == []
 
-    async def test_compatible_change_suggests_minor_bump(self, client: AsyncClient):
+    async def test_compatible_change_suggests_minor_bump(self, client: AsyncClient) -> None:
         """Adding a new optional property should suggest minor version bump."""
         team_resp = await client.post("/api/v1/teams", json={"name": "version-minor"})
         team_id = team_resp.json()["id"]
@@ -649,7 +711,7 @@ class TestVersionSuggestionPreview:
         assert data["is_first_contract"] is False
         assert data["breaking_changes"] == []
 
-    async def test_breaking_change_suggests_major_bump(self, client: AsyncClient):
+    async def test_breaking_change_suggests_major_bump(self, client: AsyncClient) -> None:
         """Removing a property should suggest major version bump with breaking changes."""
         team_resp = await client.post("/api/v1/teams", json={"name": "version-major"})
         team_id = team_resp.json()["id"]
@@ -697,7 +759,7 @@ class TestVersionSuggestionPreview:
         assert "email" in breaking["path"]
         assert breaking["type"] == "property_removed"
 
-    async def test_no_change_suggests_patch_bump(self, client: AsyncClient):
+    async def test_no_change_suggests_patch_bump(self, client: AsyncClient) -> None:
         """Identical schema should suggest patch version bump."""
         team_resp = await client.post("/api/v1/teams", json={"name": "version-patch"})
         team_id = team_resp.json()["id"]
@@ -730,7 +792,7 @@ class TestVersionSuggestionPreview:
         assert data["change_type"] == "patch"
         assert data["breaking_changes"] == []
 
-    async def test_asset_not_found(self, client: AsyncClient):
+    async def test_asset_not_found(self, client: AsyncClient) -> None:
         """Version suggestion on nonexistent asset should 404."""
         resp = await client.post(
             "/api/v1/assets/00000000-0000-0000-0000-000000000000/version-suggestion",
@@ -738,7 +800,7 @@ class TestVersionSuggestionPreview:
         )
         assert resp.status_code == 404
 
-    async def test_invalid_schema(self, client: AsyncClient):
+    async def test_invalid_schema(self, client: AsyncClient) -> None:
         """Version suggestion with invalid JSON Schema should fail."""
         team_resp = await client.post("/api/v1/teams", json={"name": "version-invalid"})
         team_id = team_resp.json()["id"]
@@ -754,7 +816,7 @@ class TestVersionSuggestionPreview:
         )
         assert resp.status_code == 400
 
-    async def test_adding_required_field_is_breaking(self, client: AsyncClient):
+    async def test_adding_required_field_is_breaking(self, client: AsyncClient) -> None:
         """Adding a required field should be detected as breaking change."""
         team_resp = await client.post("/api/v1/teams", json={"name": "version-required"})
         team_id = team_resp.json()["id"]

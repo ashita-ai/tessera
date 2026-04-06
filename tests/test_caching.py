@@ -128,9 +128,17 @@ class TestCaching:
             resource_type=ResourceType.MODEL,
             semver_mode=SemverMode.AUTO,
         )
-        # The query returns a 4-tuple: (asset, team_name, user_name, user_email)
+        # 7-tuple: asset + team/user/service/repo enrichment
         mock_result = MagicMock()
-        mock_result.one_or_none.return_value = (mock_asset, "Test Team", None, None)
+        mock_result.one_or_none.return_value = (
+            mock_asset,
+            "Test Team",
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
         mock_session.execute.return_value = mock_result
 
         res = await get_asset(
@@ -161,9 +169,17 @@ class TestCaching:
             resource_type=ResourceType.MODEL,
             semver_mode=SemverMode.AUTO,
         )
-        # The query returns a 4-tuple: (asset, team_name, user_name, user_email)
+        # 7-tuple: asset + team/user/service/repo enrichment
         mock_result = MagicMock()
-        mock_result.one_or_none.return_value = (mock_asset, "Test Team", None, None)
+        mock_result.one_or_none.return_value = (
+            mock_asset,
+            "Test Team",
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
         mock_session.execute.return_value = mock_result
 
         res = await get_asset(
