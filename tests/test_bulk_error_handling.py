@@ -20,7 +20,7 @@ async def _setup_team_and_contract(client: AsyncClient) -> tuple[str, str, str]:
     asset_id = asset_resp.json()["id"]
 
     contract_resp = await client.post(
-        f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+        f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
         json={
             "version": "1.0.0",
             "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -76,7 +76,7 @@ class TestBulkRegistrationErrorHandling:
         )
         asset2_id = asset2_resp.json()["id"]
         contract2_resp = await client.post(
-            f"/api/v1/assets/{asset2_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset2_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -125,7 +125,7 @@ class TestBulkRegistrationErrorHandling:
         )
         asset2_id = asset2_resp.json()["id"]
         contract2_resp = await client.post(
-            f"/api/v1/assets/{asset2_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset2_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -209,7 +209,7 @@ class TestBulkAcknowledgmentErrorHandling:
 
         # Create contract + registration to enable proposals
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -228,7 +228,7 @@ class TestBulkAcknowledgmentErrorHandling:
 
         # Breaking change to create a proposal
         proposal_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
             json={
                 "version": "2.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},

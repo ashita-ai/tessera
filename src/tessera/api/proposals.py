@@ -560,7 +560,6 @@ async def get_pending_proposals(
 
 @router.get(
     "/{proposal_id}",
-    response_model=Proposal,
     responses={k: _E[k] for k in (401, 403, 404)},
 )
 @limit_read
@@ -568,18 +567,40 @@ async def get_proposal(
     request: Request,
     auth: Auth,
     proposal_id: UUID,
+    include_status: bool = Query(
+        True,
+        description=(
+            "Include acknowledgment status and consumer details. "
+            "Set to false for a lightweight response matching the Proposal model only."
+        ),
+    ),
     _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
-) -> ProposalDB:
+) -> Proposal | dict[str, Any]:
     """Get a proposal by ID.
+
+    By default returns the full proposal with acknowledgment progress,
+    consumer details, and audit status (same shape as ``/{proposal_id}/status``).
+    Pass ``include_status=false`` for a lightweight response.
 
     Requires read scope.
     """
-    result = await session.execute(select(ProposalDB).where(ProposalDB.id == proposal_id))
-    proposal = result.scalar_one_or_none()
-    if not proposal:
-        raise NotFoundError(ErrorCode.PROPOSAL_NOT_FOUND, "Proposal not found")
-    return proposal
+    if not include_status:
+        result = await session.execute(select(ProposalDB).where(ProposalDB.id == proposal_id))
+        proposal = result.scalar_one_or_none()
+        if not proposal:
+            raise NotFoundError(ErrorCode.PROPOSAL_NOT_FOUND, "Proposal not found")
+        return Proposal.model_validate(proposal)
+
+    # Full response — delegate to the status endpoint logic
+    status_data: dict[str, Any] = await get_proposal_status(
+        request=request,
+        auth=auth,
+        proposal_id=proposal_id,
+        _=None,
+        session=session,
+    )
+    return status_data
 
 
 @router.get("/{proposal_id}/status", responses={k: _E[k] for k in (401, 403, 404)})
@@ -715,9 +736,13 @@ async def get_proposal_status(
             "Consider fixing audits before publishing."
         )
 
+    # Build the full proposal model to include affected parties and objections
+    proposal_model = Proposal.model_validate(proposal)
+
     return {
         "proposal_id": str(proposal.id),
         "status": str(proposal.status),
+        "asset_id": str(proposal.asset_id),
         "asset_fqn": asset.fqn if asset else None,
         "change_type": str(proposal.change_type),
         "breaking_changes": proposal.breaking_changes,
@@ -729,6 +754,13 @@ async def get_proposal_status(
         },
         "proposed_at": proposal.proposed_at.isoformat(),
         "resolved_at": proposal.resolved_at.isoformat() if proposal.resolved_at else None,
+        "expires_at": proposal.expires_at.isoformat() if proposal.expires_at else None,
+        "auto_expire": proposal.auto_expire,
+        "proposed_schema": proposal.proposed_schema,
+        "affected_teams": [t.model_dump() for t in proposal_model.affected_teams],
+        "affected_assets": [a.model_dump() for a in proposal_model.affected_assets],
+        "objections": [o.model_dump() for o in proposal_model.objections],
+        "has_objections": proposal_model.has_objections,
         "consumers": {
             "total": total_consumers,
             "acknowledged": len(acknowledgments),

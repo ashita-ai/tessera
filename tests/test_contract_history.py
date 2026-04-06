@@ -19,7 +19,7 @@ class TestContractHistory:
         asset_id = asset_resp.json()["id"]
 
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -47,7 +47,7 @@ class TestContractHistory:
 
         # Create first version
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -57,7 +57,7 @@ class TestContractHistory:
 
         # Add optional field (minor change)
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.1.0",
                 "schema": {
@@ -99,7 +99,7 @@ class TestContractDiff:
         asset_id = asset_resp.json()["id"]
 
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -108,7 +108,7 @@ class TestContractDiff:
         )
 
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.1.0",
                 "schema": {
@@ -141,7 +141,7 @@ class TestContractDiff:
         asset_id = asset_resp.json()["id"]
 
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -155,7 +155,7 @@ class TestContractDiff:
 
         # Force publish breaking change to create v2
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}&force=true"
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}&force=true"
             "&force_reason=Removing email field as part of PII cleanup migration",
             json={
                 "version": "2.0.0",
@@ -187,7 +187,7 @@ class TestContractDiff:
         asset_id = asset_resp.json()["id"]
 
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {"type": "object"},
@@ -210,7 +210,7 @@ class TestContractDiff:
         asset_id = asset_resp.json()["id"]
 
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {"type": "object"},

@@ -86,7 +86,7 @@ class TestAutoSemverMode:
         # Publish first contract without version
         schema = make_schema(id="integer", name="string")
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts",
+            f"/api/v1/assets/{asset_id}/publish",
             params={"published_by": team_id},
             json={"schema": schema},
         )
@@ -111,7 +111,7 @@ class TestAutoSemverMode:
         # Publish first contract
         schema_v1 = make_schema(id="integer", name="string")
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts",
+            f"/api/v1/assets/{asset_id}/publish",
             params={"published_by": team_id},
             json={"schema": schema_v1, "version": "1.0.0"},
         )
@@ -128,7 +128,7 @@ class TestAutoSemverMode:
             "required": ["id", "name"],
         }
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts",
+            f"/api/v1/assets/{asset_id}/publish",
             params={"published_by": team_id},
             json={"schema": schema_v2},  # No version - should auto-bump
         )
@@ -156,7 +156,7 @@ class TestSuggestSemverMode:
         # First contract - should return version_required action
         schema = make_schema(id="integer", name="string")
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts",
+            f"/api/v1/assets/{asset_id}/publish",
             params={"published_by": team_id},
             json={"schema": schema},
         )
@@ -183,7 +183,7 @@ class TestSuggestSemverMode:
         # First contract with explicit version
         schema = make_schema(id="integer", name="string")
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts",
+            f"/api/v1/assets/{asset_id}/publish",
             params={"published_by": team_id},
             json={"schema": schema, "version": "1.0.0"},
         )
@@ -205,7 +205,7 @@ class TestSuggestSemverMode:
         # First contract
         schema_v1 = make_schema(id="integer", name="string")
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts",
+            f"/api/v1/assets/{asset_id}/publish",
             params={"published_by": team_id},
             json={"schema": schema_v1, "version": "1.0.0"},
         )
@@ -222,7 +222,7 @@ class TestSuggestSemverMode:
             "required": ["id", "name"],
         }
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts",
+            f"/api/v1/assets/{asset_id}/publish",
             params={"published_by": team_id},
             json={"schema": schema_v2},
         )
@@ -251,7 +251,7 @@ class TestEnforceSemverMode:
         # First contract
         schema_v1 = make_schema(id="integer", name="string")
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts",
+            f"/api/v1/assets/{asset_id}/publish",
             params={"published_by": team_id},
             json={"schema": schema_v1, "version": "1.0.0"},
         )
@@ -268,7 +268,7 @@ class TestEnforceSemverMode:
             "required": ["id", "name"],
         }
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts",
+            f"/api/v1/assets/{asset_id}/publish",
             params={"published_by": team_id},
             json={"schema": schema_v2, "version": "1.0.1"},  # Wrong - should be 1.1.0
         )
@@ -293,7 +293,7 @@ class TestEnforceSemverMode:
         # First contract
         schema_v1 = make_schema(id="integer", name="string")
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts",
+            f"/api/v1/assets/{asset_id}/publish",
             params={"published_by": team_id},
             json={"schema": schema_v1, "version": "1.0.0"},
         )
@@ -310,7 +310,7 @@ class TestEnforceSemverMode:
             "required": ["id", "name"],
         }
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts",
+            f"/api/v1/assets/{asset_id}/publish",
             params={"published_by": team_id},
             json={"schema": schema_v2, "version": "1.1.0"},
         )
@@ -332,7 +332,7 @@ class TestEnforceSemverMode:
         # First contract
         schema_v1 = make_schema(id="integer", name="string")
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts",
+            f"/api/v1/assets/{asset_id}/publish",
             params={"published_by": team_id},
             json={"schema": schema_v1, "version": "1.0.0"},
         )
@@ -349,7 +349,7 @@ class TestEnforceSemverMode:
             "required": ["id", "name"],
         }
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts",
+            f"/api/v1/assets/{asset_id}/publish",
             params={"published_by": team_id},
             json={"schema": schema_v2, "version": "2.0.0"},  # Major bump for minor change is OK
         )
@@ -371,7 +371,7 @@ class TestEnforceSemverMode:
         # First contract
         schema_v1 = make_schema(id="integer", name="string")
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts",
+            f"/api/v1/assets/{asset_id}/publish",
             params={"published_by": team_id},
             json={"schema": schema_v1, "version": "1.0.0"},
         )
@@ -380,7 +380,7 @@ class TestEnforceSemverMode:
         # Remove required field (breaking change)
         schema_v2 = make_schema(id="integer")  # Removed 'name'
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts",
+            f"/api/v1/assets/{asset_id}/publish",
             params={
                 "published_by": team_id,
                 "force": "true",
@@ -412,7 +412,7 @@ class TestVersionValidation:
         # First contract
         schema_v1 = make_schema(id="integer", name="string")
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts",
+            f"/api/v1/assets/{asset_id}/publish",
             params={"published_by": team_id},
             json={"schema": schema_v1, "version": "2.0.0"},  # Start at 2.0.0
         )
@@ -429,7 +429,7 @@ class TestVersionValidation:
             "required": ["id", "name"],
         }
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts",
+            f"/api/v1/assets/{asset_id}/publish",
             params={"published_by": team_id},
             json={"schema": schema_v2, "version": "1.5.0"},  # Lower than 2.0.0
         )
@@ -455,7 +455,7 @@ class TestVersionSuggestionModel:
         # First contract request
         schema = make_schema(id="integer", name="string")
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts",
+            f"/api/v1/assets/{asset_id}/publish",
             params={"published_by": team_id},
             json={"schema": schema},
         )
@@ -493,7 +493,7 @@ class TestPrereleaseVersions:
 
         schema = make_schema(id="integer", name="string")
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts",
+            f"/api/v1/assets/{asset_id}/publish",
             params={"published_by": team_id},
             json={"schema": schema, "version": version},
         )
@@ -514,7 +514,7 @@ class TestPrereleaseVersions:
         # Publish first contract
         schema_v1 = make_schema(id="integer", name="string")
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts",
+            f"/api/v1/assets/{asset_id}/publish",
             params={"published_by": team_id},
             json={"schema": schema_v1, "version": "1.0.0-alpha"},
         )
@@ -533,7 +533,7 @@ class TestPrereleaseVersions:
         # Publish breaking change with prerelease version - should NOT create proposal
         schema_v2 = make_schema(id="integer")  # Removed 'name' field
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts",
+            f"/api/v1/assets/{asset_id}/publish",
             params={"published_by": team_id},
             json={"schema": schema_v2, "version": "1.0.0-alpha.2"},
         )
@@ -557,7 +557,7 @@ class TestPrereleaseVersions:
         # Publish first contract (stable version)
         schema_v1 = make_schema(id="integer", name="string")
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts",
+            f"/api/v1/assets/{asset_id}/publish",
             params={"published_by": team_id},
             json={"schema": schema_v1, "version": "1.0.0"},
         )
@@ -576,7 +576,7 @@ class TestPrereleaseVersions:
         # Breaking change with stable version - should create proposal
         schema_v2 = make_schema(id="integer")  # Removed 'name' field
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts",
+            f"/api/v1/assets/{asset_id}/publish",
             params={"published_by": team_id},
             json={"schema": schema_v2, "version": "2.0.0"},
         )
@@ -602,7 +602,7 @@ class TestPrereleaseGraduation:
         # Publish alpha version
         schema = make_schema(id="integer", name="string")
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts",
+            f"/api/v1/assets/{asset_id}/publish",
             params={"published_by": team_id},
             json={"schema": schema, "version": "1.0.0-alpha"},
         )
@@ -610,7 +610,7 @@ class TestPrereleaseGraduation:
 
         # Graduate to stable - same schema (compatible, auto-publishes)
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts",
+            f"/api/v1/assets/{asset_id}/publish",
             params={"published_by": team_id},
             json={"schema": schema, "version": "1.0.0"},
         )
@@ -633,7 +633,7 @@ class TestPrereleaseGraduation:
         # Publish RC version
         schema = make_schema(id="integer", name="string")
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts",
+            f"/api/v1/assets/{asset_id}/publish",
             params={"published_by": team_id},
             json={"schema": schema, "version": "1.0.0-rc.1"},
         )
@@ -641,7 +641,7 @@ class TestPrereleaseGraduation:
 
         # Graduate to stable (compatible, auto-publishes)
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts",
+            f"/api/v1/assets/{asset_id}/publish",
             params={"published_by": team_id},
             json={"schema": schema, "version": "1.0.0"},
         )
@@ -664,7 +664,7 @@ class TestPrereleaseGraduation:
         # Publish alpha with full schema
         schema_v1 = make_schema(id="integer", name="string", email="string")
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts",
+            f"/api/v1/assets/{asset_id}/publish",
             params={"published_by": team_id},
             json={"schema": schema_v1, "version": "1.0.0-alpha"},
         )
@@ -682,7 +682,7 @@ class TestPrereleaseGraduation:
         # Graduate with breaking change (removed email field)
         schema_v2 = make_schema(id="integer", name="string")
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts",
+            f"/api/v1/assets/{asset_id}/publish",
             params={"published_by": team_id},
             json={"schema": schema_v2, "version": "1.0.0"},
         )
@@ -706,7 +706,7 @@ class TestPrereleaseGraduation:
         # Publish alpha
         schema = make_schema(id="integer", name="string")
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts",
+            f"/api/v1/assets/{asset_id}/publish",
             params={"published_by": team_id},
             json={"schema": schema, "version": "1.0.0-alpha"},
         )
@@ -714,7 +714,7 @@ class TestPrereleaseGraduation:
 
         # Publish 1.1.0 (different base version) - this is a normal publish
         resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts",
+            f"/api/v1/assets/{asset_id}/publish",
             params={"published_by": team_id},
             json={"schema": schema, "version": "1.1.0"},
         )

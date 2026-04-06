@@ -387,7 +387,7 @@ async def _setup_test_data(client: AsyncClient) -> dict:
 
     # Publish a contract
     resp = await client.post(
-        f"/api/v1/assets/{asset_id}/contracts",
+        f"/api/v1/assets/{asset_id}/publish",
         params={"published_by": owner_team_id},
         json={
             "version": "1.0.0",

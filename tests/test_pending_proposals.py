@@ -28,7 +28,7 @@ async def _setup_proposal_scenario(client: AsyncClient) -> dict:
 
     # Publish initial contract
     contract_resp = await client.post(
-        f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+        f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
         json={
             "version": "1.0.0",
             "schema": {
@@ -54,7 +54,7 @@ async def _setup_proposal_scenario(client: AsyncClient) -> dict:
 
     # Publish breaking change (removes 'email' field) → creates proposal
     breaking_resp = await client.post(
-        f"/api/v1/assets/{asset_id}/contracts?published_by={producer_id}",
+        f"/api/v1/assets/{asset_id}/publish?published_by={producer_id}",
         json={
             "version": "2.0.0",
             "schema": {

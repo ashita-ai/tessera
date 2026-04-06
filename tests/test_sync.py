@@ -265,7 +265,7 @@ class TestDbtImpact:
         asset_id = asset_resp.json()["id"]
 
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -319,7 +319,7 @@ class TestDbtImpact:
         asset_id = asset_resp.json()["id"]
 
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -416,7 +416,7 @@ class TestDbtImpact:
         asset_id = asset_resp.json()["id"]
 
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -760,7 +760,7 @@ class TestDbtAutoCreateProposals:
 
         # Publish initial contract
         contract_resp = await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -840,7 +840,7 @@ class TestDbtAutoCreateProposals:
 
         # Publish initial contract
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -901,7 +901,7 @@ class TestDbtAutoCreateProposals:
 
         # Publish initial contract
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -1019,7 +1019,7 @@ class TestDbtAutoPublishContractsExisting:
 
         # Publish initial contract v1.0.0
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {
@@ -1092,7 +1092,7 @@ class TestDbtAutoRegisterConsumersExisting:
         upstream_id = upstream_resp.json()["id"]
 
         await client.post(
-            f"/api/v1/assets/{upstream_id}/contracts?published_by={producer_team_id}",
+            f"/api/v1/assets/{upstream_id}/publish?published_by={producer_team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -1188,7 +1188,7 @@ class TestDbtDiff:
 
         # Publish contract
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
@@ -1233,7 +1233,7 @@ class TestDbtDiff:
         asset_id = asset_resp.json()["id"]
 
         await client.post(
-            f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
             json={
                 "version": "1.0.0",
                 "schema": {

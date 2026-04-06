@@ -5,13 +5,14 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy import cast, or_, select
+from sqlalchemy import cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.types import String
 
 from tessera.api.auth import Auth, RequireRead
 from tessera.db import get_session
 from tessera.db.models import AssetDB, ContractDB, TeamDB, UserDB
+from tessera.models.enums import ResourceType
 from tessera.services.cache import cache_global_search, get_cached_global_search
 
 router = APIRouter(prefix="/search", tags=["search"])
@@ -96,6 +97,10 @@ async def search(
     limit: int = Query(10, ge=1, le=50, description="Max results per entity type"),
     types: list[SearchEntityType] | None = Query(None, description="Limit results to entity types"),
     tags: str | None = Query(None, description="Comma-separated tags to filter assets"),
+    resource_type: ResourceType | None = Query(None, description="Filter assets by resource type"),
+    team: str | None = Query(
+        None, description="Filter assets by owner team name (case-insensitive)"
+    ),
     _: None = RequireRead,
     session: AsyncSession = Depends(get_session),
 ) -> SearchResponse:
@@ -103,10 +108,15 @@ async def search(
 
     Returns results grouped by entity type with matches highlighted.
     Search is case-insensitive and matches partial strings.
+
+    Use ``resource_type`` and ``team`` to narrow asset results (e.g. for MCP
+    tool discovery).  These filters only affect the ``assets`` portion of the
+    response.
     """
     tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
 
-    if limit == 10 and not types and not tag_list:
+    has_filters = bool(types or tag_list or resource_type or team)
+    if limit == 10 and not has_filters:
         cached = await get_cached_global_search(q, limit)
         if cached:
             return SearchResponse.model_validate(cached)
@@ -146,7 +156,7 @@ async def search(
         )
         users = list(users_result.scalars().all())
 
-    # Search assets by FQN, optionally filtered by tags
+    # Search assets by FQN, optionally filtered by tags, resource_type, and team
     assets: list[AssetDB] = []
     if "assets" in type_values:
         asset_query = (
@@ -159,6 +169,13 @@ async def search(
             # Use a portable approach: cast tags to string and check for each tag.
             for tag in tag_list:
                 asset_query = asset_query.where(cast(AssetDB.tags, String).contains(f'"{tag}"'))
+        if resource_type is not None:
+            asset_query = asset_query.where(AssetDB.resource_type == resource_type)
+        if team:
+            # Join with teams table to filter by team name (exact, case-insensitive)
+            asset_query = asset_query.join(TeamDB, AssetDB.owner_team_id == TeamDB.id).where(
+                func.lower(TeamDB.name) == func.lower(team)
+            )
         assets_result = await session.execute(asset_query.limit(limit))
         assets = list(assets_result.scalars().all())
 
@@ -218,6 +235,6 @@ async def search(
             total=len(teams) + len(users) + len(assets) + len(contracts),
         ),
     )
-    if limit == 10 and not types and not tag_list:
+    if limit == 10 and not has_filters:
         await cache_global_search(q, limit, response.model_dump())
     return response

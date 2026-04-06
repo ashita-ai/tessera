@@ -24,6 +24,11 @@ class AssetBase(BaseModel):
         max_length=settings.max_fqn_length,
         description="Fully qualified name (e.g., 'snowflake.analytics.dim_customers')",
     )
+    description: str | None = Field(
+        None,
+        max_length=2000,
+        description="Human-readable description of what this asset represents",
+    )
     metadata: dict[str, Any] = Field(default_factory=dict)
     environment: str = Field(
         default_factory=lambda: settings.default_environment,
@@ -62,6 +67,7 @@ class AssetUpdate(BaseModel):
     """Fields for updating an asset."""
 
     fqn: str | None = Field(None, min_length=1, max_length=settings.max_fqn_length)
+    description: str | None = Field(None, max_length=2000)
     owner_team_id: UUID | None = None
     owner_user_id: UUID | None = None
     environment: str | None = Field(None, min_length=1, max_length=50)
@@ -79,6 +85,7 @@ class Asset(BaseModel):
 
     id: UUID
     fqn: str
+    description: str | None = None
     owner_team_id: UUID
     owner_user_id: UUID | None = None
     environment: str

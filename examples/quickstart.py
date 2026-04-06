@@ -112,7 +112,7 @@ def setup_http(client):
     contracts = _unpack(client.get(f"{BASE_URL}/assets/{asset['id']}/contracts").json())
     if not any(c["status"] == "active" for c in contracts):
         resp = client.post(
-            f"{BASE_URL}/assets/{asset['id']}/contracts",
+            f"{BASE_URL}/assets/{asset['id']}/publish",
             params={"published_by": producer["id"]},
             json={
                 "version": "1.0.0",
@@ -200,7 +200,7 @@ def example_3_http(asset: dict, producer: dict, client):
     _print_header("EXAMPLE 3: Breaking Change Creates a Proposal")
 
     result = client.post(
-        f"{BASE_URL}/assets/{asset['id']}/contracts",
+        f"{BASE_URL}/assets/{asset['id']}/publish",
         params={"published_by": producer["id"]},
         json={
             "version": "2.0.0",
@@ -275,7 +275,7 @@ def example_5_http(asset: dict, producer: dict, client):
     }
 
     result = client.post(
-        f"{BASE_URL}/assets/{asset['id']}/contracts",
+        f"{BASE_URL}/assets/{asset['id']}/publish",
         params={"published_by": producer["id"]},
         json={"version": "1.1.0", "schema": new_schema, "compatibility_mode": "backward"},
     ).json()

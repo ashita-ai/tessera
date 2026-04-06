@@ -21,7 +21,7 @@ async def _publish_contract(
     Returns the contract dict from the response.
     """
     resp = await client.post(
-        f"/api/v1/assets/{asset_id}/contracts?published_by={team_id}",
+        f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
         json=make_contract(version, schema, **kwargs),
     )
     assert resp.status_code == 201, f"Contract creation failed: {resp.json()}"

@@ -102,6 +102,7 @@ async def create_asset(
 
     db_asset = AssetDB(
         fqn=asset.fqn,
+        description=asset.description,
         owner_team_id=asset.owner_team_id,
         owner_user_id=asset.owner_user_id,
         environment=asset.environment,
@@ -218,6 +219,8 @@ async def update_asset(
 
     if update.fqn is not None:
         asset.fqn = update.fqn
+    if update.description is not None:
+        asset.description = update.description
     if update.environment is not None:
         asset.environment = update.environment
     if update.resource_type is not None:
