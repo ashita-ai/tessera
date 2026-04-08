@@ -31,6 +31,7 @@ from tessera.services.affected_parties import get_affected_parties
 from tessera.services.audit import (
     compute_schema_hash,
     log_contract_deprecated,
+    log_contract_publish_skipped,
     log_contract_published,
     log_guarantees_updated,
     log_proposal_created,
@@ -299,13 +300,26 @@ async def bulk_publish_contracts(
 
                 # No changes - skip
                 if not diff_result.has_changes:
+                    skip_reason = "No schema changes detected"
+                    if not dry_run:
+                        # current_version is always set here — we're past
+                        # the `if not current_contract` early-return above.
+                        assert current_version is not None
+                        await log_contract_publish_skipped(
+                            session=session,
+                            asset_id=item.asset_id,
+                            publisher_id=published_by,
+                            asset_fqn=asset.fqn,
+                            current_version=current_version,
+                            reason=skip_reason,
+                        )
                     results.append(
                         PublishResult(
                             asset_id=item.asset_id,
                             asset_fqn=asset.fqn,
                             status="will_skip" if dry_run else "skipped",
                             current_version=current_version,
-                            reason="No schema changes detected",
+                            reason=skip_reason,
                         )
                     )
                     skipped_count += 1
