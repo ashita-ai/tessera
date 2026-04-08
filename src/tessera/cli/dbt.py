@@ -400,6 +400,7 @@ def sync(
     publish_compatible: Annotated[
         bool, typer.Option("--publish-compatible", help="Auto-publish compatible schema changes")
     ] = False,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation prompt")] = False,
 ) -> None:
     """Sync dbt models with Tessera.
 
@@ -423,8 +424,9 @@ def sync(
         console.print("[dim]No models found in manifest[/dim]")
         raise typer.Exit(0)
 
-    created = 0
-    published = 0
+    # Categorize models into existing vs new by querying the API
+    existing_models: list[tuple[dict[str, Any], dict[str, Any]]] = []  # (model, asset)
+    new_models: list[dict[str, Any]] = []
     skipped = 0
     errors = 0
 
@@ -433,7 +435,6 @@ def sync(
             skipped += 1
             continue
 
-        # Check if asset exists
         resp = make_request("GET", "/assets/search", params={"q": model["fqn"], "limit": 1})
         if resp.status_code != 200:
             errors += 1
@@ -443,42 +444,58 @@ def sync(
         items = search_result.get("results", [])
 
         if items:
-            asset = items[0]
-            asset_id = asset["id"]
+            existing_models.append((model, items[0]))
+        else:
+            new_models.append(model)
 
-            if publish_compatible:
-                # Check if schema has changed (compatible changes only)
-                impact_resp = make_request(
-                    "POST",
-                    f"/assets/{asset_id}/impact",
-                    json_data={"proposed_schema": model["schema"]},
-                )
-                if impact_resp.status_code == 200:
-                    impact = impact_resp.json()
-                    if not impact.get("is_breaking") and impact.get("change_type") != "none":
-                        # Get current version and increment
-                        contracts_resp = make_request("GET", f"/assets/{asset_id}/contracts")
-                        if contracts_resp.status_code == 200:
-                            contracts = contracts_resp.json().get("results", [])
-                            current = next((c for c in contracts if c["status"] == "active"), None)
-                            if current:
-                                v = current.get("version", "1.0.0")
-                                parts = v.split(".")
-                                new_v = f"{parts[0]}.{int(parts[1]) + 1}.0"
-                                make_request(
-                                    "POST",
-                                    f"/assets/{asset_id}/publish",
-                                    json_data={
-                                        "version": new_v,
-                                        "schema": model["schema"],
-                                        "compatibility_mode": "backward",
-                                        "publisher_team_id": resolved_team_id,
-                                    },
-                                )
-                                published += 1
-                                console.print(f"[green]Published:[/green] {model['fqn']} v{new_v}")
-        elif create_assets:
-            # Create new asset
+    # Prompt before creating assets
+    if create_assets and new_models and not yes:
+        console.print(f"[yellow]{len(new_models)} new asset(s) will be created:[/yellow]")
+        for m in new_models:
+            console.print(f"  {m['fqn']}")
+        confirmed = typer.confirm("Proceed?")
+        if not confirmed:
+            raise typer.Abort()
+
+    created = 0
+    published = 0
+
+    # Handle existing models
+    for model, asset in existing_models:
+        asset_id = asset["id"]
+        if publish_compatible:
+            impact_resp = make_request(
+                "POST",
+                f"/assets/{asset_id}/impact",
+                json_data={"proposed_schema": model["schema"]},
+            )
+            if impact_resp.status_code == 200:
+                impact = impact_resp.json()
+                if not impact.get("is_breaking") and impact.get("change_type") != "none":
+                    contracts_resp = make_request("GET", f"/assets/{asset_id}/contracts")
+                    if contracts_resp.status_code == 200:
+                        contracts = contracts_resp.json().get("results", [])
+                        current = next((c for c in contracts if c["status"] == "active"), None)
+                        if current:
+                            v = current.get("version", "1.0.0")
+                            parts = v.split(".")
+                            new_v = f"{parts[0]}.{int(parts[1]) + 1}.0"
+                            make_request(
+                                "POST",
+                                f"/assets/{asset_id}/publish",
+                                json_data={
+                                    "version": new_v,
+                                    "schema": model["schema"],
+                                    "compatibility_mode": "backward",
+                                    "publisher_team_id": resolved_team_id,
+                                },
+                            )
+                            published += 1
+                            console.print(f"[green]Published:[/green] {model['fqn']} v{new_v}")
+
+    # Handle new models
+    if create_assets:
+        for model in new_models:
             create_resp = make_request(
                 "POST",
                 "/assets",
@@ -498,7 +515,6 @@ def sync(
                 created += 1
                 console.print(f"[green]Created:[/green] {model['fqn']}")
 
-                # Publish initial contract
                 if model["schema"]:
                     make_request(
                         "POST",

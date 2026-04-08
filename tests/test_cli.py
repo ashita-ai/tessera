@@ -21,10 +21,22 @@ def clean_ansi(text: str) -> str:
 class TestVersion:
     """Tests for the version command."""
 
-    def test_version(self) -> None:
-        result = runner.invoke(app, ["version"])
-        assert result.exit_code == 0
-        assert "tessera 0.1.0" in clean_ansi(result.output)
+    def test_version_from_package_metadata(self) -> None:
+        with patch("tessera.cli.importlib.metadata.version", return_value="2.3.1"):
+            result = runner.invoke(app, ["version"])
+            assert result.exit_code == 0
+            assert "tessera 2.3.1" in clean_ansi(result.output)
+
+    def test_version_package_not_found(self) -> None:
+        import importlib.metadata as _meta
+
+        with patch(
+            "tessera.cli.importlib.metadata.version",
+            side_effect=_meta.PackageNotFoundError,
+        ):
+            result = runner.invoke(app, ["version"])
+            assert result.exit_code == 0
+            assert "tessera dev" in clean_ansi(result.output)
 
 
 class TestTeamCommands:
@@ -354,13 +366,13 @@ class TestProposalCommands:
             assert result.exit_code == 0
             assert "Acknowledged:" in result.output
 
-    def test_proposal_force(self) -> None:
+    def test_proposal_force_with_yes(self) -> None:
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
         mock_response.json.return_value = {"id": "p1", "status": "force_approved"}
 
         with patch("tessera.cli.make_request", return_value=mock_response):
-            result = runner.invoke(app, ["proposal", "force", "p1", "--team", "t1"])
+            result = runner.invoke(app, ["proposal", "force", "p1", "--team", "t1", "--yes"])
             assert result.exit_code == 0
             assert "Force approved:" in result.output
 
@@ -455,3 +467,99 @@ class TestHelpOutput:
         assert "list" in result.output
         assert "diff" in result.output
         assert "impact" in result.output
+
+
+class TestConfirmationPrompts:
+    """Tests for destructive operation confirmation prompts."""
+
+    def test_proposal_withdraw_prompts_and_aborts(self) -> None:
+        result = runner.invoke(app, ["proposal", "withdraw", "p1", "--team", "t1"], input="n\n")
+        assert result.exit_code != 0
+        assert "Are you sure" in result.output
+
+    def test_proposal_withdraw_prompts_and_confirms(self) -> None:
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"id": "p1", "status": "withdrawn"}
+
+        with patch("tessera.cli.make_request", return_value=mock_response):
+            result = runner.invoke(app, ["proposal", "withdraw", "p1", "--team", "t1"], input="y\n")
+            assert result.exit_code == 0
+            assert "Withdrawn:" in result.output
+
+    def test_proposal_withdraw_yes_skips_prompt(self) -> None:
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"id": "p1", "status": "withdrawn"}
+
+        with patch("tessera.cli.make_request", return_value=mock_response):
+            result = runner.invoke(app, ["proposal", "withdraw", "p1", "--team", "t1", "--yes"])
+            assert result.exit_code == 0
+            assert "Are you sure" not in result.output
+            assert "Withdrawn:" in result.output
+
+    def test_proposal_force_prompts_with_warning(self) -> None:
+        result = runner.invoke(app, ["proposal", "force", "p1", "--team", "t1"], input="n\n")
+        assert result.exit_code != 0
+        output = clean_ansi(result.output)
+        assert "bypasses consumer" in output
+
+    def test_proposal_force_prompts_and_confirms(self) -> None:
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"id": "p1", "status": "force_approved"}
+
+        with patch("tessera.cli.make_request", return_value=mock_response):
+            result = runner.invoke(app, ["proposal", "force", "p1", "--team", "t1"], input="y\n")
+            assert result.exit_code == 0
+            assert "Force approved:" in result.output
+
+    def test_proposal_force_yes_skips_prompt(self) -> None:
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"id": "p1", "status": "force_approved"}
+
+        with patch("tessera.cli.make_request", return_value=mock_response):
+            result = runner.invoke(app, ["proposal", "force", "p1", "--team", "t1", "--yes"])
+            assert result.exit_code == 0
+            assert "bypasses consumer" not in clean_ansi(result.output)
+            assert "Force approved:" in result.output
+
+
+class TestMetadataValidation:
+    """Tests for --metadata JSON validation."""
+
+    def test_invalid_json_metadata_team_create(self) -> None:
+        result = runner.invoke(app, ["team", "create", "MyTeam", "-m", "{bad json}"])
+        assert result.exit_code == 1
+        output = clean_ansi(result.output)
+        assert "Invalid JSON in --metadata" in output
+
+    def test_invalid_json_metadata_asset_create(self) -> None:
+        result = runner.invoke(
+            app, ["asset", "create", "db.schema.t", "--team", "t1", "-m", "not-json"]
+        )
+        assert result.exit_code == 1
+        output = clean_ansi(result.output)
+        assert "Invalid JSON in --metadata" in output
+
+    def test_non_object_json_metadata(self) -> None:
+        result = runner.invoke(app, ["team", "create", "MyTeam", "-m", "[1,2,3]"])
+        assert result.exit_code == 1
+        output = clean_ansi(result.output)
+        assert "expected a JSON object" in output
+
+    def test_valid_json_metadata_passes(self) -> None:
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 201
+        mock_response.json.return_value = {
+            "id": "t1",
+            "name": "MyTeam",
+            "created_at": "2024-01-01T00:00:00Z",
+        }
+
+        with patch("tessera.cli.make_request", return_value=mock_response) as mock_req:
+            result = runner.invoke(app, ["team", "create", "MyTeam", "-m", '{"env": "prod"}'])
+            assert result.exit_code == 0
+            call_args = mock_req.call_args
+            assert call_args[1]["json_data"]["metadata"] == {"env": "prod"}

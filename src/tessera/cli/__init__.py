@@ -1,5 +1,6 @@
 """Tessera CLI - Service contract coordination from the command line."""
 
+import importlib.metadata
 import json
 import logging
 from pathlib import Path
@@ -89,6 +90,21 @@ def handle_response(response: httpx.Response) -> Any:
     return response.json()
 
 
+def parse_metadata(raw: str) -> dict[str, Any]:
+    """Parse a JSON metadata string, raising a friendly error on invalid input."""
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        err_console.print(f"[red]Invalid JSON in --metadata:[/red] {exc.args[0]}")
+        raise typer.Exit(1) from None
+    if not isinstance(parsed, dict):
+        err_console.print(
+            f"[red]Invalid --metadata:[/red] expected a JSON object, got {type(parsed).__name__}"
+        )
+        raise typer.Exit(1)
+    return parsed
+
+
 # ============================================================================
 # Team commands
 # ============================================================================
@@ -102,7 +118,7 @@ def team_create(
     """Create a new team."""
     data: dict[str, Any] = {"name": name}
     if metadata:
-        data["metadata"] = json.loads(metadata)
+        data["metadata"] = parse_metadata(metadata)
 
     response = make_request("POST", "/teams", json_data=data)
     team = handle_response(response)
@@ -155,7 +171,7 @@ def asset_create(
     """Create a new asset."""
     data: dict[str, Any] = {"fqn": fqn, "owner_team_id": owner_team_id}
     if metadata:
-        data["metadata"] = json.loads(metadata)
+        data["metadata"] = parse_metadata(metadata)
 
     response = make_request("POST", "/assets", json_data=data)
     asset = handle_response(response)
@@ -479,8 +495,13 @@ def proposal_acknowledge(
 def proposal_withdraw(
     proposal_id: Annotated[str, typer.Argument(help="Proposal ID")],
     team_id: Annotated[str, typer.Option("--team", "-t", help="Producer team ID")],
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation prompt")] = False,
 ) -> None:
     """Withdraw a pending proposal."""
+    if not yes:
+        confirmed = typer.confirm(f"Are you sure you want to withdraw proposal {proposal_id}?")
+        if not confirmed:
+            raise typer.Abort()
     data = {"actor_team_id": team_id}
     response = make_request("POST", f"/proposals/{proposal_id}/withdraw", json_data=data)
     proposal = handle_response(response)
@@ -491,8 +512,18 @@ def proposal_withdraw(
 def proposal_force(
     proposal_id: Annotated[str, typer.Argument(help="Proposal ID")],
     team_id: Annotated[str, typer.Option("--team", "-t", help="Producer team ID")],
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation prompt")] = False,
 ) -> None:
     """Force approve a proposal (skips consumer acknowledgment)."""
+    if not yes:
+        err_console.print(
+            "[yellow bold]Warning:[/yellow bold] Force-approving bypasses consumer "
+            "acknowledgment. Downstream consumers will NOT have agreed to this "
+            "breaking change."
+        )
+        confirmed = typer.confirm(f"Force approve proposal {proposal_id}?")
+        if not confirmed:
+            raise typer.Abort()
     data = {"actor_team_id": team_id}
     response = make_request("POST", f"/proposals/{proposal_id}/force", json_data=data)
     proposal = handle_response(response)
@@ -565,7 +596,11 @@ def serve(
 @app.command("version")
 def version() -> None:
     """Show Tessera version."""
-    console.print("tessera 0.1.0")
+    try:
+        ver = importlib.metadata.version("tessera-contracts")
+    except importlib.metadata.PackageNotFoundError:
+        ver = "dev"
+    console.print(f"tessera {ver}")
 
 
 # Import and register subcommands at the end to avoid circular imports
