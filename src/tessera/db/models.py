@@ -338,7 +338,7 @@ class ContractDB(Base):
         DateTime(timezone=True), default=_utcnow, index=True
     )
     published_by: Mapped[UUID] = mapped_column(
-        Uuid, ForeignKey("teams.id"), nullable=False
+        Uuid, ForeignKey("teams.id"), nullable=False, index=True
     )  # Team ID
     published_by_user_id: Mapped[UUID | None] = mapped_column(
         Uuid, ForeignKey("users.id"), nullable=True, index=True
@@ -420,7 +420,7 @@ class ProposalDB(Base):
         Enum(ProposalStatus), default=ProposalStatus.PENDING, index=True
     )
     proposed_by: Mapped[UUID] = mapped_column(
-        Uuid, ForeignKey("teams.id"), nullable=False
+        Uuid, ForeignKey("teams.id"), nullable=False, index=True
     )  # Team ID
     proposed_by_user_id: Mapped[UUID | None] = mapped_column(
         Uuid, ForeignKey("users.id"), nullable=True, index=True
