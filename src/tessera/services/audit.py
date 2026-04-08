@@ -49,6 +49,7 @@ class AuditAction(StrEnum):
     CONTRACT_DEPRECATED = "contract.deprecated"
     CONTRACT_FORCE_PUBLISHED = "contract.force_published"
     CONTRACT_GUARANTEES_UPDATED = "contract.guarantees_updated"
+    CONTRACT_PUBLISH_SKIPPED = "contract.publish_skipped"
 
     # Registration actions
     REGISTRATION_CREATED = "registration.created"
@@ -223,6 +224,40 @@ async def log_contract_deprecated(
             "version": version,
             "superseded_by": str(superseded_by),
             "superseded_by_version": superseded_by_version,
+        },
+    )
+
+
+async def log_contract_publish_skipped(
+    session: AsyncSession,
+    asset_id: UUID,
+    publisher_id: UUID,
+    asset_fqn: str,
+    current_version: str,
+    reason: str,
+) -> AuditEventDB:
+    """Log that a contract publish was attempted but skipped.
+
+    Records that a bulk-publish evaluated an asset and determined no action
+    was needed. Closes the audit gap where skipped contracts left no trace.
+
+    Args:
+        asset_id: ID of the asset whose contract was evaluated.
+        publisher_id: Team ID that initiated the publish.
+        asset_fqn: Fully qualified name of the asset.
+        current_version: The version that remains active (unchanged).
+        reason: Why the publish was skipped (e.g. "No schema changes detected").
+    """
+    return await log_event(
+        session=session,
+        entity_type="contract",
+        entity_id=asset_id,
+        action=AuditAction.CONTRACT_PUBLISH_SKIPPED,
+        actor_id=publisher_id,
+        payload={
+            "asset_fqn": asset_fqn,
+            "current_version": current_version,
+            "reason": reason,
         },
     )
 

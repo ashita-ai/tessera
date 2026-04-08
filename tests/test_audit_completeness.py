@@ -328,6 +328,101 @@ class TestProposalAuditEvents:
         assert events[0].payload["reason"] == "We need migration time"
 
 
+class TestContractPublishSkippedAudit:
+    """Verify bulk publish with unchanged schema creates a skip audit event."""
+
+    async def test_bulk_publish_unchanged_schema_creates_skip_audit(
+        self, client: AsyncClient, test_session: AsyncSession
+    ):
+        # Create team and asset
+        team_resp = await client.post("/api/v1/teams", json={"name": "audit-skip-team"})
+        team_id = team_resp.json()["id"]
+
+        asset_resp = await client.post(
+            "/api/v1/assets",
+            json={"fqn": "db.schema.audit_skip_test", "owner_team_id": team_id},
+        )
+        asset_id = asset_resp.json()["id"]
+
+        schema = {
+            "type": "object",
+            "properties": {"id": {"type": "integer"}, "name": {"type": "string"}},
+            "required": ["id"],
+        }
+
+        # Publish initial contract
+        await client.post(
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
+            json={"version": "1.0.0", "schema": schema},
+        )
+
+        # Bulk-publish with the same schema (non-dry-run) → should be skipped
+        resp = await client.post(
+            "/api/v1/contracts/bulk?dry_run=false",
+            json={
+                "published_by": team_id,
+                "contracts": [{"asset_id": asset_id, "schema": schema}],
+            },
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["skipped"] == 1
+        assert body["results"][0]["status"] == "skipped"
+
+        # Verify audit event was created
+        events = await _get_audit_events(test_session, "contract.publish_skipped")
+        matching = [e for e in events if str(e.entity_id) == asset_id]
+        assert len(matching) == 1
+
+        event = matching[0]
+        assert event.entity_type == "contract"
+        assert event.actor_id == UUID(team_id)
+        assert event.payload["asset_fqn"] == "db.schema.audit_skip_test"
+        assert event.payload["current_version"] == "1.0.0"
+        assert event.payload["reason"] == "No schema changes detected"
+
+    async def test_bulk_publish_dry_run_does_not_create_skip_audit(
+        self, client: AsyncClient, test_session: AsyncSession
+    ):
+        # Create team and asset
+        team_resp = await client.post("/api/v1/teams", json={"name": "audit-skip-dry-team"})
+        team_id = team_resp.json()["id"]
+
+        asset_resp = await client.post(
+            "/api/v1/assets",
+            json={"fqn": "db.schema.audit_skip_dry_test", "owner_team_id": team_id},
+        )
+        asset_id = asset_resp.json()["id"]
+
+        schema = {
+            "type": "object",
+            "properties": {"id": {"type": "integer"}},
+            "required": ["id"],
+        }
+
+        # Publish initial contract
+        await client.post(
+            f"/api/v1/assets/{asset_id}/publish?published_by={team_id}",
+            json={"version": "1.0.0", "schema": schema},
+        )
+
+        # Bulk-publish with same schema in dry_run mode (default)
+        resp = await client.post(
+            "/api/v1/contracts/bulk",
+            json={
+                "published_by": team_id,
+                "contracts": [{"asset_id": asset_id, "schema": schema}],
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.json()["results"][0]["status"] == "will_skip"
+
+        # Verify NO audit event was created for this asset
+        events = await _get_audit_events(test_session, "contract.publish_skipped")
+        matching = [e for e in events if str(e.entity_id) == asset_id]
+        assert len(matching) == 0
+
+
 class TestBulkAuditEvents:
     """Verify bulk operations create audit events."""
 
