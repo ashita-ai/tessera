@@ -2,6 +2,7 @@
 
 import json
 import re
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import httpx
@@ -524,6 +525,133 @@ class TestConfirmationPrompts:
             assert result.exit_code == 0
             assert "bypasses consumer" not in clean_ansi(result.output)
             assert "Force approved:" in result.output
+
+
+class TestDbtSyncConfirmationPrompts:
+    """Tests for dbt sync --create-assets confirmation prompt."""
+
+    _MODELS = [
+        {
+            "fqn": "db.public.orders",
+            "schema": {"type": "object", "properties": {"id": {"type": "string"}}},
+            "description": "Orders table",
+            "tags": [],
+            "node_id": "model.project.orders",
+        },
+    ]
+
+    def _mock_search_not_found(self) -> MagicMock:
+        """Return a mock 200 response with no search results (new model)."""
+        resp = MagicMock(spec=httpx.Response)
+        resp.status_code = 200
+        resp.json.return_value = {"results": []}
+        return resp
+
+    def _mock_asset_created(self) -> MagicMock:
+        """Return a mock 201 response for asset creation."""
+        resp = MagicMock(spec=httpx.Response)
+        resp.status_code = 201
+        resp.json.return_value = {"id": "asset-new", "fqn": "db.public.orders"}
+        return resp
+
+    def _mock_publish_ok(self) -> MagicMock:
+        """Return a mock 201 response for contract publish."""
+        resp = MagicMock(spec=httpx.Response)
+        resp.status_code = 201
+        resp.json.return_value = {"contract": {"id": "c1", "version": "1.0.0"}}
+        return resp
+
+    def test_dbt_sync_create_assets_prompts_and_aborts(
+        self, tmp_path: pytest.TempPathFactory
+    ) -> None:
+        manifest = tmp_path / "manifest.json"  # type: ignore[operator]
+        manifest.write_text("{}")
+
+        with (
+            patch("tessera.cli.dbt.load_manifest", return_value={}),
+            patch("tessera.cli.dbt.get_models_from_manifest", return_value=self._MODELS),
+            patch("tessera.cli.dbt.make_request", return_value=self._mock_search_not_found()),
+        ):
+            result = runner.invoke(
+                app,
+                ["dbt", "sync", "--manifest", str(manifest), "--team", "t1", "--create-assets"],
+                input="n\n",
+            )
+            assert result.exit_code != 0
+            output = clean_ansi(result.output)
+            assert "1 new asset(s) will be created" in output
+            assert "db.public.orders" in output
+
+    def test_dbt_sync_create_assets_prompts_and_confirms(
+        self, tmp_path: pytest.TempPathFactory
+    ) -> None:
+        manifest = tmp_path / "manifest.json"  # type: ignore[operator]
+        manifest.write_text("{}")
+
+        search_resp = self._mock_search_not_found()
+        create_resp = self._mock_asset_created()
+        publish_resp = self._mock_publish_ok()
+
+        def route_request(method: str, path: str, **kwargs: Any) -> MagicMock:
+            if method == "GET" and "/assets/search" in path:
+                return search_resp
+            if method == "POST" and path == "/assets":
+                return create_resp
+            return publish_resp
+
+        with (
+            patch("tessera.cli.dbt.load_manifest", return_value={}),
+            patch("tessera.cli.dbt.get_models_from_manifest", return_value=self._MODELS),
+            patch("tessera.cli.dbt.make_request", side_effect=route_request),
+        ):
+            result = runner.invoke(
+                app,
+                ["dbt", "sync", "--manifest", str(manifest), "--team", "t1", "--create-assets"],
+                input="y\n",
+            )
+            assert result.exit_code == 0
+            output = clean_ansi(result.output)
+            assert "Created:" in output
+
+    def test_dbt_sync_create_assets_yes_skips_prompt(
+        self, tmp_path: pytest.TempPathFactory
+    ) -> None:
+        manifest = tmp_path / "manifest.json"  # type: ignore[operator]
+        manifest.write_text("{}")
+
+        search_resp = self._mock_search_not_found()
+        create_resp = self._mock_asset_created()
+        publish_resp = self._mock_publish_ok()
+
+        def route_request(method: str, path: str, **kwargs: Any) -> MagicMock:
+            if method == "GET" and "/assets/search" in path:
+                return search_resp
+            if method == "POST" and path == "/assets":
+                return create_resp
+            return publish_resp
+
+        with (
+            patch("tessera.cli.dbt.load_manifest", return_value={}),
+            patch("tessera.cli.dbt.get_models_from_manifest", return_value=self._MODELS),
+            patch("tessera.cli.dbt.make_request", side_effect=route_request),
+        ):
+            result = runner.invoke(
+                app,
+                [
+                    "dbt",
+                    "sync",
+                    "--manifest",
+                    str(manifest),
+                    "--team",
+                    "t1",
+                    "--create-assets",
+                    "--yes",
+                ],
+            )
+            assert result.exit_code == 0
+            output = clean_ansi(result.output)
+            assert "new asset(s) will be created" not in output
+            assert "Created:" in output
 
 
 class TestMetadataValidation:
