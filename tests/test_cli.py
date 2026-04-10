@@ -2,6 +2,7 @@
 
 import json
 import re
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import httpx
@@ -21,10 +22,22 @@ def clean_ansi(text: str) -> str:
 class TestVersion:
     """Tests for the version command."""
 
-    def test_version(self) -> None:
-        result = runner.invoke(app, ["version"])
-        assert result.exit_code == 0
-        assert "tessera 0.1.0" in clean_ansi(result.output)
+    def test_version_from_package_metadata(self) -> None:
+        with patch("tessera.cli.importlib.metadata.version", return_value="2.3.1"):
+            result = runner.invoke(app, ["version"])
+            assert result.exit_code == 0
+            assert "tessera 2.3.1" in clean_ansi(result.output)
+
+    def test_version_package_not_found(self) -> None:
+        import importlib.metadata as _meta
+
+        with patch(
+            "tessera.cli.importlib.metadata.version",
+            side_effect=_meta.PackageNotFoundError,
+        ):
+            result = runner.invoke(app, ["version"])
+            assert result.exit_code == 0
+            assert "tessera dev" in clean_ansi(result.output)
 
 
 class TestTeamCommands:
@@ -354,13 +367,13 @@ class TestProposalCommands:
             assert result.exit_code == 0
             assert "Acknowledged:" in result.output
 
-    def test_proposal_force(self) -> None:
+    def test_proposal_force_with_yes(self) -> None:
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
         mock_response.json.return_value = {"id": "p1", "status": "force_approved"}
 
         with patch("tessera.cli.make_request", return_value=mock_response):
-            result = runner.invoke(app, ["proposal", "force", "p1", "--team", "t1"])
+            result = runner.invoke(app, ["proposal", "force", "p1", "--team", "t1", "--yes"])
             assert result.exit_code == 0
             assert "Force approved:" in result.output
 
@@ -455,3 +468,226 @@ class TestHelpOutput:
         assert "list" in result.output
         assert "diff" in result.output
         assert "impact" in result.output
+
+
+class TestConfirmationPrompts:
+    """Tests for destructive operation confirmation prompts."""
+
+    def test_proposal_withdraw_prompts_and_aborts(self) -> None:
+        result = runner.invoke(app, ["proposal", "withdraw", "p1", "--team", "t1"], input="n\n")
+        assert result.exit_code != 0
+        assert "Are you sure" in result.output
+
+    def test_proposal_withdraw_prompts_and_confirms(self) -> None:
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"id": "p1", "status": "withdrawn"}
+
+        with patch("tessera.cli.make_request", return_value=mock_response):
+            result = runner.invoke(app, ["proposal", "withdraw", "p1", "--team", "t1"], input="y\n")
+            assert result.exit_code == 0
+            assert "Withdrawn:" in result.output
+
+    def test_proposal_withdraw_yes_skips_prompt(self) -> None:
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"id": "p1", "status": "withdrawn"}
+
+        with patch("tessera.cli.make_request", return_value=mock_response):
+            result = runner.invoke(app, ["proposal", "withdraw", "p1", "--team", "t1", "--yes"])
+            assert result.exit_code == 0
+            assert "Are you sure" not in result.output
+            assert "Withdrawn:" in result.output
+
+    def test_proposal_force_prompts_with_warning(self) -> None:
+        result = runner.invoke(app, ["proposal", "force", "p1", "--team", "t1"], input="n\n")
+        assert result.exit_code != 0
+        output = clean_ansi(result.output)
+        assert "bypasses consumer" in output
+
+    def test_proposal_force_prompts_and_confirms(self) -> None:
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"id": "p1", "status": "force_approved"}
+
+        with patch("tessera.cli.make_request", return_value=mock_response):
+            result = runner.invoke(app, ["proposal", "force", "p1", "--team", "t1"], input="y\n")
+            assert result.exit_code == 0
+            assert "Force approved:" in result.output
+
+    def test_proposal_force_yes_skips_prompt(self) -> None:
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"id": "p1", "status": "force_approved"}
+
+        with patch("tessera.cli.make_request", return_value=mock_response):
+            result = runner.invoke(app, ["proposal", "force", "p1", "--team", "t1", "--yes"])
+            assert result.exit_code == 0
+            assert "bypasses consumer" not in clean_ansi(result.output)
+            assert "Force approved:" in result.output
+
+
+class TestDbtSyncConfirmationPrompts:
+    """Tests for dbt sync --create-assets confirmation prompt."""
+
+    _MODELS = [
+        {
+            "fqn": "db.public.orders",
+            "schema": {"type": "object", "properties": {"id": {"type": "string"}}},
+            "description": "Orders table",
+            "tags": [],
+            "node_id": "model.project.orders",
+        },
+    ]
+
+    def _mock_search_not_found(self) -> MagicMock:
+        """Return a mock 200 response with no search results (new model)."""
+        resp = MagicMock(spec=httpx.Response)
+        resp.status_code = 200
+        resp.json.return_value = {"results": []}
+        return resp
+
+    def _mock_asset_created(self) -> MagicMock:
+        """Return a mock 201 response for asset creation."""
+        resp = MagicMock(spec=httpx.Response)
+        resp.status_code = 201
+        resp.json.return_value = {"id": "asset-new", "fqn": "db.public.orders"}
+        return resp
+
+    def _mock_publish_ok(self) -> MagicMock:
+        """Return a mock 201 response for contract publish."""
+        resp = MagicMock(spec=httpx.Response)
+        resp.status_code = 201
+        resp.json.return_value = {"contract": {"id": "c1", "version": "1.0.0"}}
+        return resp
+
+    def test_dbt_sync_create_assets_prompts_and_aborts(
+        self, tmp_path: pytest.TempPathFactory
+    ) -> None:
+        manifest = tmp_path / "manifest.json"  # type: ignore[operator]
+        manifest.write_text("{}")
+
+        with (
+            patch("tessera.cli.dbt.load_manifest", return_value={}),
+            patch("tessera.cli.dbt.get_models_from_manifest", return_value=self._MODELS),
+            patch("tessera.cli.dbt.make_request", return_value=self._mock_search_not_found()),
+        ):
+            result = runner.invoke(
+                app,
+                ["dbt", "sync", "--manifest", str(manifest), "--team", "t1", "--create-assets"],
+                input="n\n",
+            )
+            assert result.exit_code != 0
+            output = clean_ansi(result.output)
+            assert "1 new asset(s) will be created" in output
+            assert "db.public.orders" in output
+
+    def test_dbt_sync_create_assets_prompts_and_confirms(
+        self, tmp_path: pytest.TempPathFactory
+    ) -> None:
+        manifest = tmp_path / "manifest.json"  # type: ignore[operator]
+        manifest.write_text("{}")
+
+        search_resp = self._mock_search_not_found()
+        create_resp = self._mock_asset_created()
+        publish_resp = self._mock_publish_ok()
+
+        def route_request(method: str, path: str, **kwargs: Any) -> MagicMock:
+            if method == "GET" and "/assets/search" in path:
+                return search_resp
+            if method == "POST" and path == "/assets":
+                return create_resp
+            return publish_resp
+
+        with (
+            patch("tessera.cli.dbt.load_manifest", return_value={}),
+            patch("tessera.cli.dbt.get_models_from_manifest", return_value=self._MODELS),
+            patch("tessera.cli.dbt.make_request", side_effect=route_request),
+        ):
+            result = runner.invoke(
+                app,
+                ["dbt", "sync", "--manifest", str(manifest), "--team", "t1", "--create-assets"],
+                input="y\n",
+            )
+            assert result.exit_code == 0
+            output = clean_ansi(result.output)
+            assert "Created:" in output
+
+    def test_dbt_sync_create_assets_yes_skips_prompt(
+        self, tmp_path: pytest.TempPathFactory
+    ) -> None:
+        manifest = tmp_path / "manifest.json"  # type: ignore[operator]
+        manifest.write_text("{}")
+
+        search_resp = self._mock_search_not_found()
+        create_resp = self._mock_asset_created()
+        publish_resp = self._mock_publish_ok()
+
+        def route_request(method: str, path: str, **kwargs: Any) -> MagicMock:
+            if method == "GET" and "/assets/search" in path:
+                return search_resp
+            if method == "POST" and path == "/assets":
+                return create_resp
+            return publish_resp
+
+        with (
+            patch("tessera.cli.dbt.load_manifest", return_value={}),
+            patch("tessera.cli.dbt.get_models_from_manifest", return_value=self._MODELS),
+            patch("tessera.cli.dbt.make_request", side_effect=route_request),
+        ):
+            result = runner.invoke(
+                app,
+                [
+                    "dbt",
+                    "sync",
+                    "--manifest",
+                    str(manifest),
+                    "--team",
+                    "t1",
+                    "--create-assets",
+                    "--yes",
+                ],
+            )
+            assert result.exit_code == 0
+            output = clean_ansi(result.output)
+            assert "new asset(s) will be created" not in output
+            assert "Created:" in output
+
+
+class TestMetadataValidation:
+    """Tests for --metadata JSON validation."""
+
+    def test_invalid_json_metadata_team_create(self) -> None:
+        result = runner.invoke(app, ["team", "create", "MyTeam", "-m", "{bad json}"])
+        assert result.exit_code == 1
+        output = clean_ansi(result.output)
+        assert "Invalid JSON in --metadata" in output
+
+    def test_invalid_json_metadata_asset_create(self) -> None:
+        result = runner.invoke(
+            app, ["asset", "create", "db.schema.t", "--team", "t1", "-m", "not-json"]
+        )
+        assert result.exit_code == 1
+        output = clean_ansi(result.output)
+        assert "Invalid JSON in --metadata" in output
+
+    def test_non_object_json_metadata(self) -> None:
+        result = runner.invoke(app, ["team", "create", "MyTeam", "-m", "[1,2,3]"])
+        assert result.exit_code == 1
+        output = clean_ansi(result.output)
+        assert "expected a JSON object" in output
+
+    def test_valid_json_metadata_passes(self) -> None:
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 201
+        mock_response.json.return_value = {
+            "id": "t1",
+            "name": "MyTeam",
+            "created_at": "2024-01-01T00:00:00Z",
+        }
+
+        with patch("tessera.cli.make_request", return_value=mock_response) as mock_req:
+            result = runner.invoke(app, ["team", "create", "MyTeam", "-m", '{"env": "prod"}'])
+            assert result.exit_code == 0
+            call_args = mock_req.call_args
+            assert call_args[1]["json_data"]["metadata"] == {"env": "prod"}
